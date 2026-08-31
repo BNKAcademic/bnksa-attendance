@@ -209,10 +209,11 @@
         const GOOGLE_APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxXMjm0S-hoZ9kd2FZ1rPlyo2LZZdNugahOUZ8AfPv_J3vverflPBL7GrTirvhM_D4Fuw/exec"; 
 
         let isAdmin = false, isDbInitialized = false, currentAdminTab = 'settings', currentRoomId = null, currentSubjectId = null;
-        let editingTeacherId = null, editingSubjectId = null, editingStudentId = null;
+        let editingTeacherId = null, editingSubjectId = null, editingStudentId = null, editingUserId = null;
         // Data models
-        let settings = { title: "ระบบเช็คชื่อนักเรียนอัจฉริยะ", faviconDataUrl: "", logoDataUrl: "", announcement: "", announcementStart: "", announcementEnd: "", term: "1", year: "2567", roomCounts: { m1: 4, m2: 4, m3: 4, m4: 3, m5: 3, m6: 3 }, advisors: {}, staffs: {}, thresholds: { late: 4, absent: 4 } };
-        let teachers = [], subjects = [], students = [], attendanceData = [], followUps = [];
+        let settings = { title: "ระบบเช็คชื่อนักเรียนอัจฉริยะ", faviconDataUrl: "", logoDataUrl: "", announcement: "", announcementStart: "", announcementEnd: "", term: "1", year: "2567", roomCounts: { m1: 4, m2: 4, m3: 4, m4: 3, m5: 3, m6: 3 }, advisors: {}, staffs: {}, thresholds: { late: 4, absent: 4 }, users: [{ id: 'super_admin_root', username: 'BNKAdmin', password: '042499078', name: 'ผู้ดูแลระบบหลัก', role: 'super_admin', createdAt: new Date().toISOString() }] };
+        let teachers = [], subjects = [], students = [], attendanceData = [], followUps = [], logs = [];
+        let currentUser = null;
         const statuses = {
             'มา': { color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200', activeBg: 'bg-emerald-500', icon: 'fa-check' },
             'ร่วมกิจกรรม': { color: 'text-cyan-700', bg: 'bg-cyan-50', border: 'border-cyan-200', activeBg: 'bg-cyan-500', icon: 'fa-running' },
@@ -450,8 +451,11 @@
                     if (!settings.announcement) settings.announcement = "";
                     if (!settings.announcementStart) settings.announcementStart = "";
                     if (!settings.announcementEnd) settings.announcementEnd = "";
+                    if (!settings.users || settings.users.length === 0) {
+                        settings.users = [{ id: 'super_admin_root', username: 'BNKAdmin', password: '042499078', name: 'ผู้ดูแลระบบหลัก', role: 'super_admin', createdAt: new Date().toISOString() }];
+                    }
                     teachers = data.teachers || [];
-                    subjects = data.subjects || []; students = data.students || []; attendanceData = data.attendanceData || []; followUps = data.followUps || [];
+                    subjects = data.subjects || []; students = data.students || []; attendanceData = data.attendanceData || []; followUps = data.followUps || []; logs = data.logs || [];
                     subjects = subjects.map(s => { if (s.day !== undefined && s.period !== undefined && !s.schedules) { s.credits = 0.5; s.schedules = [{ day: s.day, period: s.period }]; delete s.day; delete s.period; } return s; });
                     students = students.map(st => { if (!st.status) st.status = 'active'; if (st.title) { st.name = (st.title + (st.name || '')).trim(); st.title = ''; } return st; });
                 } else { seedSampleData(); }
@@ -472,7 +476,7 @@
 
         async function saveData(action = 'full', payload = null) {
             try {
-                let dataToSave = { settings, teachers, subjects, students, attendanceData, followUps };
+                let dataToSave = { settings, teachers, subjects, students, attendanceData, followUps, logs };
                 if (GOOGLE_APP_SCRIPT_URL !== "YOUR_WEB_APP_URL_HERE") {
                     const response = await fetch(GOOGLE_APP_SCRIPT_URL);
                     const latestData = await response.json();
@@ -480,18 +484,24 @@
                         if (action === 'attendance' && payload) {
                             const existingIdx = latestData.attendanceData.findIndex(a => a.subjectId === payload.subjectId && a.date === payload.date && String(a.period) === String(payload.period));
                             if (existingIdx >= 0) latestData.attendanceData[existingIdx] = payload; else latestData.attendanceData.push(payload);
-                            attendanceData = latestData.attendanceData; dataToSave = latestData; dataToSave.followUps = followUps;
+                            attendanceData = latestData.attendanceData; dataToSave = latestData; dataToSave.followUps = followUps; dataToSave.logs = logs;
                         } else if (action === 'reset_subject' && payload) {
                             latestData.attendanceData = latestData.attendanceData.filter(a => a.subjectId !== payload);
-                            attendanceData = latestData.attendanceData; dataToSave = latestData; dataToSave.followUps = followUps;
+                            attendanceData = latestData.attendanceData; dataToSave = latestData; dataToSave.followUps = followUps; dataToSave.logs = logs;
                         } else if (action === 'reset_all') {
                             latestData.attendanceData = [];
-                            attendanceData = []; latestData.followUps = []; followUps = []; dataToSave = latestData;
+                            attendanceData = []; latestData.followUps = []; followUps = []; dataToSave = latestData; dataToSave.logs = logs;
                         } else if (action === 'full') { dataToSave.attendanceData = latestData.attendanceData; attendanceData = latestData.attendanceData; }
                     }
                 }
                 await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(dataToSave) });
             } catch (e) { console.error("Save Error", e); }
+        }
+
+        // บันทึก Log การแก้ไขของผู้ใช้แต่ละคน (เก็บย้อนหลังสูงสุด 500 รายการล่าสุด)
+        function logAction(action, details = '') {
+            logs.push({ id: generateId(), timestamp: new Date().toISOString(), username: currentUser ? currentUser.username : 'system', name: currentUser ? currentUser.name : 'ระบบ', action, details });
+            if (logs.length > 500) logs = logs.slice(logs.length - 500);
         }
 
         function seedSampleData() {
@@ -609,14 +619,20 @@
         }
 
         function processLogin() {
-            if (document.getElementById('adminUser').value === 'BNKAdmin' && document.getElementById('adminPass').value === '042499078') {
-                isAdmin = true;
-                document.getElementById('btnAdminLogin').classList.add('hidden'); document.getElementById('btnAdminPanel').classList.remove('hidden'); document.getElementById('btnAdminLogout').classList.remove('hidden'); showToast("เข้าสู่ระบบสำเร็จ"); navigate('admin');
+            const uname = document.getElementById('adminUser').value.trim();
+            const pass = document.getElementById('adminPass').value;
+            const found = (settings.users || []).find(u => u.username === uname && u.password === pass);
+            if (found) {
+                isAdmin = true; currentUser = { id: found.id, username: found.username, name: found.name, role: found.role };
+                document.getElementById('btnAdminLogin').classList.add('hidden'); document.getElementById('btnAdminPanel').classList.remove('hidden'); document.getElementById('btnAdminLogout').classList.remove('hidden'); showToast("เข้าสู่ระบบสำเร็จ");
+                logAction('เข้าสู่ระบบ', `เข้าสู่ระบบด้วยบัญชี ${found.username}`); saveData('full');
+                navigate('admin');
             } else showToast("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง", "error");
         }
         function logoutAdmin() {
             showConfirm("ออกจากระบบ", "คุณต้องการออกจากระบบผู้ดูแลใช่หรือไม่?", () => {
-                isAdmin = false;
+                if (currentUser) { logAction('ออกจากระบบ', `ออกจากระบบบัญชี ${currentUser.username}`); saveData('full'); }
+                isAdmin = false; currentUser = null;
                 document.getElementById('btnAdminLogin').classList.remove('hidden'); document.getElementById('btnAdminPanel').classList.add('hidden'); document.getElementById('btnAdminLogout').classList.add('hidden'); showToast("ออกจากระบบแล้ว"); navigate('dashboard');
             });
         }
@@ -884,6 +900,8 @@
             showConfirm("ยืนยันการล้างข้อมูล", "ข้อมูลการเช็คชื่อทั้งหมดในวิชานี้จะถูกลบอย่างถาวรและไม่สามารถกู้คืนได้ คุณแน่ใจหรือไม่?", async () => {
                 showToast("กำลังล้างข้อมูล... (อัปเดตแบบเรียลไทม์)", "info"); 
                 document.body.style.pointerEvents = 'none';
+                const sub = subjects.find(s => s.id === subjectId);
+                logAction('ล้างข้อมูลเช็คชื่อของวิชา', sub ? sub.name : subjectId);
                 await saveData('reset_subject', subjectId); 
                 document.body.style.pointerEvents = 'auto'; 
                 showToast("ล้างข้อมูลวิชาเรียบร้อยแล้ว", "success"); 
@@ -1069,7 +1087,8 @@
         }
 
         function renderAdmin() {
-            let html = `<div class="mb-4 sm:mb-8 flex flex-col md:flex-row md:items-center justify-between gap-3"><div><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2"><i class="fas fa-tools text-indigo-500"></i> จัดการระบบ</h2></div></div><div class="flex overflow-x-auto gap-1.5 mb-4 sm:mb-8 bg-slate-200/50 p-1.5 rounded-xl w-full scrollbar-hide shadow-inner"><button onclick="window.navigate('admin', {tab: 'settings'})" class="${currentAdminTab === 'settings' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 flex-1 justify-center"><i class="fas fa-cog"></i> ตั้งค่า</button><button onclick="window.navigate('admin', {tab: 'teachers'})" class="${currentAdminTab === 'teachers' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 flex-1 justify-center"><i class="fas fa-chalkboard-teacher"></i> ครู</button><button onclick="window.navigate('admin', {tab: 'subjects'})" class="${currentAdminTab === 'subjects' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 flex-1 justify-center"><i class="fas fa-book"></i> วิชา</button><button onclick="window.navigate('admin', {tab: 'students'})" class="${currentAdminTab === 'students' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 flex-1 justify-center"><i class="fas fa-users"></i> นักเรียน</button></div><div id="adminContent" class="bg-white rounded-2xl sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-8 w-full"></div>`;
+            const isSuperAdmin = currentUser && currentUser.role === 'super_admin';
+            let html = `<div class="mb-4 sm:mb-8 flex flex-col md:flex-row md:items-center justify-between gap-3"><div><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2"><i class="fas fa-tools text-indigo-500"></i> จัดการระบบ</h2>${currentUser ? `<p class="text-xs sm:text-sm text-slate-500 font-bold mt-1">เข้าสู่ระบบในชื่อ: ${currentUser.name} <span class="ml-1 ${currentUser.role === 'super_admin' ? 'bg-purple-100 text-purple-700 border-purple-200' : 'bg-indigo-100 text-indigo-700 border-indigo-200'} border px-2 py-0.5 rounded-full text-[10px] font-black">${currentUser.role === 'super_admin' ? 'Super Admin' : 'เจ้าหน้าที่'}</span></p>` : ''}</div></div><div class="flex overflow-x-auto gap-1.5 mb-4 sm:mb-8 bg-slate-200/50 p-1.5 rounded-xl w-full scrollbar-hide shadow-inner"><button onclick="window.navigate('admin', {tab: 'settings'})" class="${currentAdminTab === 'settings' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 flex-1 justify-center"><i class="fas fa-cog"></i> ตั้งค่า</button><button onclick="window.navigate('admin', {tab: 'data_status'})" class="${currentAdminTab === 'data_status' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 flex-1 justify-center"><i class="fas fa-database"></i> สถานะข้อมูล</button><button onclick="window.navigate('admin', {tab: 'teachers'})" class="${currentAdminTab === 'teachers' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 flex-1 justify-center"><i class="fas fa-chalkboard-teacher"></i> ครู</button><button onclick="window.navigate('admin', {tab: 'subjects'})" class="${currentAdminTab === 'subjects' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 flex-1 justify-center"><i class="fas fa-book"></i> วิชา</button><button onclick="window.navigate('admin', {tab: 'students'})" class="${currentAdminTab === 'students' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 flex-1 justify-center"><i class="fas fa-users"></i> นักเรียน</button>${isSuperAdmin ? `<button onclick="window.navigate('admin', {tab: 'users'})" class="${currentAdminTab === 'users' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 flex-1 justify-center"><i class="fas fa-user-cog"></i> ผู้ใช้งาน</button>` : ''}<button onclick="window.navigate('admin', {tab: 'logs'})" class="${currentAdminTab === 'logs' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 flex-1 justify-center"><i class="fas fa-history"></i> Log</button></div><div id="adminContent" class="bg-white rounded-2xl sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-8 w-full"></div>`;
             document.getElementById('mainContent').innerHTML = html; renderAdminTab();
         }
 
@@ -1106,6 +1125,47 @@
                 html += `</div><div class="flex justify-end mb-8"><button onclick="window.saveAdvisors()" class="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-bold shadow-sm transition-colors text-sm"><i class="fas fa-save"></i> บันทึกบุคลากรประจำห้อง</button></div><h3 class="text-lg sm:text-xl font-extrabold text-rose-600 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-exclamation-triangle"></i> ล้างข้อมูลทั้งระบบ</h3><div class="bg-rose-50 p-4 rounded-xl border border-rose-200 shadow-sm flex flex-col sm:flex-row justify-between items-center gap-4"><div><h4 class="font-bold text-rose-800 text-sm sm:text-base">ล้างข้อมูลการเช็คชื่อทั้งหมด</h4><p class="text-[10px] sm:text-xs text-rose-600 font-medium">ลบประวัติการเช็คชื่อของทุกวิชา ทุกห้อง ทุกวัน (ไม่สามารถกู้คืนได้)</p></div><button onclick="window.resetAllAttendanceData()" class="w-full sm:w-auto bg-rose-600 hover:bg-rose-700 text-white px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-bold shadow-sm transition-colors text-sm whitespace-nowrap"><i class="fas fa-trash-alt"></i> ล้างข้อมูลทั้งหมด</button></div>`;
                 content.innerHTML = html;
             } 
+            else if (currentAdminTab === 'data_status') {
+                // ===== 1. ขนาดข้อมูลที่ใช้ไป (Progress) =====
+                const fullJson = JSON.stringify({ settings, teachers, subjects, students, attendanceData, followUps, logs });
+                const totalBytes = new Blob([fullJson]).size;
+                const REF_LIMIT = 50000; // อ้างอิงขีดจำกัด 50,000 ตัวอักษรต่อเซลล์ของ Google Sheets (กรณีระบบหลังบ้านเก็บเป็น JSON ในเซลล์เดียว)
+                const usagePct = Math.min(100, Math.round((fullJson.length / REF_LIMIT) * 100));
+                const barColor = usagePct >= 90 ? 'bg-rose-500' : (usagePct >= 70 ? 'bg-amber-500' : 'bg-emerald-500');
+                const fmtSize = (b) => b < 1024 ? `${b} B` : (b < 1024*1024 ? `${(b/1024).toFixed(1)} KB` : `${(b/1024/1024).toFixed(2)} MB`);
+                const sizeBreakdown = [
+                    { label: 'ข้อมูลนักเรียน', icon: 'fa-users', color: 'bg-blue-400', bytes: new Blob([JSON.stringify(students)]).size },
+                    { label: 'ข้อมูลรายวิชา', icon: 'fa-book', color: 'bg-indigo-400', bytes: new Blob([JSON.stringify(subjects)]).size },
+                    { label: 'ข้อมูลครู', icon: 'fa-chalkboard-teacher', color: 'bg-purple-400', bytes: new Blob([JSON.stringify(teachers)]).size },
+                    { label: 'ประวัติการเช็คชื่อ', icon: 'fa-calendar-check', color: 'bg-emerald-400', bytes: new Blob([JSON.stringify(attendanceData)]).size },
+                    { label: 'การติดตามนักเรียน', icon: 'fa-clipboard-list', color: 'bg-amber-400', bytes: new Blob([JSON.stringify(followUps)]).size },
+                    { label: 'ประวัติ Log', icon: 'fa-history', color: 'bg-cyan-400', bytes: new Blob([JSON.stringify(logs)]).size },
+                    { label: 'โลโก้ + ไอคอนเว็บไซต์', icon: 'fa-image', color: 'bg-rose-400', bytes: new Blob([JSON.stringify({a: settings.faviconDataUrl, b: settings.logoDataUrl})]).size },
+                ];
+                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-hdd text-indigo-500"></i> ขนาดข้อมูลที่ใช้ไป</h3><div class="mb-8 bg-slate-50 p-4 sm:p-6 rounded-2xl border border-slate-100"><div class="flex justify-between items-end mb-2"><div><span class="text-2xl sm:text-3xl font-black text-slate-800">${fmtSize(totalBytes)}</span><span class="text-slate-400 font-bold text-xs sm:text-sm ml-1">ใช้ไปแล้ว</span></div><span class="text-lg sm:text-2xl font-black ${usagePct >= 90 ? 'text-rose-500' : (usagePct >= 70 ? 'text-amber-500' : 'text-emerald-500')}">${usagePct}%</span></div><div class="w-full h-4 sm:h-5 bg-slate-200 rounded-full overflow-hidden shadow-inner"><div class="${barColor} h-full rounded-full transition-all duration-700 shadow-sm" style="width: ${usagePct}%"></div></div><p class="text-[10px] sm:text-xs text-slate-400 font-medium mt-2"><i class="fas fa-info-circle"></i> อ้างอิงขีดจำกัด ${REF_LIMIT.toLocaleString()} ตัวอักษรต่อเซลล์ของ Google Sheets (กรณีระบบหลังบ้านเก็บข้อมูลแบบ JSON ในเซลล์เดียว) เป็นตัวเลขอ้างอิงเพื่อประเมินแนวโน้ม ไม่ใช่ขีดจำกัดตายตัวของทุกการตั้งค่า</p><div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-5">${sizeBreakdown.sort((a,b)=>b.bytes-a.bytes).map(s => `<div class="flex items-center gap-2.5 bg-white border border-slate-200 rounded-lg px-3 py-2"><div class="w-7 h-7 ${s.color} text-white rounded-lg flex items-center justify-center text-[10px] shrink-0"><i class="fas ${s.icon}"></i></div><span class="flex-1 text-xs sm:text-sm font-bold text-slate-700 truncate">${s.label}</span><span class="text-xs sm:text-sm font-black text-slate-500">${fmtSize(s.bytes)}</span></div>`).join('')}</div></div>`;
+
+                // ===== 2. สถานะการลงข้อมูลนักเรียนรายห้อง =====
+                const roomList = getRoomList();
+                const roomsWithNone = roomList.filter(r => students.filter(s => s.roomId === r).length === 0);
+                html += `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-clipboard-check text-indigo-500"></i> สถานะการลงข้อมูลนักเรียนรายห้อง</h3><div class="mb-3 flex flex-wrap gap-2"><span class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded-full"><i class="fas fa-check-circle"></i> ลงข้อมูลแล้ว ${roomList.length - roomsWithNone.length} ห้อง</span><span class="bg-rose-50 border border-rose-200 text-rose-600 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded-full"><i class="fas fa-exclamation-circle"></i> ยังไม่ได้ลงข้อมูล ${roomsWithNone.length} ห้อง</span></div><div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 mb-8">${roomList.map(r => { const cnt = students.filter(s => s.roomId === r).length; const activeCnt = students.filter(s => s.roomId === r && s.status !== 'resigned').length; const done = cnt > 0;
+                    return `<div class="rounded-xl border p-3 ${done ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'}"><div class="flex items-center justify-between mb-1"><span class="font-black text-slate-700 text-xs sm:text-sm">ห้อง ${formatRoomName(r)}</span><i class="fas ${done ? 'fa-check-circle text-emerald-500' : 'fa-times-circle text-rose-400'} text-sm"></i></div><div class="text-[10px] sm:text-xs font-bold ${done ? 'text-emerald-700' : 'text-rose-500'}">${done ? `${activeCnt} คน` : 'ยังไม่มีข้อมูล'}</div></div>`; }).join('')}</div>`;
+
+                // ===== 3. สถานะการลงข้อมูลรายวิชาของครู =====
+                html += `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-chalkboard-teacher text-indigo-500"></i> สถานะการลงข้อมูลรายวิชาของครู</h3>`;
+                if (teachers.length === 0) {
+                    html += `<div class="text-center text-slate-400 py-10 font-medium bg-slate-50 rounded-xl border border-slate-100">ยังไม่มีข้อมูลครูในระบบ</div>`;
+                } else {
+                    html += `<div class="overflow-x-auto rounded-xl border border-slate-200"><table class="w-full text-left text-xs sm:text-sm min-w-[500px]"><thead class="bg-slate-100"><tr><th class="p-2.5 font-extrabold">ชื่อครู</th><th class="p-2.5 font-extrabold text-center">จำนวนวิชา</th><th class="p-2.5 font-extrabold text-center">จำนวนชั้น</th><th class="p-2.5 font-extrabold text-center">จำนวนห้อง</th></tr></thead><tbody class="divide-y divide-slate-100">`;
+                    teachers.slice().sort((a,b) => a.name.localeCompare(b.name)).forEach(t => {
+                        const taught = subjects.filter(s => s.teacher === t.name || s.teacher2 === t.name);
+                        const rooms = [...new Set(taught.map(s => s.roomId))];
+                        const levels = [...new Set(rooms.map(r => r.split('_')[0]))];
+                        html += `<tr class="hover:bg-slate-50 transition-colors"><td class="p-2.5 font-bold text-slate-700">${t.name}</td><td class="p-2.5 text-center font-black ${taught.length === 0 ? 'text-rose-400' : 'text-indigo-600'}">${taught.length}</td><td class="p-2.5 text-center font-black text-slate-600">${levels.length}</td><td class="p-2.5 text-center font-black text-slate-600">${rooms.length}</td></tr>`;
+                    });
+                    html += `</tbody></table></div>`;
+                }
+                content.innerHTML = html;
+            }
             else if (currentAdminTab === 'teachers') {
                 let deptOptions = departmentsList.map(d => `<option value="${d}">${d}</option>`).join('');
                 let html = `<div class="flex flex-col sm:flex-row justify-between sm:items-center mb-3 gap-2"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-chalkboard-teacher text-indigo-500"></i> จัดการครูผู้สอน</h3><button onclick="window.openTeacherModal()" class="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg font-bold text-sm shadow-sm transition-colors"><i class="fas fa-plus"></i> เพิ่มครูใหม่</button></div>`;
@@ -1150,6 +1210,37 @@
                 html += `</tbody></table></div>`;
                 content.innerHTML = html;
             }
+            else if (currentAdminTab === 'users') {
+                if (!currentUser || currentUser.role !== 'super_admin') {
+                    content.innerHTML = `<div class="text-center text-slate-400 py-16 font-bold"><i class="fas fa-lock text-3xl mb-3"></i><br>เฉพาะ Super Admin เท่านั้นที่จัดการผู้ใช้งานได้</div>`;
+                    return;
+                }
+                let html = `<div class="flex justify-between items-center mb-4 flex-wrap gap-2"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-user-cog text-indigo-500"></i> จัดการผู้ใช้งาน (แอดมิน)</h3><button onclick="window.openUserModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-user-plus"></i> เพิ่มผู้ใช้ใหม่</button></div>`;
+                html += `<div id="userModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-3 transition-opacity"><div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-md transform scale-95 opacity-0 transition-all duration-300" id="userModalBox"><div class="p-4 sm:p-6"><div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-extrabold text-lg" id="userModalTitle">เพิ่มผู้ใช้งาน</h4><button onclick="window.closeUserModal()" class="text-slate-400 text-xl hover:text-rose-500 transition-colors"><i class="fas fa-times"></i></button></div><div class="space-y-3 mb-4"><div><label class="block text-xs font-bold mb-1">ชื่อ-นามสกุล (แสดงในระบบ)</label><input type="text" id="newUserName" class="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-400" placeholder="เช่น เจ้าหน้าที่ทะเบียน"></div><div><label class="block text-xs font-bold mb-1">ชื่อผู้ใช้ (Username)</label><input type="text" id="newUserUsername" class="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-400" placeholder="username"></div><div><label class="block text-xs font-bold mb-1">รหัสผ่าน</label><input type="text" id="newUserPassword" class="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-400" placeholder="ตั้งรหัสผ่าน"></div><div class="bg-indigo-50 border border-indigo-200 text-indigo-700 text-[10px] sm:text-xs font-bold rounded-lg px-3 py-2 flex items-center gap-1.5"><i class="fas fa-info-circle"></i> ผู้ใช้ใหม่จะได้รับสิทธิ์ "เจ้าหน้าที่" (ไม่สามารถเพิ่ม/แก้ไข/ลบผู้ใช้งานอื่นได้)</div></div><div class="flex justify-end gap-2"><button onclick="window.closeUserModal()" class="bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded font-bold text-sm transition-colors">ยกเลิก</button><button onclick="window.saveUserForm()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded font-bold text-sm shadow-sm transition-colors"><i class="fas fa-save"></i> บันทึก</button></div></div></div></div>`;
+                html += `<div class="space-y-2.5">`;
+                (settings.users || []).forEach(u => {
+                    const isSuper = u.role === 'super_admin';
+                    html += `<div class="flex items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-xl p-3 sm:p-4"><div class="flex items-center gap-3 min-w-0"><div class="w-9 h-9 sm:w-11 sm:h-11 rounded-full flex items-center justify-center text-sm sm:text-lg shrink-0 ${isSuper ? 'bg-purple-100 text-purple-700' : 'bg-indigo-100 text-indigo-700'}"><i class="fas ${isSuper ? 'fa-crown' : 'fa-user'}"></i></div><div class="min-w-0"><div class="font-bold text-slate-800 text-sm sm:text-base truncate">${u.name} ${isSuper ? '<span class="bg-purple-100 text-purple-700 border border-purple-200 text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded-full ml-1">Super Admin</span>' : '<span class="bg-indigo-100 text-indigo-700 border border-indigo-200 text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded-full ml-1">เจ้าหน้าที่</span>'}</div><div class="text-[10px] sm:text-xs text-slate-500 font-medium truncate">Username: ${u.username}</div></div></div><div class="flex gap-1.5 shrink-0">${isSuper ? `<span class="text-slate-400 text-[10px] sm:text-xs font-bold px-2 flex items-center gap-1"><i class="fas fa-lock"></i> ล็อกไว้</span>` : `<button onclick="window.openUserModal('${u.id}')" class="text-amber-500 bg-amber-50 hover:bg-amber-100 p-2 rounded-lg transition-colors"><i class="fas fa-edit"></i></button><button onclick="window.deleteUser('${u.id}')" class="text-rose-500 bg-rose-50 hover:bg-rose-100 p-2 rounded-lg transition-colors"><i class="fas fa-trash"></i></button>`}</div></div>`;
+                });
+                html += `</div>`;
+                content.innerHTML = html;
+            }
+            else if (currentAdminTab === 'logs') {
+                let html = `<div class="flex justify-between items-center mb-4 flex-wrap gap-2"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-history text-indigo-500"></i> ประวัติการแก้ไข (Log)</h3><span class="text-[10px] sm:text-xs text-slate-400 font-bold">แสดงล่าสุด ${Math.min(logs.length, 200)} จาก ${logs.length} รายการ</span></div>`;
+                const sortedLogs = logs.slice().reverse().slice(0, 200);
+                if (sortedLogs.length === 0) {
+                    html += `<div class="text-center text-slate-400 py-16 font-medium"><i class="fas fa-inbox text-3xl mb-3"></i><br>ยังไม่มีประวัติการแก้ไข</div>`;
+                } else {
+                    html += `<div class="space-y-2 max-h-[600px] overflow-y-auto pr-1">`;
+                    sortedLogs.forEach(l => {
+                        const d = new Date(l.timestamp);
+                        const dateStr = isNaN(d) ? '' : d.toLocaleString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                        html += `<div class="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-start sm:items-center gap-1.5 sm:gap-3"><div class="shrink-0 text-[10px] sm:text-xs font-bold text-slate-400 sm:w-36">${dateStr}</div><div class="shrink-0 text-[10px] sm:text-xs font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full w-max">${l.name}</div><div class="flex-1 min-w-0"><span class="font-bold text-slate-700 text-xs sm:text-sm">${l.action}</span>${l.details ? `<span class="text-slate-500 text-[10px] sm:text-xs ml-1">— ${l.details}</span>` : ''}</div></div>`;
+                    });
+                    html += `</div>`;
+                }
+                content.innerHTML = html;
+            }
         }
 
         function saveAdminSettings() {
@@ -1162,6 +1253,7 @@
             document.getElementById('navTitle').innerText = settings.title;
             document.title = settings.title;
             document.getElementById('navSubtitle').innerText = `ภาคเรียนที่ ${settings.term} / ${settings.year}`;
+            logAction('แก้ไขการตั้งค่าระบบ', `ชื่อระบบ: ${settings.title}, ภาคเรียน ${settings.term}/${settings.year}`);
             saveData('full'); showToast("บันทึกโครงสร้างและการแจ้งเตือนเรียบร้อย"); renderAdminTab();
         }
 
@@ -1173,6 +1265,7 @@
             if (start && end && new Date(end) < new Date(start)) { showToast("เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่มต้น", "error"); return; }
             settings.announcement = text; settings.announcementStart = start; settings.announcementEnd = end;
             updateAnnouncementBar();
+            logAction('แก้ไขประกาศ', text ? `ตั้งข้อความ: "${text.substring(0,60)}"` : 'ล้างข้อความประกาศ');
             saveData('full'); showToast("บันทึกประกาศเรียบร้อย"); renderAdminTab();
         };
 
@@ -1181,6 +1274,7 @@
             showConfirm("ลบประกาศ", "ต้องการลบข้อความประกาศนี้ทันทีใช่หรือไม่?", () => {
                 settings.announcement = ''; settings.announcementStart = ''; settings.announcementEnd = '';
                 updateAnnouncementBar();
+                logAction('ลบประกาศทันที');
                 saveData('full'); showToast("ลบประกาศแล้ว"); renderAdminTab();
             });
         };
@@ -1206,6 +1300,7 @@
                     settings.faviconDataUrl = dataUrl;
                     applyFavicon();
                     const preview = document.getElementById('faviconPreview'); if (preview) preview.src = dataUrl;
+                    logAction('เปลี่ยนไอคอนเว็บไซต์ (Favicon)');
                     saveData('full');
                     showToast("บันทึกไอคอนเว็บไซต์เรียบร้อย");
                 };
@@ -1236,6 +1331,7 @@
                     const dataUrl = canvas.toDataURL('image/png', 0.9);
                     settings.logoDataUrl = dataUrl;
                     applyHeaderLogo();
+                    logAction('เปลี่ยนโลโก้บนแถบหัวเว็บไซต์');
                     saveData('full');
                     showToast("บันทึกโลโก้หัวเว็บไซต์เรียบร้อย");
                     renderAdminTab();
@@ -1251,6 +1347,7 @@
         window.removeHeaderLogo = function() {
             settings.logoDataUrl = '';
             applyHeaderLogo();
+            logAction('ลบโลโก้บนแถบหัวเว็บไซต์');
             saveData('full');
             showToast("ลบโลโก้แล้ว กลับไปใช้ไอคอนเริ่มต้น");
             renderAdminTab();
@@ -1262,6 +1359,7 @@
                 settings.advisors[roomId] = [ document.getElementById(`adv1_${roomId}`).value.trim(), document.getElementById(`adv2_${roomId}`).value.trim() ]; 
                 settings.staffs[roomId] = document.getElementById(`staff_${roomId}`).value;
             });
+            logAction('แก้ไขครูที่ปรึกษา/เจ้าหน้าที่ประจำห้อง');
             saveData('full'); showToast("บันทึกบุคลากรประจำห้องเรียบร้อย"); 
         }
 
@@ -1289,6 +1387,7 @@
             const dept = document.getElementById('newTcDept').value;
             if (!name) { showToast("กรุณากรอกชื่อครู", "error"); return;
             }
+            let logMsg = '';
             if (editingTeacherId) {
                 const t = teachers.find(x => x.id === editingTeacherId);
                 if (t) {
@@ -1299,19 +1398,22 @@
                     t.department = dept;
                     if (oldName !== name) { subjects.forEach(s => { if (s.teacher === oldName) s.teacher = name; if (s.teacher2 === oldName) s.teacher2 = name; });
                     }
+                    logMsg = `แก้ไขข้อมูลครู: ${oldName} -> ${name}`;
                 }
             } else {
                 if (teachers.find(x => x.name === name)) { showToast("มีชื่อนี้แล้ว", "error");
                 return; }
                 teachers.push({ id: generateId(), name, department: dept });
+                logMsg = `เพิ่มครูใหม่: ${name}`;
             }
+            logAction('จัดการข้อมูลครู', logMsg);
             saveData('full'); showToast("บันทึกข้อมูลครูสำเร็จ"); renderAdminTab(); closeTeacherModal();
         };
         function deleteTeacher(id, subjectCount) { if (subjectCount > 0) { showToast("ไม่สามารถลบได้ มีวิชาที่สอนอยู่", "error"); return;
-        } showConfirm("ลบ", "แน่ใจหรือไม่ที่จะลบครูท่านนี้?", () => { teachers = teachers.filter(t => t.id !== id); saveData('full'); showToast("ลบเรียบร้อย"); renderAdminTab(); });
+        } const t = teachers.find(x => x.id === id); showConfirm("ลบ", "แน่ใจหรือไม่ที่จะลบครูท่านนี้?", () => { teachers = teachers.filter(x => x.id !== id); logAction('ลบข้อมูลครู', t ? t.name : id); saveData('full'); showToast("ลบเรียบร้อย"); renderAdminTab(); });
         }
         
-        window.resetAllAttendanceData = function() { showConfirm("ยืนยันล้างข้อมูลทั้งหมด", "คำเตือน: ข้อมูลการเช็คชื่อของนักเรียนทุกคนและวิชาทั้งหมดจะถูกลบอย่างถาวรและไม่สามารถกู้คืนได้ คุณแน่ใจหรือไม่?", async () => { showToast("กำลังล้างข้อมูล... (อัปเดตแบบเรียลไทม์)", "info"); document.body.style.pointerEvents = 'none'; await saveData('reset_all'); document.body.style.pointerEvents = 'auto'; showToast("ล้างข้อมูลทั้งหมดเรียบร้อยแล้ว", "success"); renderAdminTab(); });
+        window.resetAllAttendanceData = function() { showConfirm("ยืนยันล้างข้อมูลทั้งหมด", "คำเตือน: ข้อมูลการเช็คชื่อของนักเรียนทุกคนและวิชาทั้งหมดจะถูกลบอย่างถาวรและไม่สามารถกู้คืนได้ คุณแน่ใจหรือไม่?", async () => { showToast("กำลังล้างข้อมูล... (อัปเดตแบบเรียลไทม์)", "info"); document.body.style.pointerEvents = 'none'; logAction('ล้างข้อมูลการเช็คชื่อทั้งหมด', 'รีเซ็ตข้อมูลการเช็คชื่อ/ติดตามทั้งระบบ'); await saveData('reset_all'); document.body.style.pointerEvents = 'auto'; showToast("ล้างข้อมูลทั้งหมดเรียบร้อยแล้ว", "success"); renderAdminTab(); });
         };
 
         window.renderScheduleInputs = function(existingSchedules = null) {
@@ -1336,7 +1438,8 @@
         for(let i=0; i<count; i++) { schedules.push({ day: parseInt(document.getElementById(`newSubDay_${i}`).value), period: parseInt(document.getElementById(`newSubPeriod_${i}`).value) });
         } if (editingSubjectId) { const sub = subjects.find(s => s.id === editingSubjectId); if(sub) { sub.roomId = roomId; sub.code = code;
         sub.name = name; sub.teacher = teacher; sub.teacher2 = teacher2; sub.credits = credit; sub.schedules = schedules;
-        } } else { subjects.push({ id: generateId(), roomId, name, code, teacher, teacher2, credits: credit, schedules }); } saveData('full'); showToast("บันทึกสำเร็จ"); renderAdminTab(); closeSubjectModal();
+        logAction('แก้ไขข้อมูลวิชา', `${name} (${formatRoomName(roomId)})`);
+        } } else { subjects.push({ id: generateId(), roomId, name, code, teacher, teacher2, credits: credit, schedules }); logAction('เพิ่มวิชาใหม่', `${name} (${formatRoomName(roomId)})`); } saveData('full'); showToast("บันทึกสำเร็จ"); renderAdminTab(); closeSubjectModal();
         };
 
         window.downloadSubjectTemplate = function() {
@@ -1383,7 +1486,7 @@
                         if (exists) { exists.name = name; exists.code = code; exists.teacher = teacher; exists.teacher2 = teacher2; exists.credits = credits; if (schedules.length > 0) exists.schedules = schedules;
                         } else { subjects.push({ id: generateId(), roomId: targetRoom, name, code, teacher, teacher2, credits, schedules }); } imported++;
                     }
-                    if (imported > 0) { saveData('full');
+                    if (imported > 0) { saveData('full'); logAction('นำเข้ารายวิชาจาก Excel', `นำเข้า ${imported} วิชา ห้อง ${formatRoomName(targetRoom)}`);
                         showToast(`นำเข้า ${imported} วิชา สำเร็จ!${skipped > 0 ? ' (ข้าม ' + skipped + ' แถวที่ไม่ระบุครู)' : ''}`); renderAdminTab(); } else { showToast("ไม่พบข้อมูลที่ถูกต้อง หรือไม่ได้ระบุชื่อครูในแถวใดเลย", "error");
                     }
                 } catch (err) { showToast("เกิดข้อผิดพลาดในการอ่านไฟล์", "error");
@@ -1401,11 +1504,59 @@
         window.saveStudentForm = function() { const number = document.getElementById('newStuNum').value, name = document.getElementById('newStuName').value.trim(), status = document.getElementById('newStuStatus').value;
         if (!number || !name) { showToast("กรอกข้อมูลให้ครบ", "error"); return; } if (editingStudentId) { const st = students.find(s => s.id === editingStudentId);
         if(st) { st.number = number; st.name = name; st.status = status;
-        } } else { students.push({ id: generateId(), roomId: window.adminSelectedRoom, number, name, status }); } saveData('full'); showToast("บันทึกสำเร็จ"); renderAdminTab(); closeStudentModal(); };
-        function deleteSubject(id) { showConfirm("ลบวิชา", "ข้อมูลการเช็คชื่อทั้งหมดในวิชานี้จะถูกลบไปด้วย แน่ใจหรือไม่?", () => { subjects = subjects.filter(s => s.id !== id); attendanceData = attendanceData.filter(a => a.subjectId !== id); saveData('full'); renderAdminTab(); });
+        logAction('แก้ไขข้อมูลนักเรียน', `${name} (เลขที่ ${number}, ${formatRoomName(st.roomId)})`);
+        } } else { students.push({ id: generateId(), roomId: window.adminSelectedRoom, number, name, status }); logAction('เพิ่มนักเรียนใหม่', `${name} (เลขที่ ${number}, ${formatRoomName(window.adminSelectedRoom)})`); } saveData('full'); showToast("บันทึกสำเร็จ"); renderAdminTab(); closeStudentModal(); };
+        function deleteSubject(id) { const sub = subjects.find(s => s.id === id); showConfirm("ลบวิชา", "ข้อมูลการเช็คชื่อทั้งหมดในวิชานี้จะถูกลบไปด้วย แน่ใจหรือไม่?", () => { subjects = subjects.filter(s => s.id !== id); attendanceData = attendanceData.filter(a => a.subjectId !== id); logAction('ลบวิชา', sub ? sub.name : id); saveData('full'); renderAdminTab(); });
         }
-        function deleteStudent(id) { showConfirm("ลบนักเรียน", "แน่ใจหรือไม่ที่จะลบนักเรียนคนนี้?", () => { students = students.filter(s => s.id !== id); saveData('full'); renderAdminTab(); });
+        function deleteStudent(id) { const st = students.find(s => s.id === id); showConfirm("ลบนักเรียน", "แน่ใจหรือไม่ที่จะลบนักเรียนคนนี้?", () => { students = students.filter(s => s.id !== id); logAction('ลบนักเรียน', st ? `${st.name} (${formatRoomName(st.roomId)})` : id); saveData('full'); renderAdminTab(); });
         }
+
+        // ===== จัดการผู้ใช้งาน (เฉพาะ Super Admin) =====
+        window.openUserModal = function(id = null) {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่จัดการผู้ใช้งานได้", "error"); return; }
+            editingUserId = id;
+            const u = id ? (settings.users || []).find(x => x.id === id) : null;
+            document.getElementById('userModalTitle').innerText = id ? 'แก้ไขผู้ใช้งาน' : 'เพิ่มผู้ใช้งานใหม่';
+            document.getElementById('newUserName').value = u ? u.name : '';
+            document.getElementById('newUserUsername').value = u ? u.username : '';
+            document.getElementById('newUserPassword').value = u ? u.password : '';
+            document.getElementById('userModal').classList.remove('hidden');
+            setTimeout(() => { document.getElementById('userModalBox').classList.remove('scale-95', 'opacity-0'); document.getElementById('userModalBox').classList.add('scale-100', 'opacity-100'); }, 10);
+        };
+        window.closeUserModal = function() {
+            document.getElementById('userModalBox').classList.remove('scale-100', 'opacity-100');
+            document.getElementById('userModalBox').classList.add('scale-95', 'opacity-0');
+            setTimeout(() => { document.getElementById('userModal').classList.add('hidden'); }, 300);
+        };
+        window.saveUserForm = function() {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่จัดการผู้ใช้งานได้", "error"); return; }
+            const name = document.getElementById('newUserName').value.trim();
+            const username = document.getElementById('newUserUsername').value.trim();
+            const password = document.getElementById('newUserPassword').value;
+            if (!name || !username || !password) { showToast("กรอกข้อมูลให้ครบ", "error"); return; }
+            if (!settings.users) settings.users = [];
+            const dup = settings.users.find(u => u.username === username && u.id !== editingUserId);
+            if (dup) { showToast("ชื่อผู้ใช้นี้มีอยู่แล้ว", "error"); return; }
+            if (editingUserId) {
+                const u = settings.users.find(x => x.id === editingUserId);
+                if (u && u.role === 'super_admin') { showToast("ไม่สามารถแก้ไข Super Admin ได้", "error"); return; }
+                if (u) { u.name = name; u.username = username; u.password = password; logAction('แก้ไขข้อมูลผู้ใช้งาน', `${name} (${username})`); }
+            } else {
+                settings.users.push({ id: generateId(), username, password, name, role: 'admin', createdAt: new Date().toISOString() });
+                logAction('เพิ่มผู้ใช้งานใหม่', `${name} (${username}) สิทธิ์เจ้าหน้าที่`);
+            }
+            saveData('full'); showToast("บันทึกสำเร็จ"); renderAdminTab(); closeUserModal();
+        };
+        window.deleteUser = function(id) {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่จัดการผู้ใช้งานได้", "error"); return; }
+            const u = (settings.users || []).find(x => x.id === id);
+            if (!u || u.role === 'super_admin') { showToast("ไม่สามารถลบ Super Admin ได้", "error"); return; }
+            showConfirm("ลบผู้ใช้งาน", `ต้องการลบผู้ใช้ "${u.name}" ใช่หรือไม่?`, () => {
+                settings.users = settings.users.filter(x => x.id !== id);
+                logAction('ลบผู้ใช้งาน', `${u.name} (${u.username})`);
+                saveData('full'); showToast("ลบผู้ใช้งานแล้ว"); renderAdminTab();
+            });
+        };
         
         window.filterSubjects = function() {
             const searchInput = document.getElementById('searchSubjectInput');
@@ -1468,7 +1619,7 @@
                             } else { students.push({ id: generateId(), roomId: window.adminSelectedRoom, number, name, status: 'active' }); } imported++;
                         }
                     }
-                    if (imported > 0) { saveData('full');
+                    if (imported > 0) { saveData('full'); logAction('นำเข้ารายชื่อนักเรียนจาก Excel', `นำเข้า ${imported} คน ห้อง ${formatRoomName(window.adminSelectedRoom)}`);
                         showToast(`นำเข้า ${imported} คน สำเร็จ!`); renderAdminTab(); } else { showToast("ไม่พบข้อมูลที่ถูกต้อง", "error");
                     }
                 } catch (err) { showToast("เกิดข้อผิดพลาดในการอ่านไฟล์", "error");
