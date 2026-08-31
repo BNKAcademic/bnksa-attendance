@@ -37,6 +37,32 @@
         .a4-page { width: 794px; min-height: 1123px; padding: 40px; background: white; box-sizing: border-box; position: relative; }
         .a4-export-container table { table-layout: fixed; width: 100%; }
         .a4-export-container th, .a4-export-container td { word-wrap: break-word; white-space: normal; }
+
+        /* ===== Dark Mode ===== */
+        html.dark body { background-color: #0f172a; color: #e2e8f0; }
+        html.dark .glass-effect { background: rgba(15, 23, 42, 0.92) !important; }
+        html.dark .bg-white { background-color: #1e293b !important; }
+        html.dark .bg-slate-50 { background-color: #1e293b !important; }
+        html.dark .bg-slate-100 { background-color: #273449 !important; }
+        html.dark .bg-slate-200 { background-color: #334155 !important; }
+        html.dark .hover\:bg-slate-50:hover { background-color: #273449 !important; }
+        html.dark .hover\:bg-slate-100:hover { background-color: #334155 !important; }
+        html.dark .hover\:bg-white:hover { background-color: #273449 !important; }
+        html.dark .text-slate-800 { color: #f1f5f9 !important; }
+        html.dark .text-slate-700 { color: #e2e8f0 !important; }
+        html.dark .text-slate-600 { color: #cbd5e1 !important; }
+        html.dark .text-slate-500 { color: #94a3b8 !important; }
+        html.dark .text-slate-400 { color: #64748b !important; }
+        html.dark .border-slate-100 { border-color: #334155 !important; }
+        html.dark .border-slate-200 { border-color: #334155 !important; }
+        html.dark .border-slate-300 { border-color: #475569 !important; }
+        html.dark input, html.dark select, html.dark textarea { background-color: #1e293b !important; color: #f1f5f9 !important; border-color: #334155 !important; }
+        html.dark input::placeholder, html.dark textarea::placeholder { color: #64748b !important; }
+        html.dark table thead { background-color: #273449 !important; }
+        html.dark ::-webkit-scrollbar-track { background: #1e293b; }
+        html.dark .shadow-sm, html.dark .shadow-md, html.dark .shadow-lg, html.dark .shadow-xl { box-shadow: 0 1px 3px rgba(0,0,0,0.5) !important; }
+        /* งาน PDF/Export ต้องคงเป็นโหมดสว่างเสมอ ไม่ว่าจะเปิด Dark Mode อยู่หรือไม่ (ปิด dark ชั่วคราวระหว่างสร้างไฟล์ผ่าน JS) */
+        .a4-export-container, .a4-export-container * { color-scheme: light; }
     </style>
 </head>
 <body class="text-slate-800 antialiased min-h-screen flex flex-col selection:bg-indigo-100 selection:text-indigo-900">
@@ -44,14 +70,16 @@
     <nav class="glass-effect border-b border-slate-200/80 sticky top-0 z-40 shadow-sm">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-16 sm:h-20 items-center">
-                <div class="flex items-center cursor-pointer group" onclick="window.navigate('dashboard')">
-                    <div class="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-indigo-500 to-blue-600 rounded-xl sm:rounded-2xl flex items-center justify-center text-white font-bold text-xl sm:text-2xl shadow-lg shadow-indigo-200 group-hover:scale-105 transition-transform"><i class="fas fa-graduation-cap"></i></div>
-                    <div class="ml-3 sm:ml-4">
-                        <h1 class="text-lg sm:text-2xl font-extrabold text-slate-800 tracking-tight leading-tight" id="navTitle">ระบบเช็คชื่อ</h1>
+                <div class="flex items-center cursor-pointer group min-w-0" onclick="window.navigate('dashboard')">
+                    <div id="navLogoBox" class="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-indigo-500 to-blue-600 rounded-xl sm:rounded-2xl flex items-center justify-center text-white font-bold text-xl sm:text-2xl shadow-lg shadow-indigo-200 group-hover:scale-105 transition-transform shrink-0 overflow-hidden"><i class="fas fa-graduation-cap" id="navLogoIcon"></i><img id="navLogoImg" class="hidden w-full h-full object-cover" alt="โลโก้"></div>
+                    <div class="ml-3 sm:ml-4 min-w-0">
+                        <h1 class="text-lg sm:text-2xl font-extrabold text-slate-800 tracking-tight leading-tight truncate" id="navTitle">ระบบเช็คชื่อ</h1>
                         <p class="text-[10px] sm:text-sm text-slate-500 font-medium" id="navSubtitle">กำลังเชื่อมต่อ...</p>
                     </div>
                 </div>
                 <div class="flex items-center gap-1.5 sm:gap-3">
+                    <button id="btnRefreshData" onclick="window.refreshData()" title="รีเฟรชข้อมูล" class="bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 text-slate-600 hover:text-indigo-700 w-9 h-9 sm:w-11 sm:h-11 rounded-xl text-sm sm:text-base font-bold transition-all shadow-sm flex items-center justify-center shrink-0"><i class="fas fa-sync-alt" id="refreshIcon"></i></button>
+                    <button id="btnDarkMode" onclick="window.toggleDarkMode()" title="สลับโหมดมืด/สว่าง" class="bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 text-slate-600 hover:text-indigo-700 w-9 h-9 sm:w-11 sm:h-11 rounded-xl text-sm sm:text-base font-bold transition-all shadow-sm flex items-center justify-center shrink-0"><i class="fas fa-moon" id="darkModeIcon"></i></button>
                     <button id="btnAdminLogin" onclick="window.navigate('admin_login')" class="bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 text-slate-600 hover:text-indigo-700 px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-sm flex items-center gap-2"><i class="fas fa-user-shield"></i> <span class="hidden sm:inline">ผู้ดูแลระบบ</span></button>
                     <button id="btnAdminPanel" onclick="window.navigate('admin')" class="hidden bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white border border-indigo-200 px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-sm flex items-center gap-2"><i class="fas fa-cog"></i> <span class="hidden sm:inline">จัดการระบบ</span></button>
                     <button id="btnAdminLogout" onclick="window.logoutAdmin()" class="hidden bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white border border-rose-200 px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-sm flex items-center gap-2"><i class="fas fa-sign-out-alt"></i> <span class="hidden sm:inline">ออก</span></button>
@@ -59,6 +87,7 @@
             </div>
         </div>
     </nav>
+
 
     <div id="announcementBar" class="hidden bg-amber-400 text-amber-900 text-center px-4 py-2.5 sm:py-3 text-xs sm:text-sm font-bold shadow-sm sticky top-16 sm:top-20 z-30">
         <i class="fas fa-bullhorn mr-1.5"></i><span id="announcementText"></span>
@@ -103,7 +132,7 @@
         let isAdmin = false, isDbInitialized = false, currentAdminTab = 'settings', currentRoomId = null, currentSubjectId = null;
         let editingTeacherId = null, editingSubjectId = null, editingStudentId = null;
         // Data models
-        let settings = { title: "ระบบเช็คชื่อนักเรียนอัจฉริยะ", faviconDataUrl: "", announcement: "", term: "1", year: "2567", roomCounts: { m1: 4, m2: 4, m3: 4, m4: 3, m5: 3, m6: 3 }, advisors: {}, staffs: {}, thresholds: { late: 4, absent: 4 } };
+        let settings = { title: "ระบบเช็คชื่อนักเรียนอัจฉริยะ", faviconDataUrl: "", logoDataUrl: "", announcement: "", term: "1", year: "2567", roomCounts: { m1: 4, m2: 4, m3: 4, m4: 3, m5: 3, m6: 3 }, advisors: {}, staffs: {}, thresholds: { late: 4, absent: 4 } };
         let teachers = [], subjects = [], students = [], attendanceData = [], followUps = [];
         const statuses = {
             'มา': { color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200', activeBg: 'bg-emerald-500', icon: 'fa-check' },
@@ -240,6 +269,10 @@
                                     settings.faviconDataUrl = data.settings.faviconDataUrl;
                                     applyFavicon();
                                 }
+                                if (data.settings.logoDataUrl !== undefined && data.settings.logoDataUrl !== settings.logoDataUrl) {
+                                    settings.logoDataUrl = data.settings.logoDataUrl;
+                                    applyHeaderLogo();
+                                }
                                 if ((data.settings.announcement || '') !== (settings.announcement || '')) {
                                     settings.announcement = data.settings.announcement || '';
                                     updateAnnouncementBar();
@@ -263,6 +296,7 @@
                     if (!settings.staffs) settings.staffs = {};
                     if (!settings.title) settings.title = "ระบบเช็คชื่อนักเรียนอัจฉริยะ";
                     if (!settings.faviconDataUrl) settings.faviconDataUrl = "";
+                    if (!settings.logoDataUrl) settings.logoDataUrl = "";
                     if (!settings.announcement) settings.announcement = "";
                     teachers = data.teachers || [];
                     subjects = data.subjects || []; students = data.students || []; attendanceData = data.attendanceData || []; followUps = data.followUps || [];
@@ -274,7 +308,9 @@
                 document.title = settings.title;
                 document.getElementById('navSubtitle').innerText = `ภาคเรียนที่ ${settings.term} / ${settings.year}`;
                 applyFavicon();
+                applyHeaderLogo();
                 updateAnnouncementBar();
+                applyDarkModePreference();
                 // ตั้งค่าจุดเริ่มต้นของ history ให้เป็นหน้า dashboard เพื่อให้ปุ่ม Back ทำงานถูกต้องตั้งแต่แรก
                 try { history.replaceState({ view: 'dashboard' }, '', location.pathname + location.search); } catch (e) {}
                 showToast("พร้อมใช้งาน!", "success"); renderDashboard(); startRealtimeSync();
@@ -316,6 +352,60 @@
             const link = document.getElementById('faviconLink');
             if (link) link.href = settings.faviconDataUrl && settings.faviconDataUrl.length > 0 ? settings.faviconDataUrl : 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/graduation-cap.svg';
         }
+
+        function applyHeaderLogo() {
+            const icon = document.getElementById('navLogoIcon'), img = document.getElementById('navLogoImg');
+            if (!icon || !img) return;
+            if (settings.logoDataUrl && settings.logoDataUrl.length > 0) {
+                img.src = settings.logoDataUrl; img.classList.remove('hidden'); icon.classList.add('hidden');
+            } else {
+                img.classList.add('hidden'); img.src = ''; icon.classList.remove('hidden');
+            }
+        }
+
+        // ===== Dark Mode =====
+        function applyDarkModePreference() {
+            let pref = 'light';
+            try { pref = localStorage.getItem('bnksa_theme') || 'light'; } catch (e) {}
+            setDarkMode(pref === 'dark', false);
+        }
+        function setDarkMode(isDark, persist = true) {
+            document.documentElement.classList.toggle('dark', isDark);
+            const icon = document.getElementById('darkModeIcon');
+            if (icon) { icon.classList.toggle('fa-moon', !isDark); icon.classList.toggle('fa-sun', isDark); }
+            if (persist) { try { localStorage.setItem('bnksa_theme', isDark ? 'dark' : 'light'); } catch (e) {} }
+        }
+        window.toggleDarkMode = function() {
+            const isDark = !document.documentElement.classList.contains('dark');
+            setDarkMode(isDark, true);
+            showToast(isDark ? "เปิดโหมดมืดแล้ว" : "ปิดโหมดมืดแล้ว");
+        };
+
+        // ===== รีเฟรชข้อมูล (ใช้ได้ทุกหน้า) =====
+        window.refreshData = async function() {
+            const icon = document.getElementById('refreshIcon');
+            if (icon) icon.classList.add('fa-spin');
+            if (GOOGLE_APP_SCRIPT_URL === "YOUR_WEB_APP_URL_HERE") { if (icon) icon.classList.remove('fa-spin'); return; }
+            try {
+                const response = await fetch(GOOGLE_APP_SCRIPT_URL); const data = await response.json();
+                if (data) {
+                    attendanceData = data.attendanceData || attendanceData; followUps = data.followUps || followUps;
+                    if (!isAdmin) {
+                        teachers = data.teachers || teachers; subjects = data.subjects || subjects;
+                        students = (data.students || students).map(st => { if (st.title) { st.name = (st.title + (st.name || '')).trim(); st.title = ''; } return st; });
+                        if (data.settings) {
+                            if (data.settings.title) { settings.title = data.settings.title; document.getElementById('navTitle').innerText = settings.title; document.title = settings.title; }
+                            if (data.settings.faviconDataUrl !== undefined) { settings.faviconDataUrl = data.settings.faviconDataUrl; applyFavicon(); }
+                            if (data.settings.logoDataUrl !== undefined) { settings.logoDataUrl = data.settings.logoDataUrl; applyHeaderLogo(); }
+                            settings.announcement = data.settings.announcement || ''; updateAnnouncementBar();
+                        }
+                    }
+                }
+                safeRenderState(history.state || { view: 'dashboard' });
+                showToast("รีเฟรชข้อมูลสำเร็จ");
+            } catch (e) { showToast("รีเฟรชข้อมูลไม่สำเร็จ ลองอีกครั้ง", "error"); }
+            if (icon) icon.classList.remove('fa-spin');
+        };
 
         function updateAnnouncementBar() {
             const bar = document.getElementById('announcementBar');
@@ -401,10 +491,10 @@
                     const deptTeachers = teachers.filter(t => (t.department || 'ระบบ/อื่นๆ') === dept);
                     if (deptTeachers.length > 0) {
                         const cfg = deptConfig[dept];
-                        html += `<div class="mb-8"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-4 flex items-center gap-3 border-b border-slate-200 pb-3"><div class="w-8 h-8 ${cfg.bg} ${cfg.text} rounded-lg flex items-center justify-center text-sm shadow-sm"><i class="fas ${cfg.icon}"></i></div>${dept}</h3><div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-6">`;
+                        html += `<div class="mb-8"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-4 flex items-center gap-3 border-b border-slate-200 pb-3"><div class="w-8 h-8 ${cfg.bg} ${cfg.text} rounded-lg flex items-center justify-center text-sm shadow-sm"><i class="fas ${cfg.icon}"></i></div>${dept}</h3><div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-6">`;
                         deptTeachers.sort((a,b) => a.name.localeCompare(b.name)).forEach(t => { 
                             const taughtSubjects = subjects.filter(s => s.teacher === t.name || s.teacher2 === t.name);
-                            html += `<button onclick="window.navigate('teacher_dash', {teacherName: '${t.name}'})" class="bg-white border ${cfg.border} rounded-2xl sm:rounded-3xl p-3 sm:p-6 transition-all hover:shadow-xl hover:-translate-y-1 text-left flex flex-col items-center text-center group relative overflow-hidden ${cfg.hover} min-h-[150px] sm:min-h-[200px] justify-start"><div class="w-10 h-10 sm:w-16 sm:h-16 ${cfg.bg} ${cfg.text} rounded-full flex items-center justify-center text-lg sm:text-2xl mb-2 sm:mb-4 group-hover:scale-110 transition-all shadow-sm shrink-0"><i class="fas fa-user-tie"></i></div><h4 class="font-extrabold text-xs sm:text-lg text-slate-800 group-hover:${cfg.text} relative w-full break-words px-1 leading-tight flex items-center justify-center min-h-[2.4em] sm:min-h-[2.6em]" title="${t.name}">${t.name}</h4><p class="text-[10px] sm:text-xs text-slate-500 mt-1 font-bold bg-slate-50 px-2 py-0.5 rounded-full border border-slate-200 shadow-sm relative mt-auto">${taughtSubjects.length} วิชา</p></button>`;
+                            html += `<button onclick="window.navigate('teacher_dash', {teacherName: '${t.name}'})" class="bg-white border ${cfg.border} rounded-2xl sm:rounded-3xl p-3 sm:p-6 transition-all hover:shadow-xl hover:-translate-y-1 text-left flex flex-col items-center text-center group relative overflow-hidden ${cfg.hover} min-h-[130px] sm:min-h-[170px] justify-start"><div class="w-10 h-10 sm:w-16 sm:h-16 ${cfg.bg} ${cfg.text} rounded-full flex items-center justify-center text-lg sm:text-2xl mb-2 sm:mb-4 group-hover:scale-110 transition-all shadow-sm shrink-0"><i class="fas fa-user-tie"></i></div><h4 class="font-extrabold text-xs sm:text-lg text-slate-800 group-hover:${cfg.text} relative w-full whitespace-nowrap overflow-hidden text-ellipsis px-1 leading-tight" title="${t.name}">${t.name}</h4><p class="text-[10px] sm:text-xs text-slate-500 mt-1 font-bold bg-slate-50 px-2 py-0.5 rounded-full border border-slate-200 shadow-sm relative mt-auto">${taughtSubjects.length} วิชา</p></button>`;
                         });
                         html += `</div></div>`;
                     }
@@ -769,7 +859,7 @@
         function renderAdminTab() {
             const content = document.getElementById('adminContent');
             if (currentAdminTab === 'settings') {
-                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-heading text-indigo-500"></i> ชื่อหัวเรื่องระบบ</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100"><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ชื่อระบบ (แสดงที่แถบด้านบน)</label><input type="text" id="setSiteTitle" value="${settings.title || 'ระบบเช็คชื่อนักเรียนอัจฉริยะ'}" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="เช่น ระบบเช็คชื่อนักเรียนอัจฉริยะ"></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-icons text-indigo-500"></i> ไอคอนเว็บไซต์ (Favicon)</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 flex items-center gap-4 flex-wrap"><img id="faviconPreview" src="${settings.faviconDataUrl || 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/graduation-cap.svg'}" class="w-14 h-14 rounded-xl border border-slate-200 bg-white object-contain p-1 shadow-sm"><div class="flex-1 min-w-[200px]"><input type="file" id="faviconFileInput" accept="image/*" class="hidden" onchange="window.handleFaviconUpload(event)"><button onclick="document.getElementById('faviconFileInput').click()" class="bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors"><i class="fas fa-upload"></i> เลือกรูปไอคอนใหม่</button><p class="text-[10px] sm:text-xs text-slate-400 mt-1.5 font-medium">แนะนำไฟล์ภาพสี่เหลี่ยมจัตุรัส ระบบจะปรับขนาดให้อัตโนมัติ และบันทึกทันทีที่เลือกไฟล์</p></div></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-bullhorn text-indigo-500"></i> ประกาศแจ้งเตือน (แสดงบนสุดของเว็บ)</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100"><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ข้อความประกาศ (เว้นว่างไว้เพื่อซ่อนแถบประกาศ)</label><textarea id="setAnnouncement" rows="2" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none resize-none" placeholder="เช่น ปิดเรียนวันที่ 5 กันยายน เนื่องในกิจกรรมกีฬาสี">${settings.announcement || ''}</textarea></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-sliders-h text-indigo-500"></i> ข้อมูลภาคเรียน</h3><div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100"><div><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ภาคเรียน</label><input type="text" id="setTerm" value="${settings.term}" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"></div><div><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ปีการศึกษา</label><input type="text" id="setYear" value="${settings.year}" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"></div></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-cubes text-indigo-500"></i> จำนวนห้อง (ต่อชั้นปี)</h3><div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3 mb-6">`;
+                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-heading text-indigo-500"></i> ชื่อหัวเรื่องระบบ</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100"><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ชื่อระบบ (แสดงที่แถบด้านบน)</label><input type="text" id="setSiteTitle" value="${settings.title || 'ระบบเช็คชื่อนักเรียนอัจฉริยะ'}" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="เช่น ระบบเช็คชื่อนักเรียนอัจฉริยะ"></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-icons text-indigo-500"></i> ไอคอนเว็บไซต์ (Favicon)</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 flex items-center gap-4 flex-wrap"><img id="faviconPreview" src="${settings.faviconDataUrl || 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/graduation-cap.svg'}" class="w-14 h-14 rounded-xl border border-slate-200 bg-white object-contain p-1 shadow-sm"><div class="flex-1 min-w-[200px]"><input type="file" id="faviconFileInput" accept="image/*" class="hidden" onchange="window.handleFaviconUpload(event)"><button onclick="document.getElementById('faviconFileInput').click()" class="bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors"><i class="fas fa-upload"></i> เลือกรูปไอคอนใหม่</button><p class="text-[10px] sm:text-xs text-slate-400 mt-1.5 font-medium">แนะนำไฟล์ภาพสี่เหลี่ยมจัตุรัส ระบบจะปรับขนาดให้อัตโนมัติ และบันทึกทันทีที่เลือกไฟล์</p></div></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-image text-indigo-500"></i> โลโก้บนแถบหัวเว็บไซต์</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 flex items-center gap-4 flex-wrap"><div id="navLogoPreviewBox" class="w-14 h-14 rounded-xl border border-slate-200 bg-white flex items-center justify-center overflow-hidden shadow-sm">${settings.logoDataUrl ? `<img id="navLogoPreview" src="${settings.logoDataUrl}" class="w-full h-full object-cover">` : `<i class="fas fa-graduation-cap text-indigo-400 text-xl" id="navLogoPreview"></i>`}</div><div class="flex-1 min-w-[200px]"><input type="file" id="navLogoFileInput" accept="image/*" class="hidden" onchange="window.handleHeaderLogoUpload(event)"><button onclick="document.getElementById('navLogoFileInput').click()" class="bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors"><i class="fas fa-upload"></i> เลือกรูปโลโก้ใหม่</button>${settings.logoDataUrl ? `<button onclick="window.removeHeaderLogo()" class="ml-2 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-600 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors"><i class="fas fa-times"></i> ลบโลโก้</button>` : ''}<p class="text-[10px] sm:text-xs text-slate-400 mt-1.5 font-medium">แสดงแทนไอคอนหมวกบัณฑิตที่มุมซ้ายบนของเว็บ บันทึกทันทีที่เลือกไฟล์</p></div></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-bullhorn text-indigo-500"></i> ประกาศแจ้งเตือน (แสดงบนสุดของเว็บ)</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100"><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ข้อความประกาศ (เว้นว่างไว้เพื่อซ่อนแถบประกาศ)</label><textarea id="setAnnouncement" rows="2" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none resize-none" placeholder="เช่น ปิดเรียนวันที่ 5 กันยายน เนื่องในกิจกรรมกีฬาสี">${settings.announcement || ''}</textarea></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-sliders-h text-indigo-500"></i> ข้อมูลภาคเรียน</h3><div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100"><div><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ภาคเรียน</label><input type="text" id="setTerm" value="${settings.term}" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"></div><div><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ปีการศึกษา</label><input type="text" id="setYear" value="${settings.year}" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"></div></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-cubes text-indigo-500"></i> จำนวนห้อง (ต่อชั้นปี)</h3><div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3 mb-6">`;
                 for(let i=1; i<=6; i++) { html += `<div class="bg-slate-50 p-2 sm:p-3 rounded-lg border border-slate-100 text-center"><label class="block font-black text-[10px] sm:text-xs text-slate-700 mb-1 sm:mb-2">ม.${i}</label><input type="number" id="setCountM${i}" value="${settings.roomCounts[`m${i}`]}" min="0" max="15" class="w-full text-center py-1.5 sm:py-2 rounded border border-slate-200 font-bold text-indigo-600 outline-none text-base sm:text-sm"></div>`;
                 }
                 html += `</div><h3 class="text-lg sm:text-xl font-extrabold text-rose-600 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-bell"></i> ตั้งค่าการแจ้งเตือนติดตาม (ต่อเดือน)</h3><div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6 bg-rose-50 p-3 sm:p-4 rounded-xl border border-rose-100 shadow-inner"><div><label class="block text-[10px] sm:text-xs font-bold text-rose-700 mb-1">สายเกิน (ครั้ง)</label><input type="number" id="setLateThresh" value="${settings.thresholds?.late || 4}" class="w-full bg-white border border-rose-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none text-rose-700"></div><div><label class="block text-[10px] sm:text-xs font-bold text-rose-700 mb-1">ขาดเกิน (ครั้ง)</label><input type="number" id="setAbsentThresh" value="${settings.thresholds?.absent || 4}" class="w-full bg-white border border-rose-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none text-rose-700"></div></div><div class="flex justify-end mb-6"><button onclick="window.saveAdminSettings()" class="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-bold shadow-sm transition-colors text-sm"><i class="fas fa-save"></i> บันทึกการตั้งค่าทั้งหมด</button></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-id-badge text-indigo-500"></i> ครูที่ปรึกษา และ เจ้าหน้าที่</h3><div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-8">`;
@@ -890,6 +980,45 @@
             reader.onerror = () => showToast("เกิดข้อผิดพลาดในการอ่านไฟล์", "error");
             reader.readAsDataURL(file);
             event.target.value = '';
+        };
+
+        window.handleHeaderLogoUpload = function(event) {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            if (!file.type.startsWith('image/')) { showToast("กรุณาเลือกไฟล์รูปภาพเท่านั้น", "error"); return; }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const SIZE = 160;
+                    const canvas = document.createElement('canvas');
+                    canvas.width = SIZE; canvas.height = SIZE;
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, SIZE, SIZE);
+                    const scale = Math.max(SIZE / img.width, SIZE / img.height);
+                    const w = img.width * scale, h = img.height * scale;
+                    ctx.drawImage(img, (SIZE - w) / 2, (SIZE - h) / 2, w, h);
+                    const dataUrl = canvas.toDataURL('image/png', 0.9);
+                    settings.logoDataUrl = dataUrl;
+                    applyHeaderLogo();
+                    saveData('full');
+                    showToast("บันทึกโลโก้หัวเว็บไซต์เรียบร้อย");
+                    renderAdminTab();
+                };
+                img.onerror = () => showToast("ไม่สามารถอ่านไฟล์รูปภาพนี้ได้", "error");
+                img.src = e.target.result;
+            };
+            reader.onerror = () => showToast("เกิดข้อผิดพลาดในการอ่านไฟล์", "error");
+            reader.readAsDataURL(file);
+            event.target.value = '';
+        };
+
+        window.removeHeaderLogo = function() {
+            settings.logoDataUrl = '';
+            applyHeaderLogo();
+            saveData('full');
+            showToast("ลบโลโก้แล้ว กลับไปใช้ไอคอนเริ่มต้น");
+            renderAdminTab();
         };
         
         function saveAdvisors() { 
@@ -1131,6 +1260,7 @@
             const pdfType = document.getElementById('studentPdfType').value;
             const data = window.tempStudentReport; if (!data || data.student.id !== studentId) return;
             showToast("กำลังประมวลผล PDF กรุณารอสักครู่...", "success");
+            const __wasDark = document.documentElement.classList.contains('dark'); if (__wasDark) document.documentElement.classList.remove('dark');
             const advData = settings.advisors && settings.advisors[data.student.roomId] ? settings.advisors[data.student.roomId] : [];
             const adv1 = advData[0] || '                                                   ';
             const adv2 = advData[1] || null;
@@ -1159,9 +1289,11 @@
             } catch (err) { showToast("เกิดข้อผิดพลาดในการสร้าง PDF", "error");
             }
             document.getElementById('pdf-student-container').remove();
+            if (__wasDark) document.documentElement.classList.add('dark');
         };
         window.downloadInfographicPDF = async function(subjectId) {
             showToast("กำลังประมวลผล PDF กรุณารอสักครู่...", "success");
+            const __wasDark = document.documentElement.classList.contains('dark'); if (__wasDark) document.documentElement.classList.remove('dark');
             const subject = subjects.find(s => s.id === subjectId); const roomStudents = students.filter(s => s.roomId === subject.roomId).sort((a,b) => parseInt(a.number) - parseInt(b.number));
             const subjectAtt = attendanceData.filter(a => a.subjectId === subjectId);
             
@@ -1203,10 +1335,12 @@
                 pdfDoc.save(`Report_${subject.name}_${formatRoomName(subject.roomId)}.pdf`);
                 showToast("สร้างไฟล์ PDF สำเร็จ!", "success");
             } catch (err) { showToast("เกิดข้อผิดพลาดในการสร้าง PDF", "error"); } document.getElementById('pdf-export-container').remove();
+            if (__wasDark) document.documentElement.classList.add('dark');
         }
 
         window.downloadRoomInfographicPDF = async function(roomId, month) {
             showToast("กำลังประมวลผล PDF กรุณารอสักครู่...", "success");
+            const __wasDark = document.documentElement.classList.contains('dark'); if (__wasDark) document.documentElement.classList.remove('dark');
             const report = window.tempRoomReport; if(!report || report.roomId !== roomId) return; const roomName = formatRoomName(roomId);
             const monthNames = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
             const displayMonthYear = `${monthNames[parseInt(month.split('-')[1])-1]} ${parseInt(month.split('-')[0])+543}`;
@@ -1249,10 +1383,12 @@
                 pdfDoc.save(`RoomSummary_${roomName}_${month}.pdf`);
                 showToast("สร้างไฟล์ PDF สำเร็จ!", "success");
             } catch (err) { showToast("เกิดข้อผิดพลาดในการสร้าง PDF", "error"); } document.getElementById('pdf-room-container').remove();
+            if (__wasDark) document.documentElement.classList.add('dark');
         }
 
         window.downloadRoomDailyPDF = async function(roomId, date) {
             showToast("กำลังประมวลผล PDF กรุณารอสักครู่...", "success");
+            const __wasDark = document.documentElement.classList.contains('dark'); if (__wasDark) document.documentElement.classList.remove('dark');
             const roomName = formatRoomName(roomId), roomStudents = students.filter(s => s.roomId === roomId).sort((a,b) => parseInt(a.number) - parseInt(b.number)), roomSubjects = subjects.filter(s => s.roomId === roomId);
             const advData = settings.advisors && settings.advisors[roomId] ? settings.advisors[roomId] : []; let advisorText = Array.isArray(advData) ? advData.filter(a => a.trim()).join(' และ ') : "ยังไม่ระบุ";
             const staffName = settings.staffs && settings.staffs[roomId] ? settings.staffs[roomId] : '';
@@ -1294,6 +1430,7 @@
                 pdfDoc.save(`DailySummary_${roomName}_${date}.pdf`);
                 showToast("สร้างไฟล์ PDF สำเร็จ!", "success");
             } catch (err) { showToast("เกิดข้อผิดพลาดในการสร้าง PDF", "error"); } document.getElementById('pdf-daily-room-container').remove();
+            if (__wasDark) document.documentElement.classList.add('dark');
         }
     </script>
 </body>
