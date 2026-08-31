@@ -145,6 +145,20 @@
         };
         const timeSlots = [ { period: 0, time: '08.00-08.30', name: 'เข้าแถวเช้า' }, { period: 1, time: '08.30-09.20' }, { period: 2, time: '09.20-10.10' }, { period: 3, time: '10.20-11.10' }, { period: 4, time: '11.10-12.00' }, { period: -1, time: '12.00-13.00', name: 'พักกลางวัน' }, { period: 5, time: '13.00-13.50' }, { period: 6, time: '13.50-14.40' }, { period: 7, time: '14.40-15.30' }, { period: 8, time: '15.30-16.20' } ];
         const daysLabel = ['วันจันทร์', 'วันอังคาร', 'วันพุธ', 'วันพฤหัสบดี', 'วันศุกร์'];
+        const SUBJECT_DAY_MAP = { 'จันทร์': 1, 'จ': 1, 'อังคาร': 2, 'อ': 2, 'พุธ': 3, 'พ': 3, 'พฤหัสบดี': 4, 'พฤหัส': 4, 'พฤ': 4, 'ศุกร์': 5, 'ศ': 5 };
+        function parseScheduleString(str) {
+            if (!str) return [];
+            const schedules = [];
+            String(str).split(',').forEach(part => {
+                const seg = part.trim(); if (!seg) return;
+                const m = seg.split('-'); if (m.length < 2) return;
+                const dayKey = m[0].trim().replace(/^วัน/, '');
+                const day = SUBJECT_DAY_MAP[dayKey];
+                const period = parseInt(m[1].trim());
+                if (day && !isNaN(period) && period >= 0 && period <= 8) schedules.push({ day, period });
+            });
+            return schedules;
+        }
 
         // Department Configuration
         const deptConfig = {
@@ -491,7 +505,7 @@
                     const deptTeachers = teachers.filter(t => (t.department || 'ระบบ/อื่นๆ') === dept);
                     if (deptTeachers.length > 0) {
                         const cfg = deptConfig[dept];
-                        html += `<div class="mb-8"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-4 flex items-center gap-3 border-b border-slate-200 pb-3"><div class="w-8 h-8 ${cfg.bg} ${cfg.text} rounded-lg flex items-center justify-center text-sm shadow-sm"><i class="fas ${cfg.icon}"></i></div>${dept}</h3><div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-6">`;
+                        html += `<div class="mb-8"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-4 flex items-center gap-3 border-b border-slate-200 pb-3"><div class="w-8 h-8 ${cfg.bg} ${cfg.text} rounded-lg flex items-center justify-center text-sm shadow-sm"><i class="fas ${cfg.icon}"></i></div>${dept}</h3><div class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-6">`;
                         deptTeachers.sort((a,b) => a.name.localeCompare(b.name)).forEach(t => { 
                             const taughtSubjects = subjects.filter(s => s.teacher === t.name || s.teacher2 === t.name);
                             html += `<button onclick="window.navigate('teacher_dash', {teacherName: '${t.name}'})" class="bg-white border ${cfg.border} rounded-2xl sm:rounded-3xl p-3 sm:p-6 transition-all hover:shadow-xl hover:-translate-y-1 text-left flex flex-col items-center text-center group relative overflow-hidden ${cfg.hover} min-h-[130px] sm:min-h-[170px] justify-start"><div class="w-10 h-10 sm:w-16 sm:h-16 ${cfg.bg} ${cfg.text} rounded-full flex items-center justify-center text-lg sm:text-2xl mb-2 sm:mb-4 group-hover:scale-110 transition-all shadow-sm shrink-0"><i class="fas fa-user-tie"></i></div><h4 class="font-extrabold text-xs sm:text-lg text-slate-800 group-hover:${cfg.text} relative w-full whitespace-nowrap overflow-hidden text-ellipsis px-1 leading-tight" title="${t.name}">${t.name}</h4><p class="text-[10px] sm:text-xs text-slate-500 mt-1 font-bold bg-slate-50 px-2 py-0.5 rounded-full border border-slate-200 shadow-sm relative mt-auto">${taughtSubjects.length} วิชา</p></button>`;
@@ -906,7 +920,7 @@
                 if (window.adminSelectedSubjectRoom !== 'all' && !subjRoomList.includes(window.adminSelectedSubjectRoom)) window.adminSelectedSubjectRoom = 'all';
                 const isAllRooms = window.adminSelectedSubjectRoom === 'all';
                 let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-book-open text-indigo-500"></i> จัดการวิชา</h3>`;
-                html += `<div class="flex flex-col lg:flex-row justify-between lg:items-center mb-3 gap-2"><select id="adminSubjectRoomSelect" onchange="window.adminSelectedSubjectRoom = this.value; window.renderAdminTab();" class="bg-white border-2 border-slate-200 rounded-lg px-3 py-1.5 font-bold text-sm w-full lg:w-auto outline-none focus:border-indigo-400 shadow-sm"><option value="all" ${isAllRooms ? 'selected' : ''}>รวมทุกห้อง (ทั้งหมด)</option>${subjRoomList.map(r => `<option value="${r}" ${window.adminSelectedSubjectRoom === r ? 'selected' : ''}>ห้อง ${formatRoomName(r)}</option>`).join('')}</select><button onclick="window.openSubjectModal()" class="w-full lg:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg font-bold text-sm shadow-sm transition-colors flex items-center justify-center gap-1.5"><i class="fas fa-plus"></i> เพิ่มวิชาใหม่${!isAllRooms ? ` (ห้อง ${formatRoomName(window.adminSelectedSubjectRoom)})` : ''}</button></div>`;
+                html += `<div class="flex flex-col lg:flex-row justify-between lg:items-center mb-3 gap-2"><select id="adminSubjectRoomSelect" onchange="window.adminSelectedSubjectRoom = this.value; window.renderAdminTab();" class="bg-white border-2 border-slate-200 rounded-lg px-3 py-1.5 font-bold text-sm w-full lg:w-auto outline-none focus:border-indigo-400 shadow-sm"><option value="all" ${isAllRooms ? 'selected' : ''}>รวมทุกห้อง (ทั้งหมด)</option>${subjRoomList.map(r => `<option value="${r}" ${window.adminSelectedSubjectRoom === r ? 'selected' : ''}>ห้อง ${formatRoomName(r)}</option>`).join('')}</select><div class="flex flex-wrap gap-1.5"><button onclick="window.openSubjectModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm transition-colors flex items-center justify-center gap-1.5 flex-1 sm:flex-none"><i class="fas fa-plus"></i> เพิ่มวิชาใหม่${!isAllRooms ? ` (ห้อง ${formatRoomName(window.adminSelectedSubjectRoom)})` : ''}</button>${!isAllRooms ? `<button onclick="window.downloadSubjectTemplate()" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-2 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-download"></i> โหลดฟอร์มวิชา</button><label class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg font-bold text-[10px] sm:text-sm cursor-pointer flex-1 sm:flex-none text-center shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-import"></i> นำเข้ารายวิชา Excel<input type="file" accept=".xlsx, .xls" class="hidden" onchange="window.handleImportSubjects(event)"></label>` : `<span class="text-[10px] sm:text-xs text-slate-400 font-bold flex items-center px-2">เลือกห้องที่ต้องการเพื่อนำเข้า/โหลดฟอร์มรายวิชา</span>`}</div></div>`;
 
                 html += `<div class="mb-4 bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-sm"><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><i class="fas fa-search text-slate-400"></i></div><input type="text" id="searchSubjectInput" onkeyup="window.filterSubjects()" class="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-400 shadow-inner" placeholder="ค้นหา รหัสวิชา, ชื่อวิชา, ครูผู้สอน..."></div></div>`;
                 html += `<div id="subjectModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-3 transition-opacity"><div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto transform scale-95 opacity-0 transition-all duration-300" id="subjectModalBox"><div class="p-4 sm:p-6"><div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-extrabold text-lg" id="subjectModalTitle">เพิ่ม</h4><button onclick="window.closeSubjectModal()" class="text-slate-400 text-xl hover:text-rose-500 transition-colors"><i class="fas fa-times"></i></button></div><div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2.5 mb-4"><div><label class="block text-[10px] sm:text-xs font-bold mb-1">ห้อง</label><select id="newSubRoom" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm">${subjRoomList.map(r => `<option value="${r}">${formatRoomName(r)}</option>`).join('')}</select></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">รหัสวิชา</label><input type="text" id="newSubCode" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm outline-none focus:ring-1 focus:ring-indigo-400" placeholder="เช่น ว31101"></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">ชื่อวิชา</label><input type="text" id="newSubName" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm outline-none focus:ring-1 focus:ring-indigo-400"></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">ครู (หลัก)</label><select id="newSubTeacher" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm">${tcOptions}</select></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">ครู (ร่วมสอน)</label><select id="newSubTeacher2" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm"><option value="">-- ไม่มี --</option>${tcOptions}</select></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">หน่วยกิต (คาบ)</label><select id="newSubCredit" onchange="window.renderScheduleInputs()" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm"><option value="0.5">0.5 (1 คาบ)</option><option value="1.0">1.0 (2 คาบ)</option><option value="1.5">1.5 (3 คาบ)</option><option value="2.0">2.0 (4 คาบ)</option><option value="2.5">2.5 (5 คาบ)</option><option value="3.0">3.0 (6 คาบ)</option></select></div></div><div id="scheduleContainer" class="grid grid-cols-1 sm:grid-cols-3 gap-2 border-t pt-3 mb-4"></div><div class="flex justify-end gap-2"><button onclick="window.closeSubjectModal()" class="bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded font-bold text-sm transition-colors">ยกเลิก</button><button onclick="window.saveSubjectForm()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded font-bold text-sm shadow-sm transition-colors"><i class="fas fa-save"></i> บันทึก</button></div></div></div></div>`;
@@ -1102,6 +1116,58 @@
         } if (editingSubjectId) { const sub = subjects.find(s => s.id === editingSubjectId); if(sub) { sub.roomId = roomId; sub.code = code;
         sub.name = name; sub.teacher = teacher; sub.teacher2 = teacher2; sub.credits = credit; sub.schedules = schedules;
         } } else { subjects.push({ id: generateId(), roomId, name, code, teacher, teacher2, credits: credit, schedules }); } saveData('full'); showToast("บันทึกสำเร็จ"); renderAdminTab(); closeSubjectModal();
+        };
+
+        window.downloadSubjectTemplate = function() {
+            if (!window.adminSelectedSubjectRoom || window.adminSelectedSubjectRoom === 'all') { showToast("กรุณาเลือกห้องก่อนโหลดฟอร์ม", "error"); return; }
+            const roomName = formatRoomName(window.adminSelectedSubjectRoom);
+            const ws_data = [
+                ["รหัสวิชา", "ชื่อวิชา", "ครู (หลัก)", "ครู (ร่วมสอน)", "หน่วยกิต", "ตารางเรียน (วัน-คาบ)"],
+                ["ว31101", "คณิตศาสตร์พื้นฐาน", "ครูสมใจ รักเรียน", "", "1.0", "จันทร์-1,พฤหัสบดี-3"],
+                ["", "เช็คแถวเช้า", "ครูสมใจ รักเรียน", "", "0.5", "จันทร์-0"],
+                [],
+                ["หมายเหตุ: ตารางเรียนใช้รูปแบบ วัน-คาบ คั่นด้วยจุลภาคหากมีหลายคาบ เช่น จันทร์-1,พฤหัสบดี-3"],
+                ["คาบที่ใช้ได้: 0=แถวเช้า, 1-4=คาบเช้า, 5-8=คาบบ่าย"],
+                ["ชื่อครู (หลัก) ต้องพิมพ์ตรงกับชื่อครูที่มีอยู่ในระบบเป๊ะ ไม่เช่นนั้นวิชาจะไม่ปรากฏในหน้าของครูท่านนั้น"]
+            ];
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); ws['!cols'] = [{wch: 12}, {wch: 28}, {wch: 22}, {wch: 22}, {wch: 10}, {wch: 32}];
+            const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Template");
+            XLSX.writeFile(wb, `แบบฟอร์มนำเข้ารายวิชา_${roomName}.xlsx`);
+            showToast("ดาวน์โหลดแบบฟอร์มรายวิชาสำเร็จ", "success");
+        };
+
+        window.handleImportSubjects = function(e) {
+            if (!window.adminSelectedSubjectRoom || window.adminSelectedSubjectRoom === 'all') { showToast("กรุณาเลือกห้องก่อนนำเข้า", "error"); e.target.value = ''; return; }
+            const targetRoom = window.adminSelectedSubjectRoom;
+            const file = e.target.files[0];
+            if (!file) return; showToast("กำลังอ่านไฟล์..."); const reader = new FileReader();
+            reader.onload = function(evt) {
+                try {
+                    const data = new Uint8Array(evt.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'}); const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
+                    let startIndex = (jsonData.length > 0 && (String(jsonData[0][0] || '').includes("รหัสวิชา") || String(jsonData[0][1] || '').includes("ชื่อวิชา"))) ? 1 : 0;
+                    let imported = 0, skipped = 0;
+                    for (let i = startIndex; i < jsonData.length; i++) {
+                        const row = jsonData[i];
+                        if (!row || !row[1] || !String(row[1]).trim()) continue;
+                        const name = String(row[1]).trim();
+                        if (name.startsWith('หมายเหตุ') || name.startsWith('คาบที่ใช้ได้') || name.startsWith('ชื่อครู')) continue;
+                        const code = String(row[0] || '').trim();
+                        const teacher = String(row[2] || '').trim();
+                        const teacher2 = String(row[3] || '').trim();
+                        const credits = parseFloat(row[4]) || 0.5;
+                        const schedules = parseScheduleString(row[5]);
+                        if (!teacher) { skipped++; continue; }
+                        const exists = code ? subjects.find(s => s.roomId === targetRoom && s.code && s.code === code) : subjects.find(s => s.roomId === targetRoom && s.name === name && s.teacher === teacher);
+                        if (exists) { exists.name = name; exists.code = code; exists.teacher = teacher; exists.teacher2 = teacher2; exists.credits = credits; if (schedules.length > 0) exists.schedules = schedules;
+                        } else { subjects.push({ id: generateId(), roomId: targetRoom, name, code, teacher, teacher2, credits, schedules }); } imported++;
+                    }
+                    if (imported > 0) { saveData('full');
+                        showToast(`นำเข้า ${imported} วิชา สำเร็จ!${skipped > 0 ? ' (ข้าม ' + skipped + ' แถวที่ไม่ระบุครู)' : ''}`); renderAdminTab(); } else { showToast("ไม่พบข้อมูลที่ถูกต้อง หรือไม่ได้ระบุชื่อครูในแถวใดเลย", "error");
+                    }
+                } catch (err) { showToast("เกิดข้อผิดพลาดในการอ่านไฟล์", "error");
+                } e.target.value = '';
+            }; reader.readAsArrayBuffer(file);
         };
 
         window.openStudentModal = function() { editingStudentId = null; document.getElementById('studentModalTitle').innerText = 'เพิ่มนักเรียนใหม่'; document.getElementById('newStuNum').value = ''; document.getElementById('newStuName').value = '';
