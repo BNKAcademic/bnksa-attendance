@@ -11,6 +11,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-datalabels/2.2.0/chartjs-plugin-datalabels.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Sarabun:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     
     <style>
@@ -145,7 +146,15 @@
             'โดดเรียน': { color: 'text-purple-700', bg: 'bg-purple-50', border: 'border-purple-200', activeBg: 'bg-purple-600', icon: 'fa-walking' }
         };
         const STATUS_HEX = { 'มา': '#10b981', 'ร่วมกิจกรรม': '#06b6d4', 'สาย': '#f59e0b', 'ลาป่วย': '#3b82f6', 'ลากิจ': '#6366f1', 'ขาด': '#f43f5e', 'โดดเรียน': '#9333ea' };
-        // ===== เครื่องมือสร้างกราฟ (Chart.js) รองรับ Dark Mode และมือถือ =====
+        if (typeof Chart !== 'undefined' && typeof ChartDataLabels !== 'undefined') { Chart.register(ChartDataLabels); }
+        // ===== เครื่องมือสร้างกราฟ (Chart.js) รองรับ Dark Mode และมือถือ พร้อมเปอร์เซ็นต์บนกราฟ =====
+        function percentLabelFormatter(value, context) {
+            const data = context.chart.data.datasets[context.datasetIndex].data;
+            const total = data.reduce((a, b) => a + (Number(b) || 0), 0);
+            if (!value || total === 0) return '';
+            const pct = Math.round((value / total) * 100);
+            return `${value} (${pct}%)`;
+        }
         function chartTextColor() { return document.documentElement.classList.contains('dark') ? '#cbd5e1' : '#475569'; }
         function chartGridColor() { return document.documentElement.classList.contains('dark') ? 'rgba(148,163,184,0.15)' : 'rgba(100,116,139,0.12)'; }
         function chartBorderBg() { return document.documentElement.classList.contains('dark') ? '#1e293b' : '#ffffff'; }
@@ -154,7 +163,8 @@
             const el = document.getElementById(canvasId); if (!el || typeof Chart === 'undefined') return;
             const labels = Object.keys(totals);
             new Chart(el, { type: 'bar', data: { labels, datasets: [{ label: 'จำนวน (ครั้ง)', data: labels.map(l => totals[l] || 0), backgroundColor: labels.map(l => STATUS_HEX[l]), borderRadius: 8, maxBarThickness: 46 }] },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { titleFont: { size: 12 }, bodyFont: { size: 12 } } },
+                options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 24 } }, plugins: { legend: { display: false }, tooltip: { titleFont: { size: 12 }, bodyFont: { size: 12 } },
+                    datalabels: { display: (ctx) => ctx.dataset.data[ctx.dataIndex] > 0, color: chartTextColor(), anchor: 'end', align: 'top', offset: 2, font: { weight: 'bold', size: isMobileView() ? 9 : 11 }, formatter: percentLabelFormatter } },
                     scales: { x: { ticks: { color: chartTextColor(), font: { weight: 'bold', size: isMobileView() ? 9 : 11 }, maxRotation: isMobileView() ? 60 : 0, minRotation: isMobileView() ? 60 : 0 }, grid: { display: false } }, y: { beginAtZero: true, ticks: { color: chartTextColor(), precision: 0, font: { size: 10 } }, grid: { color: chartGridColor() } } } } });
         }
         function makeStatusDoughnutChart(canvasId, totals) {
@@ -162,7 +172,8 @@
             const labels = Object.keys(totals).filter(l => (totals[l] || 0) > 0);
             if (labels.length === 0) { const ctx = el.getContext('2d'); ctx.font = '13px Sarabun'; ctx.fillStyle = chartTextColor(); ctx.textAlign = 'center'; ctx.fillText('ยังไม่มีข้อมูลในเดือนนี้', el.width / 2, el.height / 2); return; }
             new Chart(el, { type: 'doughnut', data: { labels, datasets: [{ data: labels.map(l => totals[l]), backgroundColor: labels.map(l => STATUS_HEX[l]), borderWidth: 2, borderColor: chartBorderBg() }] },
-                options: { responsive: true, maintainAspectRatio: false, cutout: '62%', plugins: { legend: { position: isMobileView() ? 'bottom' : 'right', labels: { color: chartTextColor(), font: { weight: 'bold', size: isMobileView() ? 10 : 11 }, padding: isMobileView() ? 10 : 14, boxWidth: 12 } } } } });
+                options: { responsive: true, maintainAspectRatio: false, cutout: '62%', plugins: { legend: { position: isMobileView() ? 'bottom' : 'right', labels: { color: chartTextColor(), font: { weight: 'bold', size: isMobileView() ? 10 : 11 }, padding: isMobileView() ? 10 : 14, boxWidth: 12 } },
+                    datalabels: { color: '#ffffff', textStrokeColor: 'rgba(0,0,0,0.35)', textStrokeWidth: 3, font: { weight: 'bold', size: isMobileView() ? 10 : 12 }, formatter: percentLabelFormatter } } } });
         }
         function computeSchoolMonthlyStats(month) {
             let raw = {}; students.forEach(st => raw[st.id] = {});
@@ -597,7 +608,9 @@
             const levelCtxEl = document.getElementById('schoolLevelChart');
             if (levelCtxEl && typeof Chart !== 'undefined') {
                 new Chart(levelCtxEl, { type: 'bar', data: { labels: [1,2,3,4,5,6].map(i => `ม.${i}`), datasets: [{ label: 'จำนวนนักเรียน', data: [1,2,3,4,5,6].map(i => levelCounts[i] || 0), backgroundColor: ['#3b82f6','#10b981','#f59e0b','#f43f5e','#a855f7','#06b6d4'], borderRadius: 8, maxBarThickness: 50 }] },
-                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: chartTextColor(), font: { weight: 'bold', size: isMobileView() ? 10 : 12 } }, grid: { display: false } }, y: { beginAtZero: true, ticks: { color: chartTextColor(), precision: 0 }, grid: { color: chartGridColor() } } } } });
+                    options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 24 } }, plugins: { legend: { display: false },
+                        datalabels: { display: (ctx) => ctx.dataset.data[ctx.dataIndex] > 0, color: chartTextColor(), anchor: 'end', align: 'top', offset: 2, font: { weight: 'bold', size: isMobileView() ? 10 : 12 }, formatter: percentLabelFormatter } },
+                        scales: { x: { ticks: { color: chartTextColor(), font: { weight: 'bold', size: isMobileView() ? 10 : 12 } }, grid: { display: false } }, y: { beginAtZero: true, ticks: { color: chartTextColor(), precision: 0 }, grid: { color: chartGridColor() } } } } });
             }
             makeStatusDoughnutChart('schoolStatusChart', totals);
         }
