@@ -165,8 +165,11 @@
     </nav>
 
 
-    <div id="announcementBar" class="hidden bg-amber-400 text-amber-900 text-center px-4 py-2.5 sm:py-3 text-xs sm:text-sm font-bold shadow-sm sticky top-16 sm:top-20 z-30">
-        <i class="fas fa-bullhorn mr-1.5"></i><span id="announcementText"></span>
+    <div id="announcementBar" class="hidden bg-gradient-to-r from-amber-50 to-orange-50 border-b-2 border-amber-300 sticky top-16 sm:top-20 z-30 shadow-sm">
+        <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2 sm:py-3 flex items-start sm:items-center gap-2 sm:gap-3">
+            <div class="w-6 h-6 sm:w-8 sm:h-8 bg-amber-400 text-white rounded-full flex items-center justify-center text-[10px] sm:text-sm shrink-0 shadow-sm"><i class="fas fa-bullhorn"></i></div>
+            <span id="announcementText" class="flex-1 min-w-0 text-amber-900 text-[11px] sm:text-sm font-bold leading-snug break-words"></span>
+        </div>
     </div>
 
     <main id="mainContent" class="flex-grow max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 py-6 sm:py-10 w-full"></main>
@@ -208,7 +211,7 @@
         let isAdmin = false, isDbInitialized = false, currentAdminTab = 'settings', currentRoomId = null, currentSubjectId = null;
         let editingTeacherId = null, editingSubjectId = null, editingStudentId = null;
         // Data models
-        let settings = { title: "ระบบเช็คชื่อนักเรียนอัจฉริยะ", faviconDataUrl: "", logoDataUrl: "", announcement: "", term: "1", year: "2567", roomCounts: { m1: 4, m2: 4, m3: 4, m4: 3, m5: 3, m6: 3 }, advisors: {}, staffs: {}, thresholds: { late: 4, absent: 4 } };
+        let settings = { title: "ระบบเช็คชื่อนักเรียนอัจฉริยะ", faviconDataUrl: "", logoDataUrl: "", announcement: "", announcementStart: "", announcementEnd: "", term: "1", year: "2567", roomCounts: { m1: 4, m2: 4, m3: 4, m4: 3, m5: 3, m6: 3 }, advisors: {}, staffs: {}, thresholds: { late: 4, absent: 4 } };
         let teachers = [], subjects = [], students = [], attendanceData = [], followUps = [];
         const statuses = {
             'มา': { color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200', activeBg: 'bg-emerald-500', icon: 'fa-check' },
@@ -418,8 +421,10 @@
                                     settings.logoDataUrl = data.settings.logoDataUrl;
                                     applyHeaderLogo();
                                 }
-                                if ((data.settings.announcement || '') !== (settings.announcement || '')) {
+                                if ((data.settings.announcement || '') !== (settings.announcement || '') || (data.settings.announcementStart || '') !== (settings.announcementStart || '') || (data.settings.announcementEnd || '') !== (settings.announcementEnd || '')) {
                                     settings.announcement = data.settings.announcement || '';
+                                    settings.announcementStart = data.settings.announcementStart || '';
+                                    settings.announcementEnd = data.settings.announcementEnd || '';
                                     updateAnnouncementBar();
                                 }
                             }
@@ -443,6 +448,8 @@
                     if (!settings.faviconDataUrl) settings.faviconDataUrl = "";
                     if (!settings.logoDataUrl) settings.logoDataUrl = "";
                     if (!settings.announcement) settings.announcement = "";
+                    if (!settings.announcementStart) settings.announcementStart = "";
+                    if (!settings.announcementEnd) settings.announcementEnd = "";
                     teachers = data.teachers || [];
                     subjects = data.subjects || []; students = data.students || []; attendanceData = data.attendanceData || []; followUps = data.followUps || [];
                     subjects = subjects.map(s => { if (s.day !== undefined && s.period !== undefined && !s.schedules) { s.credits = 0.5; s.schedules = [{ day: s.day, period: s.period }]; delete s.day; delete s.period; } return s; });
@@ -455,6 +462,7 @@
                 applyFavicon();
                 applyHeaderLogo();
                 updateAnnouncementBar();
+                setInterval(updateAnnouncementBar, 60000);
                 applyDarkModePreference();
                 // ตั้งค่าจุดเริ่มต้นของ history ให้เป็นหน้า dashboard เพื่อให้ปุ่ม Back ทำงานถูกต้องตั้งแต่แรก
                 try { history.replaceState({ view: 'dashboard' }, '', location.pathname + location.search); } catch (e) {}
@@ -543,7 +551,7 @@
                             if (data.settings.title) { settings.title = data.settings.title; document.getElementById('navTitle').innerText = settings.title; document.title = settings.title; }
                             if (data.settings.faviconDataUrl !== undefined) { settings.faviconDataUrl = data.settings.faviconDataUrl; applyFavicon(); }
                             if (data.settings.logoDataUrl !== undefined) { settings.logoDataUrl = data.settings.logoDataUrl; applyHeaderLogo(); }
-                            settings.announcement = data.settings.announcement || ''; updateAnnouncementBar();
+                            settings.announcement = data.settings.announcement || ''; settings.announcementStart = data.settings.announcementStart || ''; settings.announcementEnd = data.settings.announcementEnd || ''; updateAnnouncementBar();
                         }
                     }
                 }
@@ -553,12 +561,19 @@
             if (icon) icon.classList.remove('fa-spin');
         };
 
+        function isAnnouncementActive() {
+            const text = (settings.announcement || '').trim();
+            if (!text) return false;
+            const now = new Date();
+            if (settings.announcementStart) { const start = new Date(settings.announcementStart); if (!isNaN(start) && now < start) return false; }
+            if (settings.announcementEnd) { const end = new Date(settings.announcementEnd); if (!isNaN(end) && now > end) return false; }
+            return true;
+        }
         function updateAnnouncementBar() {
             const bar = document.getElementById('announcementBar');
             const textEl = document.getElementById('announcementText');
-            const text = (settings.announcement || '').trim();
             if (!bar || !textEl) return;
-            if (text) { textEl.innerText = text; bar.classList.remove('hidden'); }
+            if (isAnnouncementActive()) { textEl.innerText = (settings.announcement || '').trim(); bar.classList.remove('hidden'); }
             else { bar.classList.add('hidden'); textEl.innerText = ''; }
         }
 
@@ -1061,7 +1076,7 @@
         function renderAdminTab() {
             const content = document.getElementById('adminContent');
             if (currentAdminTab === 'settings') {
-                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-heading text-indigo-500"></i> ชื่อหัวเรื่องระบบ</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100"><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ชื่อระบบ (แสดงที่แถบด้านบน)</label><input type="text" id="setSiteTitle" value="${settings.title || 'ระบบเช็คชื่อนักเรียนอัจฉริยะ'}" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="เช่น ระบบเช็คชื่อนักเรียนอัจฉริยะ"></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-icons text-indigo-500"></i> ไอคอนเว็บไซต์ (Favicon)</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 flex items-center gap-4 flex-wrap"><img id="faviconPreview" src="${settings.faviconDataUrl || 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/graduation-cap.svg'}" class="w-14 h-14 rounded-xl border border-slate-200 bg-white object-contain p-1 shadow-sm"><div class="flex-1 min-w-[200px]"><input type="file" id="faviconFileInput" accept="image/*" class="hidden" onchange="window.handleFaviconUpload(event)"><button onclick="document.getElementById('faviconFileInput').click()" class="bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors"><i class="fas fa-upload"></i> เลือกรูปไอคอนใหม่</button><p class="text-[10px] sm:text-xs text-slate-400 mt-1.5 font-medium">แนะนำไฟล์ภาพสี่เหลี่ยมจัตุรัส ระบบจะปรับขนาดให้อัตโนมัติ และบันทึกทันทีที่เลือกไฟล์</p></div></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-image text-indigo-500"></i> โลโก้บนแถบหัวเว็บไซต์</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 flex items-center gap-4 flex-wrap"><div id="navLogoPreviewBox" class="w-14 h-14 rounded-xl border border-slate-200 bg-white flex items-center justify-center overflow-hidden shadow-sm">${settings.logoDataUrl ? `<img id="navLogoPreview" src="${settings.logoDataUrl}" class="w-full h-full object-cover">` : `<i class="fas fa-graduation-cap text-indigo-400 text-xl" id="navLogoPreview"></i>`}</div><div class="flex-1 min-w-[200px]"><input type="file" id="navLogoFileInput" accept="image/*" class="hidden" onchange="window.handleHeaderLogoUpload(event)"><button onclick="document.getElementById('navLogoFileInput').click()" class="bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors"><i class="fas fa-upload"></i> เลือกรูปโลโก้ใหม่</button>${settings.logoDataUrl ? `<button onclick="window.removeHeaderLogo()" class="ml-2 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-600 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors"><i class="fas fa-times"></i> ลบโลโก้</button>` : ''}<p class="text-[10px] sm:text-xs text-slate-400 mt-1.5 font-medium">แสดงแทนไอคอนหมวกบัณฑิตที่มุมซ้ายบนของเว็บ บันทึกทันทีที่เลือกไฟล์</p></div></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-bullhorn text-indigo-500"></i> ประกาศแจ้งเตือน (แสดงบนสุดของเว็บ)</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100"><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ข้อความประกาศ (เว้นว่างไว้เพื่อซ่อนแถบประกาศ)</label><textarea id="setAnnouncement" rows="2" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none resize-none" placeholder="เช่น ปิดเรียนวันที่ 5 กันยายน เนื่องในกิจกรรมกีฬาสี">${settings.announcement || ''}</textarea></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-sliders-h text-indigo-500"></i> ข้อมูลภาคเรียน</h3><div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100"><div><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ภาคเรียน</label><input type="text" id="setTerm" value="${settings.term}" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"></div><div><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ปีการศึกษา</label><input type="text" id="setYear" value="${settings.year}" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"></div></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-cubes text-indigo-500"></i> จำนวนห้อง (ต่อชั้นปี)</h3><div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3 mb-6">`;
+                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-heading text-indigo-500"></i> ชื่อหัวเรื่องระบบ</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100"><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ชื่อระบบ (แสดงที่แถบด้านบน)</label><input type="text" id="setSiteTitle" value="${settings.title || 'ระบบเช็คชื่อนักเรียนอัจฉริยะ'}" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="เช่น ระบบเช็คชื่อนักเรียนอัจฉริยะ"></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-icons text-indigo-500"></i> ไอคอนเว็บไซต์ (Favicon)</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 flex items-center gap-4 flex-wrap"><img id="faviconPreview" src="${settings.faviconDataUrl || 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/graduation-cap.svg'}" class="w-14 h-14 rounded-xl border border-slate-200 bg-white object-contain p-1 shadow-sm"><div class="flex-1 min-w-[200px]"><input type="file" id="faviconFileInput" accept="image/*" class="hidden" onchange="window.handleFaviconUpload(event)"><button onclick="document.getElementById('faviconFileInput').click()" class="bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors"><i class="fas fa-upload"></i> เลือกรูปไอคอนใหม่</button><p class="text-[10px] sm:text-xs text-slate-400 mt-1.5 font-medium">แนะนำไฟล์ภาพสี่เหลี่ยมจัตุรัส ระบบจะปรับขนาดให้อัตโนมัติ และบันทึกทันทีที่เลือกไฟล์</p></div></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-image text-indigo-500"></i> โลโก้บนแถบหัวเว็บไซต์</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 flex items-center gap-4 flex-wrap"><div id="navLogoPreviewBox" class="w-14 h-14 rounded-xl border border-slate-200 bg-white flex items-center justify-center overflow-hidden shadow-sm">${settings.logoDataUrl ? `<img id="navLogoPreview" src="${settings.logoDataUrl}" class="w-full h-full object-cover">` : `<i class="fas fa-graduation-cap text-indigo-400 text-xl" id="navLogoPreview"></i>`}</div><div class="flex-1 min-w-[200px]"><input type="file" id="navLogoFileInput" accept="image/*" class="hidden" onchange="window.handleHeaderLogoUpload(event)"><button onclick="document.getElementById('navLogoFileInput').click()" class="bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors"><i class="fas fa-upload"></i> เลือกรูปโลโก้ใหม่</button>${settings.logoDataUrl ? `<button onclick="window.removeHeaderLogo()" class="ml-2 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-600 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors"><i class="fas fa-times"></i> ลบโลโก้</button>` : ''}<p class="text-[10px] sm:text-xs text-slate-400 mt-1.5 font-medium">แสดงแทนไอคอนหมวกบัณฑิตที่มุมซ้ายบนของเว็บ บันทึกทันทีที่เลือกไฟล์</p></div></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-bullhorn text-amber-500"></i> ประกาศแจ้งเตือน (แสดงบนสุดของเว็บ)</h3><div class="mb-6 bg-amber-50/70 p-3 sm:p-4 rounded-xl border border-amber-200 space-y-3">${isAnnouncementActive() ? `<div class="flex items-center gap-1.5 text-[10px] sm:text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full w-max"><i class="fas fa-circle text-[6px]"></i> กำลังแสดงอยู่ตอนนี้</div>` : (settings.announcement ? `<div class="flex items-center gap-1.5 text-[10px] sm:text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-full w-max"><i class="fas fa-clock"></i> มีข้อความอยู่ แต่ยังไม่อยู่ในช่วงเวลาที่ตั้งไว้ (หรือหมดเวลาแล้ว)</div>` : '')}<div><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ข้อความประกาศ (เว้นว่างไว้เพื่อซ่อนแถบประกาศ)</label><textarea id="setAnnouncement" rows="2" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-amber-400 outline-none resize-none" placeholder="เช่น ปิดเรียนวันที่ 5 กันยายน เนื่องในกิจกรรมกีฬาสี">${settings.announcement || ''}</textarea></div><div class="grid grid-cols-1 sm:grid-cols-2 gap-3"><div><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">เริ่มแสดงตั้งแต่ (เว้นว่าง = แสดงทันที)</label><input type="datetime-local" id="setAnnouncementStart" value="${settings.announcementStart || ''}" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-amber-400 outline-none"></div><div><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">สิ้นสุดการแสดง (เว้นว่าง = ไม่มีวันหมดเวลา)</label><input type="datetime-local" id="setAnnouncementEnd" value="${settings.announcementEnd || ''}" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-amber-400 outline-none"></div></div><div class="flex flex-wrap gap-2 pt-1"><button onclick="window.saveAnnouncementSettings()" class="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกประกาศ</button>${settings.announcement ? `<button onclick="window.clearAnnouncementNow()" class="bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-600 px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-trash-alt"></i> ลบประกาศทันที</button>` : ''}</div></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-sliders-h text-indigo-500"></i> ข้อมูลภาคเรียน</h3><div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100"><div><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ภาคเรียน</label><input type="text" id="setTerm" value="${settings.term}" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"></div><div><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ปีการศึกษา</label><input type="text" id="setYear" value="${settings.year}" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"></div></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-cubes text-indigo-500"></i> จำนวนห้อง (ต่อชั้นปี)</h3><div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3 mb-6">`;
                 for(let i=1; i<=6; i++) { html += `<div class="bg-slate-50 p-2 sm:p-3 rounded-lg border border-slate-100 text-center"><label class="block font-black text-[10px] sm:text-xs text-slate-700 mb-1 sm:mb-2">ม.${i}</label><input type="number" id="setCountM${i}" value="${settings.roomCounts[`m${i}`]}" min="0" max="15" class="w-full text-center py-1.5 sm:py-2 rounded border border-slate-200 font-bold text-indigo-600 outline-none text-base sm:text-sm"></div>`;
                 }
                 html += `</div><h3 class="text-lg sm:text-xl font-extrabold text-rose-600 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-bell"></i> ตั้งค่าการแจ้งเตือนติดตาม (ต่อเดือน)</h3><div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6 bg-rose-50 p-3 sm:p-4 rounded-xl border border-rose-100 shadow-inner"><div><label class="block text-[10px] sm:text-xs font-bold text-rose-700 mb-1">สายเกิน (ครั้ง)</label><input type="number" id="setLateThresh" value="${settings.thresholds?.late || 4}" class="w-full bg-white border border-rose-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none text-rose-700"></div><div><label class="block text-[10px] sm:text-xs font-bold text-rose-700 mb-1">ขาดเกิน (ครั้ง)</label><input type="number" id="setAbsentThresh" value="${settings.thresholds?.absent || 4}" class="w-full bg-white border border-rose-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none text-rose-700"></div></div><div class="flex justify-end mb-6"><button onclick="window.saveAdminSettings()" class="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-bold shadow-sm transition-colors text-sm"><i class="fas fa-save"></i> บันทึกการตั้งค่าทั้งหมด</button></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-id-badge text-indigo-500"></i> ครูที่ปรึกษา และ เจ้าหน้าที่</h3><div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-8">`;
@@ -1139,7 +1154,6 @@
 
         function saveAdminSettings() {
             settings.title = document.getElementById('setSiteTitle').value.trim() || 'ระบบเช็คชื่อนักเรียนอัจฉริยะ';
-            settings.announcement = document.getElementById('setAnnouncement').value.trim();
             settings.term = document.getElementById('setTerm').value;
             settings.year = document.getElementById('setYear').value;
             for(let i=1; i<=6; i++) { settings.roomCounts[`m${i}`] = parseInt(document.getElementById(`setCountM${i}`).value) || 0;
@@ -1148,9 +1162,28 @@
             document.getElementById('navTitle').innerText = settings.title;
             document.title = settings.title;
             document.getElementById('navSubtitle').innerText = `ภาคเรียนที่ ${settings.term} / ${settings.year}`;
-            updateAnnouncementBar();
             saveData('full'); showToast("บันทึกโครงสร้างและการแจ้งเตือนเรียบร้อย"); renderAdminTab();
         }
+
+        // บันทึกประกาศแจ้งเตือน (แยกจากการตั้งค่าหลัก) พร้อมช่วงเวลาที่ต้องการให้แสดง
+        window.saveAnnouncementSettings = function() {
+            const text = document.getElementById('setAnnouncement').value.trim();
+            const start = document.getElementById('setAnnouncementStart').value || '';
+            const end = document.getElementById('setAnnouncementEnd').value || '';
+            if (start && end && new Date(end) < new Date(start)) { showToast("เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่มต้น", "error"); return; }
+            settings.announcement = text; settings.announcementStart = start; settings.announcementEnd = end;
+            updateAnnouncementBar();
+            saveData('full'); showToast("บันทึกประกาศเรียบร้อย"); renderAdminTab();
+        };
+
+        // ลบประกาศทันที (เฉพาะแอดมิน)
+        window.clearAnnouncementNow = function() {
+            showConfirm("ลบประกาศ", "ต้องการลบข้อความประกาศนี้ทันทีใช่หรือไม่?", () => {
+                settings.announcement = ''; settings.announcementStart = ''; settings.announcementEnd = '';
+                updateAnnouncementBar();
+                saveData('full'); showToast("ลบประกาศแล้ว"); renderAdminTab();
+            });
+        };
 
         // อัปโหลดไอคอนเว็บไซต์ (Favicon) - เฉพาะแอดมิน ปรับขนาดภาพให้เล็กลงก่อนบันทึกเพื่อไม่ให้ข้อมูลหนักเกินไป
         window.handleFaviconUpload = function(event) {
