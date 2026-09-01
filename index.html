@@ -499,27 +499,48 @@
             } catch (error) { document.getElementById('mainContent').innerHTML = '<div class="text-center p-10 sm:p-20 text-rose-500 font-bold text-lg sm:text-2xl bg-white rounded-3xl shadow-sm border border-rose-200 mt-10"><i class="fas fa-exclamation-triangle mb-4 text-4xl sm:text-5xl"></i><br>ไม่สามารถเชื่อมต่อฐานข้อมูลได้</div>'; }
         };
 
+        // รวม log ของเครื่องนี้ (local) เข้ากับ log ล่าสุดบนเซิร์ฟเวอร์ (remote) แบบไม่ทับกัน
+        function mergeLogsArrays(remote, local) {
+            const map = new Map();
+            (remote || []).forEach(l => map.set(l.id, l));
+            (local || []).forEach(l => map.set(l.id, l));
+            let merged = Array.from(map.values());
+            merged.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            if (merged.length > 500) merged = merged.slice(merged.length - 500);
+            return merged;
+        }
+
+        // ===== บันทึกข้อมูลแบบ Real-time รองรับการบันทึกพร้อมกันจากหลายอุปกรณ์ =====
+        // การเช็คชื่อ/ติดตามนักเรียน/ล้างข้อมูล จะส่งเฉพาะ "รายการที่เปลี่ยนแปลง" ไปให้ฝั่งเซิร์ฟเวอร์ผสานเข้ากับข้อมูลล่าสุดเองแบบอะตอมมิก
+        // (ล็อกการเขียนไว้ฝั่ง Apps Script ด้วย LockService กันข้อมูลชนกันเวลาเช็คชื่อพร้อมกันหลายห้อง/หลายวิชา)
         async function saveData(action = 'full', payload = null) {
             try {
-                let dataToSave = { settings, teachers, subjects, students, attendanceData, followUps, logs };
-                if (GOOGLE_APP_SCRIPT_URL !== "YOUR_WEB_APP_URL_HERE") {
+                if (GOOGLE_APP_SCRIPT_URL === "YOUR_WEB_APP_URL_HERE") return;
+                if (action === 'attendance' && payload) {
+                    const idx = attendanceData.findIndex(a => a.subjectId === payload.subjectId && a.date === payload.date && String(a.period) === String(payload.period));
+                    if (idx >= 0) attendanceData[idx] = payload; else attendanceData.push(payload);
+                    await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'upsert_attendance', record: payload }) });
+                } else if (action === 'followup' && payload) {
+                    followUps.push(payload);
+                    await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'upsert_followup', record: payload }) });
+                } else if (action === 'reset_subject' && payload) {
+                    attendanceData = attendanceData.filter(a => a.subjectId !== payload);
+                    await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_subject_attendance', subjectId: payload }) });
+                } else if (action === 'reset_all') {
+                    attendanceData = []; followUps = [];
+                    await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_all_attendance' }) });
+                } else {
+                    // 'full' - ใช้สำหรับตั้งค่า/ครู/วิชา/นักเรียน/ผู้ใช้งาน ฯลฯ ยังคง fetch ข้อมูลล่าสุดมาผสาน attendanceData/followUps/logs ก่อนเขียนทับเสมอ กันไม่ให้ไปทับข้อมูลที่ถูกเช็คชื่อพร้อมกันจากอุปกรณ์อื่น
+                    let dataToSave = { settings, teachers, subjects, students, attendanceData, followUps, logs };
                     const response = await fetch(GOOGLE_APP_SCRIPT_URL);
                     const latestData = await response.json();
                     if (latestData && latestData.attendanceData) {
-                        if (action === 'attendance' && payload) {
-                            const existingIdx = latestData.attendanceData.findIndex(a => a.subjectId === payload.subjectId && a.date === payload.date && String(a.period) === String(payload.period));
-                            if (existingIdx >= 0) latestData.attendanceData[existingIdx] = payload; else latestData.attendanceData.push(payload);
-                            attendanceData = latestData.attendanceData; dataToSave = latestData; dataToSave.followUps = followUps; dataToSave.logs = logs;
-                        } else if (action === 'reset_subject' && payload) {
-                            latestData.attendanceData = latestData.attendanceData.filter(a => a.subjectId !== payload);
-                            attendanceData = latestData.attendanceData; dataToSave = latestData; dataToSave.followUps = followUps; dataToSave.logs = logs;
-                        } else if (action === 'reset_all') {
-                            latestData.attendanceData = [];
-                            attendanceData = []; latestData.followUps = []; followUps = []; dataToSave = latestData; dataToSave.logs = logs;
-                        } else if (action === 'full') { dataToSave.attendanceData = latestData.attendanceData; attendanceData = latestData.attendanceData; }
+                        dataToSave.attendanceData = latestData.attendanceData; attendanceData = latestData.attendanceData;
+                        dataToSave.followUps = latestData.followUps || followUps; followUps = dataToSave.followUps;
+                        dataToSave.logs = mergeLogsArrays(latestData.logs, logs); logs = dataToSave.logs;
                     }
+                    await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(dataToSave) });
                 }
-                await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(dataToSave) });
             } catch (e) { console.error("Save Error", e); }
         }
 
@@ -1138,7 +1159,7 @@
 
         window.markFollowUp = async function(studentId, month) {
             showConfirm("ยืนยันการบันทึก", "ยืนยันว่าครูที่ปรึกษาได้ทำการติดตามนักเรียนคนนี้แล้ว?", async () => {
-                showToast("กำลังบันทึกข้อมูล...", "info"); followUps.push({ studentId, month, timestamp: new Date().toISOString() }); await saveData('full'); showToast("บันทึกติดตามเรียบร้อยแล้ว", "success"); if (currentRoomId) openRoomSummary(currentRoomId, month, 'monthly');
+                showToast("กำลังบันทึกข้อมูล... (อัปเดตแบบเรียลไทม์)", "info"); await saveData('followup', { studentId, month, timestamp: new Date().toISOString() }); showToast("บันทึกติดตามเรียบร้อยแล้ว", "success"); if (currentRoomId) openRoomSummary(currentRoomId, month, 'monthly');
             });
         };
 
@@ -1449,7 +1470,7 @@
                 };
                 const uniqueUsers = [...new Set(logs.map(l => l.name))].sort((a,b) => a.localeCompare(b));
                 const isSuperAdminLogs = currentUser && currentUser.role === 'super_admin';
-                let html = `<div class="flex justify-between items-center mb-4 flex-wrap gap-2"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-history text-indigo-500"></i> ประวัติการแก้ไข (Log)</h3><div class="flex gap-1.5"><button onclick="window.refreshData()" class="bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-sync-alt"></i> รีเฟรช Log</button>${isSuperAdminLogs && logs.length > 0 ? `<button onclick="window.clearAllLogs()" class="bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-600 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-trash-alt"></i> ล้างประวัติ Log ทั้งหมด</button>` : ''}</div></div>`;
+                let html = `<div class="flex justify-between items-center mb-4 flex-wrap gap-2"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-history text-indigo-500"></i> Log</h3><div class="flex gap-1.5"><button onclick="window.refreshLogView(this)" class="bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-sync-alt" id="logRefreshIcon"></i> รีเฟรช Log</button>${isSuperAdminLogs && logs.length > 0 ? `<button onclick="window.clearAllLogs()" class="bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-600 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-trash-alt"></i> ล้างประวัติ Log ทั้งหมด</button>` : ''}</div></div>`;
                 html += `<div class="flex flex-wrap gap-1.5 mb-3">${Object.entries(catMeta).map(([key, m]) => `<button onclick="window.filterLogCategory('${key}')" class="px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-bold border transition-colors flex items-center gap-1.5 ${window.logFilterCategory === key ? `bg-${m.color}-600 text-white border-${m.color}-600` : `bg-white text-slate-600 border-slate-200 hover:bg-slate-50`}"><i class="fas ${m.icon}"></i> ${m.label}</button>`).join('')}</div>`;
                 if (window.logFilterCategory === 'account') { html += `<div class="mb-3 flex items-start gap-2 bg-purple-50 border border-purple-200 text-purple-700 rounded-lg px-3 py-2.5"><i class="fas fa-info-circle mt-0.5"></i><span class="text-[10px] sm:text-xs font-bold leading-relaxed">ระบบจะออกจากระบบให้อัตโนมัติหากไม่มีการใช้งานเกิน 30 นาที (เพื่อความปลอดภัยของบัญชี) เหตุการณ์นี้จะถูกบันทึกเป็น "ออกจากระบบอัตโนมัติ (หมดเวลา)" ในหมวดนี้เช่นกัน</span></div>`; }
                 html += `<div class="mb-4 flex items-center gap-2 flex-wrap"><label class="text-[10px] sm:text-xs font-bold text-slate-500 flex items-center gap-1.5"><i class="fas fa-user"></i> กรองเฉพาะบัญชี:</label><select onchange="window.filterLogUser(this.value)" class="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[10px] sm:text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-400"><option value="all" ${window.logFilterUser === 'all' ? 'selected' : ''}>ทุกบัญชี</option>${uniqueUsers.map(u => `<option value="${u}" ${window.logFilterUser === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>`;
@@ -1474,6 +1495,12 @@
         }
         window.filterLogCategory = function(cat) { window.logFilterCategory = cat; renderAdminTab(); };
         window.filterLogUser = function(name) { window.logFilterUser = name; renderAdminTab(); };
+        window.refreshLogView = async function(btn) {
+            const icon = document.getElementById('logRefreshIcon');
+            if (icon) icon.classList.add('fa-spin');
+            if (btn) btn.disabled = true;
+            await window.refreshData();
+        };
         window.clearAllLogs = function() {
             if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่ล้างประวัติ Log ได้", "error"); return; }
             showConfirm("ล้างประวัติ Log ทั้งหมด", "ประวัติการแก้ไขทั้งหมดที่บันทึกไว้จะถูกลบอย่างถาวรและไม่สามารถกู้คืนได้ คุณแน่ใจหรือไม่?", () => {
