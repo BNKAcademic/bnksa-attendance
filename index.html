@@ -212,7 +212,7 @@
         let isAdmin = false, isDbInitialized = false, currentAdminTab = 'settings', currentRoomId = null, currentSubjectId = null;
         let editingTeacherId = null, editingSubjectId = null, editingStudentId = null, editingUserId = null;
         // Data models
-        let settings = { title: "ระบบเช็คชื่อนักเรียนอัจฉริยะ", faviconDataUrl: "", logoDataUrl: "", announcement: "", announcementStart: "", announcementEnd: "", term: "1", year: "2567", roomCounts: { m1: 4, m2: 4, m3: 4, m4: 3, m5: 3, m6: 3 }, advisors: {}, staffs: {}, thresholds: { late: 4, absent: 4 }, storageLimitChars: 50000, users: [{ id: 'super_admin_root', username: 'BNKAdmin', password: '042499078', name: 'ผู้ดูแลระบบหลัก', role: 'super_admin', createdAt: new Date().toISOString() }] };
+        let settings = { title: "ระบบเช็คชื่อนักเรียนอัจฉริยะ", faviconDataUrl: "", logoDataUrl: "", announcement: "", announcementStart: "", announcementEnd: "", term: "1", year: "2567", roomCounts: { m1: 4, m2: 4, m3: 4, m4: 3, m5: 3, m6: 3 }, advisors: {}, staffs: {}, thresholds: { late: 4, absent: 4 }, storageLimitChars: 8000000, users: [{ id: 'super_admin_root', username: 'BNKAdmin', password: '042499078', name: 'ผู้ดูแลระบบหลัก', role: 'super_admin', createdAt: new Date().toISOString() }] };
         let teachers = [], subjects = [], students = [], attendanceData = [], followUps = [], logs = [];
         let currentUser = null;
         const statuses = {
@@ -455,7 +455,8 @@
                     if (!settings.users || settings.users.length === 0) {
                         settings.users = [{ id: 'super_admin_root', username: 'BNKAdmin', password: '042499078', name: 'ผู้ดูแลระบบหลัก', role: 'super_admin', createdAt: new Date().toISOString() }];
                     }
-                    if (!settings.storageLimitChars) settings.storageLimitChars = 50000;
+                    // แก้ไขค่าเริ่มต้นเดิมที่อ้างอิงผิด (Google Sheets cell) ให้ตรงกับความจริง (Drive file ผ่าน DriveApp.createFile ซึ่งจำกัดที่ 10MB)
+                    if (!settings.storageLimitChars || settings.storageLimitChars === 50000) settings.storageLimitChars = 8000000;
                     teachers = data.teachers || [];
                     subjects = data.subjects || []; students = data.students || []; attendanceData = data.attendanceData || []; followUps = data.followUps || []; logs = data.logs || [];
                     subjects = subjects.map(s => { if (s.day !== undefined && s.period !== undefined && !s.schedules) { s.credits = 0.5; s.schedules = [{ day: s.day, period: s.period }]; delete s.day; delete s.period; } return s; });
@@ -1168,7 +1169,11 @@
                     { label: 'ประวัติ Log', icon: 'fa-history', color: 'bg-cyan-400', bytes: new Blob([JSON.stringify(logs)]).size },
                     { label: 'โลโก้ + ไอคอนเว็บไซต์', icon: 'fa-image', color: 'bg-rose-400', bytes: new Blob([JSON.stringify({a: settings.faviconDataUrl, b: settings.logoDataUrl})]).size },
                 ];
-                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-hdd text-indigo-500"></i> ขนาดข้อมูลที่ใช้ไป</h3><div class="mb-4 bg-slate-50 p-4 sm:p-6 rounded-2xl border border-slate-100"><div class="flex justify-between items-end mb-2"><div><span class="text-2xl sm:text-3xl font-black text-slate-800">${fmtSize(totalBytes)}</span><span class="text-slate-400 font-bold text-xs sm:text-sm ml-1">ใช้ไปแล้ว จากขีดจำกัด ${limitChars.toLocaleString()} ตัวอักษร</span></div><span class="text-lg sm:text-2xl font-black ${usagePct >= 90 ? 'text-rose-500' : (usagePct >= 70 ? 'text-amber-500' : 'text-emerald-500')}">${usagePct}%</span></div><div class="w-full h-4 sm:h-5 bg-slate-200 rounded-full overflow-hidden shadow-inner"><div class="${barColor} h-full rounded-full transition-all duration-700 shadow-sm" style="width: ${usagePct}%"></div></div><div class="flex items-center gap-2 mt-3 border rounded-lg px-3 py-2 ${statusBg}"><i class="fas ${statusIcon}"></i><span class="text-[11px] sm:text-sm font-bold">${statusMsg}</span></div>${isSuperAdminDS ? `<div class="flex flex-wrap items-end gap-2 mt-4 pt-4 border-t border-slate-200"><div class="flex-1 min-w-[160px]"><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ตั้งขีดจำกัดพื้นที่จัดเก็บ (ตัวอักษร)</label><input type="number" id="setStorageLimit" value="${limitChars}" min="1000" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"></div><button onclick="window.saveStorageLimit()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกขีดจำกัด</button></div><p class="text-[10px] sm:text-xs text-slate-400 font-medium mt-2"><i class="fas fa-info-circle"></i> ค่าเริ่มต้นอ้างอิงขีดจำกัด 50,000 ตัวอักษรต่อเซลล์ของ Google Sheets (กรณีระบบหลังบ้านเก็บข้อมูลแบบ JSON ในเซลล์เดียว) หากระบบหลังบ้านของท่านมีขีดจำกัดจริงต่างออกไป สามารถปรับตัวเลขนี้ให้ตรงกับของจริงได้</p>` : ''}<div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-5">${sizeBreakdown.sort((a,b)=>b.bytes-a.bytes).map(s => `<div class="flex items-center gap-2.5 bg-white border border-slate-200 rounded-lg px-3 py-2"><div class="w-7 h-7 ${s.color} text-white rounded-lg flex items-center justify-center text-[10px] shrink-0"><i class="fas ${s.icon}"></i></div><span class="flex-1 text-xs sm:text-sm font-bold text-slate-700 truncate">${s.label}</span><span class="text-xs sm:text-sm font-black text-slate-500">${fmtSize(s.bytes)}</span></div>`).join('')}</div></div>`;
+                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-hdd text-indigo-500"></i> ขนาดข้อมูลที่ใช้ไป</h3><div class="mb-4 bg-slate-50 p-4 sm:p-6 rounded-2xl border border-slate-100"><div class="flex justify-between items-end mb-2"><div><span class="text-2xl sm:text-3xl font-black text-slate-800">${fmtSize(totalBytes)}</span><span class="text-slate-400 font-bold text-xs sm:text-sm ml-1">ใช้ไปแล้ว จากขีดจำกัด ${limitChars.toLocaleString()} ตัวอักษร</span></div><span class="text-lg sm:text-2xl font-black ${usagePct >= 90 ? 'text-rose-500' : (usagePct >= 70 ? 'text-amber-500' : 'text-emerald-500')}">${usagePct}%</span></div><div class="w-full h-4 sm:h-5 bg-slate-200 rounded-full overflow-hidden shadow-inner"><div class="${barColor} h-full rounded-full transition-all duration-700 shadow-sm" style="width: ${usagePct}%"></div></div><div class="flex items-center gap-2 mt-3 border rounded-lg px-3 py-2 ${statusBg}"><i class="fas ${statusIcon}"></i><span class="text-[11px] sm:text-sm font-bold">${statusMsg}</span></div>${isSuperAdminDS ? `<div class="flex flex-wrap items-end gap-2 mt-4 pt-4 border-t border-slate-200"><div class="flex-1 min-w-[160px]"><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ตั้งขีดจำกัดพื้นที่จัดเก็บ (ตัวอักษร)</label><input type="number" id="setStorageLimit" value="${limitChars}" min="1000" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"></div><button onclick="window.saveStorageLimit()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกขีดจำกัด</button></div><p class="text-[10px] sm:text-xs text-slate-400 font-medium mt-2"><i class="fas fa-info-circle"></i> ค่าเริ่มต้นอ้างอิงขีดจำกัด 10MB (ประมาณ 10,000,000 ตัวอักษร) ของ DriveApp.createFile() ในกรณีระบบหลังบ้านเก็บฐานข้อมูลเป็นไฟล์ JSON บน Google Drive (เผื่อระยะปลอดภัยไว้ที่ 8,000,000 ตัวอักษร) หากระบบหลังบ้านของท่านมีขีดจำกัดจริงต่างออกไป สามารถปรับตัวเลขนี้ให้ตรงกับของจริงได้</p>` : ''}<div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-5">${sizeBreakdown.sort((a,b)=>b.bytes-a.bytes).map(s => `<div class="flex items-center gap-2.5 bg-white border border-slate-200 rounded-lg px-3 py-2"><div class="w-7 h-7 ${s.color} text-white rounded-lg flex items-center justify-center text-[10px] shrink-0"><i class="fas ${s.icon}"></i></div><span class="flex-1 text-xs sm:text-sm font-bold text-slate-700 truncate">${s.label}</span><span class="text-xs sm:text-sm font-black text-slate-500">${fmtSize(s.bytes)}</span></div>`).join('')}</div></div>`;
+
+                // ===== 1.5 เก็บถาวรข้อมูลเช็คชื่อเก่า (ลดขนาดข้อมูลระยะยาว) =====
+                const oldestDate = attendanceData.reduce((min, a) => (a.date && (!min || a.date < min)) ? a.date : min, null);
+                html += `<div class="mb-8 bg-purple-50/60 p-4 sm:p-6 rounded-2xl border border-purple-200"><h3 class="text-base sm:text-lg font-extrabold text-purple-800 mb-2 flex items-center gap-2"><i class="fas fa-archive text-purple-500"></i> เก็บถาวรข้อมูลเช็คชื่อเก่า (เก็บด่วน/นอกรอบ)</h3><p class="text-[10px] sm:text-xs text-purple-600 font-medium mb-3">ระบบหลังบ้านมีนโยบายเก็บถาวรข้อมูลเช็คชื่อที่เก่ากว่า 2 ปีให้อัตโนมัติอยู่แล้วทุกครั้งที่บันทึกข้อมูล เครื่องมือนี้ไว้ใช้เผื่อต้องการเก็บถาวรข้อมูลเร็วกว่ากำหนด หรือกำหนดวันที่เอง เช่น ก่อนขึ้นเทอมใหม่${oldestDate ? ` (ข้อมูลเก่าสุดที่มีอยู่: ${oldestDate.split('-').reverse().join('/')})` : ''}</p><div class="flex flex-wrap items-end gap-2"><div class="flex-1 min-w-[160px]"><label class="block text-[10px] sm:text-xs font-bold text-purple-700 mb-1">เก็บถาวรข้อมูลที่บันทึกก่อนวันที่</label><input type="date" id="archiveCutoffDate" onchange="window.updateArchivePreview()" class="w-full bg-white border border-purple-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-purple-400 outline-none"></div><button onclick="window.archiveOldAttendance()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-file-download"></i> ส่งออก + เก็บถาวร</button></div><p id="archivePreviewText" class="text-[10px] sm:text-xs text-purple-500 font-bold mt-2">เลือกวันที่เพื่อดูจำนวนข้อมูลที่จะถูกเก็บถาวร</p></div>`;
 
                 // ===== 2. สถานะการลงข้อมูลนักเรียนรายห้อง =====
                 const roomList = getRoomList();
@@ -1476,6 +1481,42 @@
         }
         
         window.resetAllAttendanceData = function() { showConfirm("ยืนยันล้างข้อมูลทั้งหมด", "คำเตือน: ข้อมูลการเช็คชื่อของนักเรียนทุกคนและวิชาทั้งหมดจะถูกลบอย่างถาวรและไม่สามารถกู้คืนได้ คุณแน่ใจหรือไม่?", async () => { showToast("กำลังล้างข้อมูล... (อัปเดตแบบเรียลไทม์)", "info"); document.body.style.pointerEvents = 'none'; logAction('ล้างข้อมูลการเช็คชื่อทั้งหมด', 'รีเซ็ตข้อมูลการเช็คชื่อ/ติดตามทั้งระบบ'); await saveData('reset_all'); document.body.style.pointerEvents = 'auto'; showToast("ล้างข้อมูลทั้งหมดเรียบร้อยแล้ว", "success"); renderAdminTab(); });
+        };
+
+        // ===== เก็บถาวรข้อมูลเช็คชื่อเก่า: ส่งออก Excel แล้วลบออกจากข้อมูลที่ใช้งานจริง (ลดขนาดไฟล์ระยะยาว) =====
+        window.updateArchivePreview = function() {
+            const cutoff = document.getElementById('archiveCutoffDate').value;
+            const textEl = document.getElementById('archivePreviewText');
+            if (!cutoff) { textEl.innerText = 'เลือกวันที่เพื่อดูจำนวนข้อมูลที่จะถูกเก็บถาวร'; return; }
+            const matching = attendanceData.filter(a => a.date && a.date < cutoff);
+            if (matching.length === 0) { textEl.innerText = `ไม่พบข้อมูลก่อนวันที่ ${cutoff.split('-').reverse().join('/')}`; return; }
+            textEl.innerHTML = `พบข้อมูล <b>${matching.length}</b> รายการเช็คชื่อ (${matching.length} คาบ) ก่อนวันที่ ${cutoff.split('-').reverse().join('/')} ที่จะถูกเก็บถาวร`;
+        };
+        window.archiveOldAttendance = function() {
+            const cutoff = document.getElementById('archiveCutoffDate').value;
+            if (!cutoff) { showToast("กรุณาเลือกวันที่ก่อน", "error"); return; }
+            const toArchive = attendanceData.filter(a => a.date && a.date < cutoff);
+            if (toArchive.length === 0) { showToast("ไม่พบข้อมูลก่อนวันที่ที่เลือก", "error"); return; }
+            showConfirm("ยืนยันการเก็บถาวร", `จะดาวน์โหลดไฟล์ Excel เก็บข้อมูลเช็คชื่อ ${toArchive.length} รายการ (ก่อนวันที่ ${cutoff.split('-').reverse().join('/')}) แล้วลบออกจากระบบที่ใช้งานอยู่ทันที คุณแน่ใจหรือไม่?`, () => {
+                const rows = [["วันที่", "คาบ", "รหัสวิชา", "ชื่อวิชา", "ห้อง", "เลขที่", "ชื่อ-นามสกุล", "สถานะ"]];
+                toArchive.forEach(a => {
+                    const sub = subjects.find(s => s.id === a.subjectId);
+                    const roomName = sub ? formatRoomName(sub.roomId) : '-';
+                    const dateDisp = a.date.split('-').reverse().join('/');
+                    Object.keys(a.records || {}).forEach(stId => {
+                        const st = students.find(s => s.id === stId);
+                        rows.push([dateDisp, a.period, sub ? (sub.code || '') : '', sub ? sub.name : '(วิชาถูกลบแล้ว)', roomName, st ? st.number : '-', st ? st.name : '(ไม่พบข้อมูลนักเรียน)', a.records[stId]]);
+                    });
+                });
+                const ws = XLSX.utils.aoa_to_sheet(rows); ws['!cols'] = [{wch:10},{wch:6},{wch:10},{wch:22},{wch:10},{wch:8},{wch:28},{wch:14}];
+                const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Archive");
+                XLSX.writeFile(wb, `เก็บถาวรข้อมูลเช็คชื่อ_ก่อน_${cutoff}.xlsx`);
+                attendanceData = attendanceData.filter(a => !(a.date && a.date < cutoff));
+                logAction('เก็บถาวรข้อมูลเช็คชื่อเก่า', `เก็บถาวร ${toArchive.length} รายการ (ก่อนวันที่ ${cutoff})`);
+                saveData('full');
+                showToast(`เก็บถาวร ${toArchive.length} รายการสำเร็จ ดาวน์โหลดไฟล์แล้ว`, "success");
+                renderAdminTab();
+            });
         };
 
         window.renderScheduleInputs = function(existingSchedules = null) {
