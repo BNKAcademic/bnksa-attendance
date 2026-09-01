@@ -1,0 +1,136 @@
+/* ==========================================================
+   ระบบเช็คชื่อนักเรียนอัจฉริยะ - Stylesheet
+   แยกออกมาจาก index.html เพื่อให้ดูแลง่ายขึ้น
+   ========================================================== */
+
+        body { font-family: 'Sarabun', 'Inter', sans-serif; background-color: #f8fafc; -webkit-tap-highlight-color: transparent; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        .glass-effect { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(12px); }
+        .toast-enter { transform: translateY(-100%); opacity: 0; }
+        .toast-enter-active { transform: translateY(0); opacity: 1; transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .toast-exit { transform: translateY(0); opacity: 1; }
+        .toast-exit-active { transform: translateY(-100%); opacity: 0; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .stat-card-hover:hover { transform: translateY(-4px); box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); }
+        
+        /* Sticky columns for mobile tables */
+        .sticky-col { position: sticky; left: 0; z-index: 20; background-color: inherit; }
+        .sticky-col-2 { position: sticky; left: 40px; z-index: 20; background-color: inherit; }
+        @media (min-width: 640px) { .sticky-col-2 { left: 60px; } }
+        
+        /* A4 Print Styles (บังคับใช้ Sarabun 100%) */
+        .a4-export-container { 
+            width: 794px; background-color: #ffffff; position: absolute; top: 0; left: -9999px; z-index: -50; 
+            line-height: 1.6; letter-spacing: 0.01em; font-family: 'Sarabun', sans-serif !important;
+        }
+        .a4-export-container * { font-family: 'Sarabun', sans-serif !important; }
+        .a4-page { width: 794px; min-height: 1123px; padding: 40px; background: white; box-sizing: border-box; position: relative; }
+        .a4-export-container table { table-layout: fixed; width: 100%; }
+        .a4-export-container th, .a4-export-container td { word-wrap: break-word; white-space: normal; }
+
+        /* ===== Dark Mode ===== */
+        html.dark { color-scheme: dark; }
+        html.dark body { background-color: #0b1220; color: #e2e8f0; }
+        html.dark .glass-effect { background: rgba(11, 18, 32, 0.92) !important; }
+
+        /* พื้นผิวหลัก (การ์ด/พาเนล) ไล่ระดับความลึกให้ดูมีมิติ */
+        html.dark .bg-white { background-color: #141e33 !important; }
+        html.dark .bg-slate-50 { background-color: #17233b !important; }
+        html.dark .bg-slate-100 { background-color: #1f2c47 !important; }
+        html.dark .bg-slate-200 { background-color: #2a3952 !important; }
+        html.dark .hover\:bg-slate-50:hover { background-color: #1c2942 !important; }
+        html.dark .hover\:bg-slate-100:hover { background-color: #253552 !important; }
+        html.dark .hover\:bg-white:hover { background-color: #1c2942 !important; }
+        html.dark .bg-slate-50\/30 { background-color: rgba(23, 35, 59, 0.5) !important; }
+        html.dark .bg-slate-50\/50 { background-color: rgba(23, 35, 59, 0.65) !important; }
+        html.dark .bg-slate-100\/60 { background-color: rgba(31, 44, 71, 0.6) !important; }
+        html.dark .bg-slate-200\/50 { background-color: rgba(42, 57, 82, 0.5) !important; }
+        html.dark .bg-slate-200\/70 { background-color: rgba(42, 57, 82, 0.7) !important; }
+
+        /* ตัวอักษร */
+        html.dark .text-slate-800 { color: #f1f5f9 !important; }
+        html.dark .text-slate-700 { color: #e2e8f0 !important; }
+        html.dark .text-slate-600 { color: #cbd5e1 !important; }
+        html.dark .text-slate-500 { color: #94a3b8 !important; }
+        html.dark .text-slate-400 { color: #7488a6 !important; }
+
+        /* เส้นขอบ */
+        html.dark .border-slate-100 { border-color: #263349 !important; }
+        html.dark .border-slate-200 { border-color: #2d3d5a !important; }
+        html.dark .border-slate-300 { border-color: #3d4f70 !important; }
+
+        /* ฟอร์ม */
+        html.dark input, html.dark select, html.dark textarea { background-color: #141e33 !important; color: #f1f5f9 !important; border-color: #2d3d5a !important; }
+        html.dark input::placeholder, html.dark textarea::placeholder { color: #64748b !important; }
+        html.dark table thead { background-color: #1f2c47 !important; }
+
+        /* เงา นุ่มนวลขึ้นให้เข้ากับพื้นมืด */
+        html.dark .shadow-sm { box-shadow: 0 1px 2px rgba(0,0,0,0.4) !important; }
+        html.dark .shadow-md, html.dark .shadow-lg, html.dark .shadow-xl, html.dark .shadow-2xl, html.dark .shadow-inner { box-shadow: 0 8px 20px -4px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.35) !important; }
+
+        /* สกอลบาร์ */
+        html.dark ::-webkit-scrollbar-track { background: #0b1220; }
+        html.dark ::-webkit-scrollbar-thumb { background: #2d3d5a; border-radius: 8px; }
+        html.dark ::-webkit-scrollbar-thumb:hover { background: #3d4f70; }
+
+        /* เปลี่ยนโหมดแบบนุ่มนวล ไม่กระตุก */
+        body, .bg-white, .bg-slate-50, .bg-slate-100, .bg-slate-200, input, select, textarea,
+        .border-slate-100, .border-slate-200, .border-slate-300, .shadow-sm, .shadow-md, .shadow-lg {
+            transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+        }
+
+        /* โทนสีพาสเทลของแต่ละสถานะ/ป้ายกำกับ ปรับให้ดูสบายตาบนพื้นมืด (ไม่จ้าเกินไป) */
+        html.dark .bg-rose-50, html.dark .bg-rose-100, html.dark .bg-rose-50\/30, html.dark .bg-rose-50\/50 { background-color: rgba(244, 63, 94, 0.16) !important; }
+        html.dark .border-rose-100, html.dark .border-rose-200, html.dark .border-rose-300 { border-color: rgba(244, 63, 94, 0.35) !important; }
+        html.dark .text-rose-600, html.dark .text-rose-700, html.dark .text-rose-800, html.dark .text-rose-900 { color: #fb7185 !important; }
+        html.dark .hover\:bg-rose-100:hover, html.dark .hover\:bg-rose-50:hover { background-color: rgba(244, 63, 94, 0.24) !important; }
+
+        html.dark .bg-indigo-50, html.dark .bg-indigo-100, html.dark .bg-indigo-50\/30, html.dark .bg-indigo-50\/40, html.dark .bg-indigo-50\/60 { background-color: rgba(99, 102, 241, 0.16) !important; }
+        html.dark .border-indigo-100, html.dark .border-indigo-200, html.dark .border-indigo-300 { border-color: rgba(99, 102, 241, 0.35) !important; }
+        html.dark .text-indigo-600, html.dark .text-indigo-700, html.dark .text-indigo-800, html.dark .text-indigo-900 { color: #818cf8 !important; }
+        html.dark .hover\:bg-indigo-100:hover, html.dark .hover\:bg-indigo-50:hover { background-color: rgba(99, 102, 241, 0.24) !important; }
+
+        html.dark .bg-amber-50, html.dark .bg-amber-100, html.dark .bg-amber-50\/30, html.dark .bg-amber-50\/70, html.dark .bg-amber-100\/50 { background-color: rgba(245, 158, 11, 0.16) !important; }
+        html.dark .border-amber-100, html.dark .border-amber-200, html.dark .border-amber-300 { border-color: rgba(245, 158, 11, 0.35) !important; }
+        html.dark .text-amber-600, html.dark .text-amber-700, html.dark .text-amber-800, html.dark .text-amber-900 { color: #fbbf24 !important; }
+        html.dark .hover\:bg-amber-100:hover, html.dark .hover\:bg-amber-50:hover { background-color: rgba(245, 158, 11, 0.24) !important; }
+
+        html.dark .bg-emerald-50, html.dark .bg-emerald-100, html.dark .bg-emerald-50\/30, html.dark .bg-emerald-50\/50 { background-color: rgba(16, 185, 129, 0.16) !important; }
+        html.dark .border-emerald-100, html.dark .border-emerald-200, html.dark .border-emerald-300 { border-color: rgba(16, 185, 129, 0.35) !important; }
+        html.dark .text-emerald-600, html.dark .text-emerald-700, html.dark .text-emerald-800, html.dark .text-emerald-900 { color: #34d399 !important; }
+        html.dark .hover\:bg-emerald-100:hover, html.dark .hover\:bg-emerald-50:hover { background-color: rgba(16, 185, 129, 0.24) !important; }
+
+        html.dark .bg-blue-50, html.dark .bg-blue-100, html.dark .bg-blue-50\/30, html.dark .bg-blue-50\/50 { background-color: rgba(59, 130, 246, 0.16) !important; }
+        html.dark .border-blue-100, html.dark .border-blue-200, html.dark .border-blue-300 { border-color: rgba(59, 130, 246, 0.35) !important; }
+        html.dark .text-blue-600, html.dark .text-blue-700, html.dark .text-blue-800, html.dark .text-blue-900 { color: #60a5fa !important; }
+        html.dark .hover\:bg-blue-100:hover, html.dark .hover\:bg-blue-50:hover { background-color: rgba(59, 130, 246, 0.24) !important; }
+
+        html.dark .bg-purple-50, html.dark .bg-purple-100, html.dark .bg-purple-50\/30 { background-color: rgba(168, 85, 247, 0.16) !important; }
+        html.dark .border-purple-100, html.dark .border-purple-200, html.dark .border-purple-300 { border-color: rgba(168, 85, 247, 0.35) !important; }
+        html.dark .text-purple-600, html.dark .text-purple-700, html.dark .text-purple-800, html.dark .text-purple-900 { color: #c084fc !important; }
+        html.dark .hover\:bg-purple-100:hover, html.dark .hover\:bg-purple-50:hover { background-color: rgba(168, 85, 247, 0.24) !important; }
+
+        html.dark .bg-cyan-50, html.dark .bg-cyan-100, html.dark .bg-cyan-50\/30 { background-color: rgba(6, 182, 212, 0.16) !important; }
+        html.dark .border-cyan-100, html.dark .border-cyan-200, html.dark .border-cyan-300 { border-color: rgba(6, 182, 212, 0.35) !important; }
+        html.dark .text-cyan-600, html.dark .text-cyan-700, html.dark .text-cyan-800, html.dark .text-cyan-900 { color: #22d3ee !important; }
+        html.dark .hover\:bg-cyan-100:hover, html.dark .hover\:bg-cyan-50:hover { background-color: rgba(6, 182, 212, 0.24) !important; }
+
+        html.dark .bg-teal-50, html.dark .bg-teal-100 { background-color: rgba(20, 184, 166, 0.16) !important; }
+        html.dark .border-teal-100, html.dark .border-teal-200, html.dark .border-teal-300 { border-color: rgba(20, 184, 166, 0.35) !important; }
+        html.dark .text-teal-600, html.dark .text-teal-700, html.dark .text-teal-800, html.dark .text-teal-900 { color: #2dd4bf !important; }
+        html.dark .hover\:bg-teal-100:hover, html.dark .hover\:bg-teal-50:hover { background-color: rgba(20, 184, 166, 0.24) !important; }
+
+        html.dark .bg-orange-50, html.dark .bg-orange-100 { background-color: rgba(249, 115, 22, 0.16) !important; }
+        html.dark .border-orange-100, html.dark .border-orange-200, html.dark .border-orange-300 { border-color: rgba(249, 115, 22, 0.35) !important; }
+        html.dark .text-orange-600, html.dark .text-orange-700, html.dark .text-orange-800, html.dark .text-orange-900 { color: #fb923c !important; }
+        html.dark .hover\:bg-orange-100:hover, html.dark .hover\:bg-orange-50:hover { background-color: rgba(249, 115, 22, 0.24) !important; }
+
+        /* งาน PDF/Export ต้องคงเป็นโหมดสว่างเสมอ ไม่ว่าจะเปิด Dark Mode อยู่หรือไม่ (ปิด dark ชั่วคราวระหว่างสร้างไฟล์ผ่าน JS) */
+        .a4-export-container, .a4-export-container * { color-scheme: light; }
+
+        /* ===== เอฟเฟคตอนสลับเทอม ===== */
+        @keyframes termSwitchFlash { 0% { transform: scale(0.94); opacity: 0.4; } 55% { transform: scale(1.025); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+        .term-switch-flash { animation: termSwitchFlash 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        @keyframes termSwitchRing { 0% { box-shadow: 0 0 0 0 rgba(99,102,241,0.45); } 100% { box-shadow: 0 0 0 14px rgba(99,102,241,0); } }
+        .term-switch-ring { animation: termSwitchRing 0.9s ease-out; }
+    

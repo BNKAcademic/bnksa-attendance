@@ -1,0 +1,2322 @@
+// ==========================================================
+// ระบบเช็คชื่อนักเรียนอัจฉริยะ - Application Logic
+// แยกออกมาจาก index.html เพื่อให้ดูแลและแก้ไขโค้ดง่ายขึ้น
+// หมายเหตุ: ไฟล์นี้ต้องถูกโหลดคู่กับ index.html เท่านั้น
+// เพราะอ้างอิง element id ต่างๆ ที่อยู่ใน index.html โดยตรง
+// ==========================================================
+
+        // 🚨 นำ Web App URL ของคุณจาก Google Apps Script มาใส่ในบรรทัดด้านล่างนี้
+        const GOOGLE_APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxXMjm0S-hoZ9kd2FZ1rPlyo2LZZdNugahOUZ8AfPv_J3vverflPBL7GrTirvhM_D4Fuw/exec"; 
+
+        let isAdmin = false, isDbInitialized = false, currentAdminTab = 'settings', currentRoomId = null, currentSubjectId = null;
+        let editingTeacherId = null, editingSubjectId = null, editingStudentId = null, editingUserId = null;
+        // Data models
+        let settings = { title: "ระบบเช็คชื่อนักเรียนอัจฉริยะ", faviconDataUrl: "", logoDataUrl: "", announcement: "", announcementStart: "", announcementEnd: "", term: "1", year: "2567", roomCounts: { m1: 4, m2: 4, m3: 4, m4: 3, m5: 3, m6: 3 }, advisors: {}, staffs: {}, thresholds: { late: 4, absent: 4 }, storageLimitChars: 8000000, holidays: [], serverOnline: true, termLocks: {}, termCount: 2, users: [{ id: 'super_admin_root', username: 'BNKAdmin', password: '042499078', name: 'ผู้ดูแลระบบหลัก', role: 'super_admin', createdAt: new Date().toISOString() }] };
+        let teachers = [], subjects = [], students = [], attendanceData = [], followUps = [], logs = [];
+        let currentUser = null;
+        const statuses = {
+            'มา': { color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200', activeBg: 'bg-emerald-500', icon: 'fa-check' },
+            'ร่วมกิจกรรม': { color: 'text-cyan-700', bg: 'bg-cyan-50', border: 'border-cyan-200', activeBg: 'bg-cyan-500', icon: 'fa-running' },
+            'สาย': { color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200', activeBg: 'bg-amber-500', icon: 'fa-clock' },
+            'ลากิจ': { color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-200', activeBg: 'bg-indigo-500', icon: 'fa-envelope-open-text' },
+            'ลาป่วย': { color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-200', activeBg: 'bg-blue-500', icon: 'fa-procedures' },
+            'ขาด': { color: 'text-rose-600', bg: 'bg-rose-50', border: 'border-rose-200', activeBg: 'bg-rose-500', icon: 'fa-times' },
+            'โดดเรียน': { color: 'text-purple-700', bg: 'bg-purple-50', border: 'border-purple-200', activeBg: 'bg-purple-600', icon: 'fa-walking' }
+        };
+        const STATUS_HEX = { 'มา': '#10b981', 'ร่วมกิจกรรม': '#06b6d4', 'สาย': '#f59e0b', 'ลาป่วย': '#3b82f6', 'ลากิจ': '#6366f1', 'ขาด': '#f43f5e', 'โดดเรียน': '#9333ea' };
+        if (typeof Chart !== 'undefined' && typeof ChartDataLabels !== 'undefined') { Chart.register(ChartDataLabels); }
+        // ===== เครื่องมือสร้างกราฟ (Chart.js) รองรับ Dark Mode และมือถือ พร้อมเปอร์เซ็นต์บนกราฟ =====
+        function percentLabelFormatter(value, context) {
+            const data = context.chart.data.datasets[context.datasetIndex].data;
+            const total = data.reduce((a, b) => a + (Number(b) || 0), 0);
+            if (!value || total === 0) return '';
+            const pct = Math.round((value / total) * 100);
+            return `${value} (${pct}%)`;
+        }
+        function chartTextColor() { return document.documentElement.classList.contains('dark') ? '#cbd5e1' : '#475569'; }
+        function chartGridColor() { return document.documentElement.classList.contains('dark') ? 'rgba(148,163,184,0.12)' : 'rgba(100,116,139,0.12)'; }
+        function chartBorderBg() { return document.documentElement.classList.contains('dark') ? '#141e33' : '#ffffff'; }
+        function isMobileView() { return window.innerWidth < 640; }
+        function makeStatusBarChart(canvasId, totals) {
+            const el = document.getElementById(canvasId); if (!el || typeof Chart === 'undefined') return;
+            const labels = Object.keys(totals);
+            new Chart(el, { type: 'bar', data: { labels, datasets: [{ label: 'จำนวน (ครั้ง)', data: labels.map(l => totals[l] || 0), backgroundColor: labels.map(l => STATUS_HEX[l]), borderRadius: 8, maxBarThickness: 46 }] },
+                options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 24 } }, plugins: { legend: { display: false }, tooltip: { titleFont: { size: 12 }, bodyFont: { size: 12 } },
+                    datalabels: { display: (ctx) => ctx.dataset.data[ctx.dataIndex] > 0, color: chartTextColor(), anchor: 'end', align: 'top', offset: 2, font: { weight: 'bold', size: isMobileView() ? 9 : 11 }, formatter: percentLabelFormatter } },
+                    scales: { x: { ticks: { color: chartTextColor(), font: { weight: 'bold', size: isMobileView() ? 9 : 11 }, maxRotation: isMobileView() ? 60 : 0, minRotation: isMobileView() ? 60 : 0 }, grid: { display: false } }, y: { beginAtZero: true, ticks: { color: chartTextColor(), precision: 0, font: { size: 10 } }, grid: { color: chartGridColor() } } } } });
+        }
+        function makeStatusDoughnutChart(canvasId, totals) {
+            const el = document.getElementById(canvasId); if (!el || typeof Chart === 'undefined') return;
+            const legendEl = document.getElementById(canvasId + 'Legend');
+            const labels = Object.keys(totals).filter(l => (totals[l] || 0) > 0);
+            if (labels.length === 0) { const ctx = el.getContext('2d'); ctx.font = '13px Sarabun'; ctx.fillStyle = chartTextColor(); ctx.textAlign = 'center'; ctx.fillText('ยังไม่มีข้อมูลในเดือนนี้', el.width / 2, el.height / 2); if (legendEl) legendEl.innerHTML = ''; return; }
+            const total = labels.reduce((a, l) => a + (totals[l] || 0), 0);
+            new Chart(el, { type: 'doughnut', data: { labels, datasets: [{ data: labels.map(l => totals[l]), backgroundColor: labels.map(l => STATUS_HEX[l]), borderWidth: 2, borderColor: chartBorderBg() }] },
+                options: { responsive: true, maintainAspectRatio: false, cutout: '60%', plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => { const pct = total > 0 ? Math.round((ctx.parsed / total) * 100) : 0; return ` ${ctx.label}: ${ctx.parsed} ครั้ง (${pct}%)`; } } } } } });
+            if (legendEl) {
+                legendEl.innerHTML = `<div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2">${labels.map(l => { const count = totals[l] || 0; const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+                    return `<div class="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5 sm:px-3 sm:py-2"><span class="w-3 h-3 rounded-full shrink-0" style="background-color:${STATUS_HEX[l]}"></span><span class="font-bold text-slate-700 text-xs sm:text-sm flex-1 truncate">${l}</span><span class="font-black text-slate-800 text-xs sm:text-sm">${pct}%</span><span class="text-slate-400 text-[10px] sm:text-xs">(${count})</span></div>`; }).join('')}</div>`;
+            }
+        }
+        function computeSchoolMonthlyStats(month) {
+            let raw = {}; students.forEach(st => raw[st.id] = {});
+            attendanceData.forEach(record => {
+                if (!record.date || !record.date.startsWith(month)) return;
+                const sub = subjects.find(s => s.id === record.subjectId); if (!sub) return;
+                Object.keys(record.records || {}).forEach(stId => {
+                    if (!raw[stId]) return; const status = record.records[stId]; if (!status) return;
+                    if (!raw[stId][record.date]) raw[stId][record.date] = []; raw[stId][record.date].push({ period: record.period || 1, status });
+                });
+            });
+            let totals = { 'มา': 0, 'ร่วมกิจกรรม': 0, 'สาย': 0, 'ลาป่วย': 0, 'ลากิจ': 0, 'ขาด': 0, 'โดดเรียน': 0 };
+            Object.keys(raw).forEach(stId => { Object.keys(raw[stId]).forEach(date => { const dayStatus = calculateDailyStatus(raw[stId][date]); if (dayStatus && totals[dayStatus] !== undefined) totals[dayStatus]++; }); });
+            return totals;
+        }
+        function computeLevelCounts() {
+            let counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+            students.forEach(st => { if (st.status === 'resigned') return; const level = parseInt((st.roomId || '').split('_')[0].replace('m', '')); if (counts[level] !== undefined) counts[level]++; });
+            return counts;
+        }
+        const timeSlots = [ { period: 0, time: '08.00-08.30', name: 'เข้าแถวเช้า' }, { period: 1, time: '08.30-09.20' }, { period: 2, time: '09.20-10.10' }, { period: 3, time: '10.20-11.10' }, { period: 4, time: '11.10-12.00' }, { period: -1, time: '12.00-13.00', name: 'พักกลางวัน' }, { period: 5, time: '13.00-13.50' }, { period: 6, time: '13.50-14.40' }, { period: 7, time: '14.40-15.30' }, { period: 8, time: '15.30-16.20' } ];
+        const daysLabel = ['วันจันทร์', 'วันอังคาร', 'วันพุธ', 'วันพฤหัสบดี', 'วันศุกร์'];
+        const SUBJECT_DAY_MAP = { 'จันทร์': 1, 'จ': 1, 'อังคาร': 2, 'อ': 2, 'พุธ': 3, 'พ': 3, 'พฤหัสบดี': 4, 'พฤหัส': 4, 'พฤ': 4, 'ศุกร์': 5, 'ศ': 5 };
+        function parseScheduleString(str) {
+            if (!str) return [];
+            const schedules = [];
+            String(str).split(',').forEach(part => {
+                const seg = part.trim(); if (!seg) return;
+                const m = seg.split('-'); if (m.length < 2) return;
+                const dayKey = m[0].trim().replace(/^วัน/, '');
+                const day = SUBJECT_DAY_MAP[dayKey];
+                const period = parseInt(m[1].trim());
+                if (day && !isNaN(period) && period >= 0 && period <= 8) schedules.push({ day, period });
+            });
+            return schedules;
+        }
+
+        // Department Configuration
+        const deptConfig = {
+            "คณิตศาสตร์": { bg: "bg-blue-100", text: "text-blue-600", border: "border-blue-200", hover: "hover:bg-blue-50", icon: "fa-calculator" },
+            "วิทยาศาสตร์และเทคโนโลยี": { bg: "bg-emerald-100", text: "text-emerald-600", border: "border-emerald-200", hover: "hover:bg-emerald-50", icon: "fa-flask" },
+            "ภาษาไทย": { bg: "bg-amber-100", text: "text-amber-600", border: "border-amber-200", hover: "hover:bg-amber-50", icon: "fa-book" },
+            "ภาษาต่างประเทศ": { bg: "bg-rose-100", text: "text-rose-600", border: "border-rose-200", hover: "hover:bg-rose-50", icon: "fa-language" },
+            "สังคมศึกษา ศาสนา และวัฒนธรรม": { bg: "bg-orange-100", text: "text-orange-600", border: "border-orange-200", hover: "hover:bg-orange-50", icon: "fa-globe-asia" },
+            "สุขศึกษาและพลศึกษา": { bg: "bg-cyan-100", text: "text-cyan-600", border: "border-cyan-200", hover: "hover:bg-cyan-50", icon: "fa-running" },
+            "ศิลปะ": { bg: "bg-purple-100", text: "text-purple-600", border: "border-purple-200", hover: "hover:bg-purple-50", icon: "fa-palette" },
+            "การงานอาชีพ": { bg: "bg-teal-100", text: "text-teal-600", border: "border-teal-200", hover: "hover:bg-teal-50", icon: "fa-tools" },
+            "ระบบ/อื่นๆ": { bg: "bg-slate-100", text: "text-slate-600", border: "border-slate-200", hover: "hover:bg-slate-50", icon: "fa-cog" }
+        };
+        const departmentsList = Object.keys(deptConfig);
+
+        function generateId() { return Math.random().toString(36).substr(2, 9); }
+        function formatRoomName(roomId) { const match = roomId?.match(/m(\d+)_(\d+)/); return match ? `ม.${match[1]}/${match[2]}` : (roomId || '-'); }
+        function getRoomList() { let rooms = []; for (let i = 1; i <= 6; i++) { let count = settings.roomCounts[`m${i}`] || 0; for (let j = 1; j <= count; j++) { rooms.push(`m${i}_${j}`); } } return rooms; }
+
+        // ===== Term/Year scoping helpers (เทอม/ปีการศึกษา) =====
+        const WEEKLY_SLOTS_TOTAL = 45; // 5 วัน x 9 คาบ (0-8 ไม่รวมพักเที่ยง)
+        function termKeyOf(term, year) { return `${term ?? settings.term}_${year ?? settings.year}`; }
+        // สถานะเทอม 3 แบบ: 'open' เปิดใช้งานปกติ, 'not_opened' ยังไม่เปิดใช้งาน (ผู้ใช้ทั่วไปสลับเข้ามาไม่ได้), 'locked' ล็อคข้อมูล (ปิดแล้ว แต่ดูย้อนหลังได้)
+        function getTermStatus(term, year) {
+            const v = settings.termLocks && settings.termLocks[termKeyOf(term, year)];
+            if (v === true) return 'locked'; // ข้อมูลเก่า (boolean) แปลงเป็นสถานะล็อค
+            if (v === 'open' || v === 'not_opened' || v === 'locked') return v;
+            return 'open';
+        }
+        function currentTermStatus() { return getTermStatus(settings.term, settings.year); }
+        // ยังคงชื่อเดิมไว้เพื่อความเข้ากันได้: ล็อคเฉพาะสถานะ "locked" (เก็บถาวร) เท่านั้นที่ห้ามแก้ไขข้อมูลวิชา ส่วน "not_opened" แอดมินยังจัดเตรียมวิชาล่วงหน้าได้
+        function currentTermLocked() { return currentTermStatus() === 'locked'; }
+        function guardTermLock(actionLabel) { if (currentTermStatus() === 'locked') { showToast(`เทอม ${settings.term}/${settings.year} ถูกล็อคข้อมูลไว้ (เก็บถาวร) ไม่สามารถ${actionLabel || 'แก้ไขข้อมูล'}ได้`, "error"); return true; } return false; }
+        // การเช็คชื่ออนุญาตเฉพาะเมื่อเทอมนั้น "เปิดใช้งาน" (open) เท่านั้น
+        function guardAttendanceLock(term, year) {
+            const status = getTermStatus(term, year);
+            if (status === 'open') return false;
+            const msg = status === 'not_opened' ? `เทอม ${term}/${year} ยังไม่เปิดใช้งาน ไม่สามารถเช็คชื่อได้` : `เทอม ${term}/${year} ถูกล็อคข้อมูลไว้แล้ว ไม่สามารถเช็คชื่อได้ (ดูข้อมูลย้อนหลังได้)`;
+            showToast(msg, "error"); return true;
+        }
+        function termStatusCardConfig(status) {
+            if (status === 'open') return { wrap: 'bg-emerald-50 border-emerald-300', dot: 'bg-emerald-500 animate-pulse', icon: 'fa-wifi', iconCls: 'text-emerald-600', text: 'ระบบเปิดให้ใช้งานสำหรับเทอมนี้', textCls: 'text-emerald-800' };
+            if (status === 'not_opened') return { wrap: 'bg-slate-100 border-slate-300', dot: 'bg-slate-400', icon: 'fa-power-off', iconCls: 'text-slate-500', text: 'ระบบยังไม่เปิดให้ใช้งานสำหรับเทอมนี้', textCls: 'text-slate-600' };
+            return { wrap: 'bg-blue-50 border-blue-300', dot: 'bg-blue-400', icon: 'fa-box-archive', iconCls: 'text-blue-600', text: 'ระบบปิดให้ใช้งานสำหรับเทอมนี้แล้ว แต่สามารถดูข้อมูลได้', textCls: 'text-blue-800' };
+        }
+        // วิชาที่ยังไม่มี term/year (ข้อมูลเก่า) ให้ถือว่าอยู่ในเทอม/ปีปัจจุบันเสมอ (ป้องกันข้อมูลหาย)
+        function isActiveSubject(s) { return String(s.term ?? settings.term) === String(settings.term) && String(s.year ?? settings.year) === String(settings.year); }
+        function activeSubjects() { return subjects.filter(isActiveSubject); }
+        function getRoomSubjects(roomId) { return activeSubjects().filter(s => s.roomId === roomId); }
+        function computeRoomScheduleStatus(roomId) { const list = getRoomSubjects(roomId); const filled = new Set(); list.forEach(s => (s.schedules || []).forEach(sch => filled.add(sch.day + '-' + sch.period))); return { filled: filled.size, total: WEEKLY_SLOTS_TOTAL, done: filled.size >= WEEKLY_SLOTS_TOTAL, count: list.length }; }
+        function findDuplicateSubjectsInRoom(roomId) {
+            const list = getRoomSubjects(roomId); const dupIds = new Set();
+            for (let i = 0; i < list.length; i++) { for (let j = i + 1; j < list.length; j++) {
+                const a = list[i], b = list[j];
+                const sameTeacher = (a.teacher || '').trim() === (b.teacher || '').trim();
+                const sameCode = (a.code || '').trim() === (b.code || '').trim();
+                const sameName = (a.name || '').trim() === (b.name || '').trim();
+                // แจ้งเตือนเฉพาะเมื่อซ้ำครบทั้ง 3 อย่าง (ครูผู้สอน + รหัสวิชา + ชื่อวิชา) เท่านั้น
+                if (sameTeacher && sameCode && sameName) { dupIds.add(a.id); dupIds.add(b.id); }
+            } }
+            return dupIds;
+        }
+        function getTeacherDept(name) { const t = teachers.find(x => x.name === name); return t ? (t.department || 'ระบบ/อื่นๆ') : ''; }
+        // หาคาบสอนที่ชนกันของครูคนเดียวกัน (ยกเว้นกลุ่มสาระ "ระบบ/อื่นๆ" ที่ให้ซ้ำได้)
+        function findTeacherConflicts() {
+            const map = {};
+            activeSubjects().forEach(s => {
+                ['teacher', 'teacher2'].forEach(field => {
+                    const tname = s[field]; if (!tname) return;
+                    if (getTeacherDept(tname) === 'ระบบ/อื่นๆ') return;
+                    (s.schedules || []).forEach(sch => {
+                        const key = tname + '|' + sch.day + '|' + sch.period;
+                        if (!map[key]) map[key] = [];
+                        map[key].push({ subjectId: s.id, roomId: s.roomId, name: s.name, teacher: tname, day: sch.day, period: sch.period });
+                    });
+                });
+            });
+            return Object.values(map).filter(arr => arr.length > 1);
+        }
+        function subjectHasConflict(subjectId) { return findTeacherConflicts().some(group => group.some(g => g.subjectId === subjectId)); }
+        function computePendingNotifications() {
+            const items = []; const roomList = getRoomList();
+            roomList.forEach(r => {
+                const st = computeRoomScheduleStatus(r);
+                if (!st.done) items.push({ type: 'incomplete', text: `ห้อง ${formatRoomName(r)} ยังลงวิชาไม่ครบตาราง (${st.filled}/${st.total} คาบ)`, action: () => { window.adminSelectedSubjectRoom = r; window.navigate('admin', { tab: 'subjects' }); } });
+                const dupes = findDuplicateSubjectsInRoom(r);
+                if (dupes.size > 0) items.push({ type: 'duplicate', text: `ห้อง ${formatRoomName(r)} มีรายวิชาซ้ำกัน ${dupes.size} รายการ`, action: () => { window.adminSelectedSubjectRoom = r; window.navigate('admin', { tab: 'subjects' }); } });
+                const activeStu = students.filter(s => s.roomId === r && s.status !== 'resigned');
+                if (activeStu.length === 0) items.push({ type: 'nostudents', text: `ห้อง ${formatRoomName(r)} ยังไม่มีรายชื่อนักเรียน`, action: () => { window.adminSelectedRoom = r; window.navigate('admin', { tab: 'students' }); } });
+            });
+            findTeacherConflicts().forEach(group => {
+                const t = group[0].teacher;
+                const daysTxt = group.map(g => `${daysLabel[g.day - 1].replace('วัน', '')} คาบ ${g.period} (${formatRoomName(g.roomId)} · ${g.name})`).join(', ');
+                items.push({ type: 'conflict', text: `ครู ${t} มีวิชาสอนชนกัน: ${daysTxt}`, action: () => { window.navigate('admin', { tab: 'subjects' }); } });
+            });
+            return items;
+        }
+
+        function calculateDailyStatus(recordsArray) {
+            if (!recordsArray || recordsArray.length === 0) return null;
+            let p0p1Present = false, p2to8Present = false, hasLeave = false, hasSick = false, hasAbsent = false, hasSkip = false, p0p1Late = false;
+            recordsArray.forEach(r => {
+                const p = parseInt(r.period), s = r.status, isPresent = (s === 'มา' || s === 'ร่วมกิจกรรม');
+                if (p === 0 || p === 1) { if (isPresent) p0p1Present = true; if (s === 'สาย') p0p1Late = true; } else { if (isPresent) p2to8Present = true; }
+                if (s === 'ลากิจ') hasLeave = true; if (s === 'ลาป่วย') hasSick = true; if (s === 'ขาด') hasAbsent = true; if (s === 'โดดเรียน') hasSkip = true;
+            });
+            if (p0p1Present) return 'มา'; if (p2to8Present || p0p1Late) return 'สาย'; if (hasLeave) return 'ลากิจ'; if (hasSick) return 'ลาป่วย';
+            if (hasAbsent) return 'ขาด'; if (hasSkip) return 'โดดเรียน'; return null;
+        }
+
+        function navigate(view, params = {}) {
+            closeAllModals();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            const state = { view, ...params };
+            try {
+                // ป้องกันการ push ซ้ำหน้าเดิม และเก็บ state ไว้ให้ปุ่ม Back ของเบราว์เซอร์/Android ย้อนกลับมาได้ถูกต้อง
+                history.pushState(state, '', location.pathname + location.search);
+            } catch (e) { /* เบราว์เซอร์บางตัวอาจไม่รองรับ ไม่กระทบการทำงานหลัก */ }
+            safeRenderState(state);
+        }
+
+        // เรนเดอร์แบบปลอดภัย: ถ้าเกิดข้อผิดพลาดใดๆ จะไม่ปล่อยให้หน้าจอว่างเปล่า (white screen)
+        // แต่จะ fallback กลับไปหน้าแรกเสมอ
+        function safeRenderState(state) {
+            try {
+                renderViewFromState(state);
+            } catch (err) {
+                console.error('Render error, falling back to dashboard:', err);
+                try { renderDashboard(); } catch (err2) { location.reload(); }
+                return;
+            }
+            // เช็คเผื่อกรณีเรนเดอร์แล้วเนื้อหาว่างเปล่าโดยไม่มี exception
+            const mc = document.getElementById('mainContent');
+            if (mc && isDbInitialized && mc.innerHTML.trim() === '') {
+                try { renderDashboard(); } catch (err3) { location.reload(); }
+            }
+        }
+
+        // จัดการปุ่ม Back ของเบราว์เซอร์และปุ่ม Back ฮาร์ดแวร์ของ Android
+        window.addEventListener('popstate', (event) => {
+            closeAllModals();
+            const state = event.state || { view: 'dashboard' };
+            safeRenderState(state);
+        });
+
+        // ตาข่ายนิรภัยสุดท้าย: ถ้ามี error ที่ไม่ถูกดักจับเกิดขึ้นระหว่างการทำงาน และทำให้เนื้อหาหลักว่างเปล่า
+        // ให้ดึงกลับมาที่หน้า dashboard แทนที่จะปล่อยให้จอขาวค้าง
+        window.addEventListener('error', function() {
+            const mc = document.getElementById('mainContent');
+            if (mc && isDbInitialized && mc.innerHTML.trim() === '') {
+                try { renderDashboard(); } catch (e) {}
+            }
+        });
+        
+        function closeAllModals() {
+            ['subjectModal', 'studentModal', 'teacherModal', 'confirmModal', 'promptModal'].forEach(id => {
+                const el = document.getElementById(id);
+                if(el) { const box = el.querySelector('div[id$="Box"]'); if(box) { box.classList.remove('scale-100', 'opacity-100'); box.classList.add('scale-95', 'opacity-0'); } setTimeout(() => el.classList.add('hidden'), 100); }
+            });
+        }
+
+        function renderViewFromState(state) {
+            if (!isDbInitialized) return;
+            if (!state || !state.view) { renderDashboard(); return; }
+            if (state.view.startsWith('admin') && !isAdmin && state.view !== 'admin_login') { renderAdminLogin(); return; }
+            try {
+                switch(state.view) {
+                    case 'dashboard': renderDashboard(); break;
+                    case 'admin_login': renderAdminLogin(); break;
+                    case 'admin': if(state.tab) currentAdminTab = state.tab; renderAdmin(); break;
+                    case 'teacher_dash': openTeacherDashboard(state.teacherName); break;
+                    case 'classroom': openClassroom(state.roomId, state.dayIndex); break;
+                    case 'attendance': openAttendance(state.subjectId, state.period, state.fromTeacherDash, state.date); break;
+                    case 'subject_summary': openSubjectSummary(state.subjectId, state.fromTeacherDash); break;
+                    case 'student_summary': openStudentSummary(state.studentId, state.month); break;
+                    case 'room_summary': openRoomSummary(state.roomId, state.month, state.tab); break;
+                    case 'school_summary': renderSchoolSummary(state.month); break;
+                    default: renderDashboard();
+                }
+            } catch (error) { renderDashboard(); }
+        }
+
+        let pollingInterval = null;
+        function startRealtimeSync() {
+            if (pollingInterval) clearInterval(pollingInterval);
+            pollingInterval = setInterval(async () => {
+                if (!isDbInitialized || GOOGLE_APP_SCRIPT_URL === "YOUR_WEB_APP_URL_HERE") return;
+                try {
+                    const response = await fetch(GOOGLE_APP_SCRIPT_URL); const data = await response.json();
+                    if (data && data.attendanceData) {
+                        attendanceData = data.attendanceData; followUps = data.followUps || [];
+                        if (!isAdmin) {
+                            teachers = data.teachers || []; subjects = data.subjects || []; students = data.students || [];
+                            students = students.map(st => { if (st.title) { st.name = (st.title + (st.name || '')).trim(); st.title = ''; } return st; });
+                            if (data.settings) {
+                                if (data.settings.title && data.settings.title !== settings.title) {
+                                    settings.title = data.settings.title;
+                                    document.getElementById('navTitle').innerText = settings.title;
+                                    document.title = settings.title;
+                                }
+                                if (data.settings.faviconDataUrl && data.settings.faviconDataUrl !== settings.faviconDataUrl) {
+                                    settings.faviconDataUrl = data.settings.faviconDataUrl;
+                                    applyFavicon();
+                                }
+                                if (data.settings.logoDataUrl !== undefined && data.settings.logoDataUrl !== settings.logoDataUrl) {
+                                    settings.logoDataUrl = data.settings.logoDataUrl;
+                                    applyHeaderLogo();
+                                }
+                                if ((data.settings.announcement || '') !== (settings.announcement || '') || (data.settings.announcementStart || '') !== (settings.announcementStart || '') || (data.settings.announcementEnd || '') !== (settings.announcementEnd || '')) {
+                                    settings.announcement = data.settings.announcement || '';
+                                    settings.announcementStart = data.settings.announcementStart || '';
+                                    settings.announcementEnd = data.settings.announcementEnd || '';
+                                    updateAnnouncementBar();
+                                }
+                                if (JSON.stringify(data.settings.holidays || []) !== JSON.stringify(settings.holidays || [])) {
+                                    settings.holidays = data.settings.holidays || [];
+                                    updateHolidayBar();
+                                }
+                                if (data.settings.serverOnline !== undefined && data.settings.serverOnline !== settings.serverOnline) {
+                                    settings.serverOnline = data.settings.serverOnline;
+                                    applyServerStatusBadge();
+                                }
+                                if (data.settings.termLocks && JSON.stringify(data.settings.termLocks) !== JSON.stringify(settings.termLocks || {})) {
+                                    settings.termLocks = data.settings.termLocks;
+                                }
+                                if (data.settings.termCount !== undefined && data.settings.termCount !== settings.termCount) {
+                                    settings.termCount = data.settings.termCount;
+                                }
+                                if (data.settings.term !== undefined && (data.settings.term !== settings.term || data.settings.year !== settings.year)) {
+                                    settings.term = data.settings.term; settings.year = data.settings.year;
+                                    document.getElementById('navSubtitle').innerText = `ภาคเรียนที่ ${settings.term} / ${settings.year}`;
+                                    const st = history.state;
+                                    if (st && (st.view === 'dashboard' || st.view === 'classroom' || st.view === 'teacher_dash')) { try { safeRenderState(st); } catch (e) {} }
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {}
+            }, 10000);
+        }
+
+        window.onload = async () => {
+            document.getElementById('mainContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 sm:py-32"><i class="fas fa-cloud-download-alt text-5xl sm:text-6xl text-indigo-500 mb-6 animate-bounce"></i><h2 class="text-xl sm:text-2xl font-extrabold text-slate-800 text-center">กำลังซิงค์ข้อมูล...</h2><p class="text-sm sm:text-base text-slate-500 mt-2 font-medium text-center">โปรดรอสักครู่ ระบบกำลังโหลดข้อมูล</p></div>`;
+            if (GOOGLE_APP_SCRIPT_URL === "YOUR_WEB_APP_URL_HERE") { document.getElementById('mainContent').innerHTML = '<div class="text-center p-6 sm:p-20 text-rose-500 font-bold text-base sm:text-2xl bg-white rounded-3xl shadow-sm border border-rose-200 mt-10"><i class="fas fa-exclamation-triangle mb-4 text-4xl sm:text-6xl"></i><br>กรุณาใส่ URL ของ Google Apps Script</div>'; return; }
+            try {
+                const response = await fetch(GOOGLE_APP_SCRIPT_URL);
+                const data = await response.json();
+                if (data.settings && Object.keys(data.settings).length > 0) {
+                    settings = data.settings;
+                    settings.thresholds = settings.thresholds || { late: 4, absent: 4 };
+                    if (!settings.staffs) settings.staffs = {};
+                    if (!settings.title) settings.title = "ระบบเช็คชื่อนักเรียนอัจฉริยะ";
+                    if (!settings.faviconDataUrl) settings.faviconDataUrl = "";
+                    if (!settings.logoDataUrl) settings.logoDataUrl = "";
+                    if (!settings.announcement) settings.announcement = "";
+                    if (!settings.announcementStart) settings.announcementStart = "";
+                    if (!settings.announcementEnd) settings.announcementEnd = "";
+                    if (!settings.users || settings.users.length === 0) {
+                        settings.users = [{ id: 'super_admin_root', username: 'BNKAdmin', password: '042499078', name: 'ผู้ดูแลระบบหลัก', role: 'super_admin', createdAt: new Date().toISOString() }];
+                    }
+                    // แก้ไขค่าเริ่มต้นเดิมที่อ้างอิงผิด (Google Sheets cell) ให้ตรงกับความจริง (Drive file ผ่าน DriveApp.createFile ซึ่งจำกัดที่ 10MB)
+                    if (!settings.storageLimitChars || settings.storageLimitChars === 50000) settings.storageLimitChars = 8000000;
+                    if (!settings.holidays) settings.holidays = [];
+                    if (settings.serverOnline === undefined) settings.serverOnline = true;
+                    if (!settings.termLocks) settings.termLocks = {};
+                    Object.keys(settings.termLocks).forEach(k => { if (settings.termLocks[k] === true) settings.termLocks[k] = 'locked'; else if (settings.termLocks[k] === false) delete settings.termLocks[k]; });
+                    if (settings.termCount !== 2 && settings.termCount !== 3) settings.termCount = 2;
+                    teachers = data.teachers || [];
+                    subjects = data.subjects || []; students = data.students || []; attendanceData = data.attendanceData || []; followUps = data.followUps || []; logs = data.logs || [];
+                    subjects = subjects.map(s => { if (s.day !== undefined && s.period !== undefined && !s.schedules) { s.credits = 0.5; s.schedules = [{ day: s.day, period: s.period }]; delete s.day; delete s.period; } if (s.term === undefined) s.term = settings.term; if (s.year === undefined) s.year = settings.year; if (s.locked === undefined) s.locked = false; return s; });
+                    students = students.map(st => { if (!st.status) st.status = 'active'; if (st.title) { st.name = (st.title + (st.name || '')).trim(); st.title = ''; } return st; });
+                } else { seedSampleData(); }
+                isDbInitialized = true;
+                document.getElementById('navTitle').innerText = settings.title;
+                document.title = settings.title;
+                document.getElementById('navSubtitle').innerText = `ภาคเรียนที่ ${settings.term} / ${settings.year}`;
+                applyFavicon();
+                applyHeaderLogo();
+                updateAnnouncementBar();
+                updateHolidayBar();
+                applyServerStatusBadge();
+                setInterval(updateAnnouncementBar, 60000);
+                setInterval(updateHolidayBar, 60000);
+                applyDarkModePreference();
+                initInactivityTracking();
+                // ตั้งค่าจุดเริ่มต้นของ history ให้เป็นหน้า dashboard เพื่อให้ปุ่ม Back ทำงานถูกต้องตั้งแต่แรก
+                try { history.replaceState({ view: 'dashboard' }, '', location.pathname + location.search); } catch (e) {}
+                showToast("พร้อมใช้งาน!", "success"); renderDashboard(); startRealtimeSync();
+            } catch (error) { document.getElementById('mainContent').innerHTML = '<div class="text-center p-10 sm:p-20 text-rose-500 font-bold text-lg sm:text-2xl bg-white rounded-3xl shadow-sm border border-rose-200 mt-10"><i class="fas fa-exclamation-triangle mb-4 text-4xl sm:text-5xl"></i><br>ไม่สามารถเชื่อมต่อฐานข้อมูลได้</div>'; }
+        };
+
+        // รวม log ของเครื่องนี้ (local) เข้ากับ log ล่าสุดบนเซิร์ฟเวอร์ (remote) แบบไม่ทับกัน
+        function mergeLogsArrays(remote, local) {
+            const map = new Map();
+            (remote || []).forEach(l => map.set(l.id, l));
+            (local || []).forEach(l => map.set(l.id, l));
+            let merged = Array.from(map.values());
+            merged.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            if (merged.length > 500) merged = merged.slice(merged.length - 500);
+            return merged;
+        }
+
+        // ===== บันทึกข้อมูลแบบ Real-time รองรับการบันทึกพร้อมกันจากหลายอุปกรณ์ =====
+        // การเช็คชื่อ/ติดตามนักเรียน/ล้างข้อมูล จะส่งเฉพาะ "รายการที่เปลี่ยนแปลง" ไปให้ฝั่งเซิร์ฟเวอร์ผสานเข้ากับข้อมูลล่าสุดเองแบบอะตอมมิก
+        // (ล็อกการเขียนไว้ฝั่ง Apps Script ด้วย LockService กันข้อมูลชนกันเวลาเช็คชื่อพร้อมกันหลายห้อง/หลายวิชา)
+        async function saveData(action = 'full', payload = null) {
+            try {
+                if (GOOGLE_APP_SCRIPT_URL === "YOUR_WEB_APP_URL_HERE") return;
+                if (action === 'attendance' && payload) {
+                    const idx = attendanceData.findIndex(a => a.subjectId === payload.subjectId && a.date === payload.date && String(a.period) === String(payload.period));
+                    if (idx >= 0) attendanceData[idx] = payload; else attendanceData.push(payload);
+                    await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'upsert_attendance', record: payload }) });
+                } else if (action === 'followup' && payload) {
+                    followUps.push(payload);
+                    await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'upsert_followup', record: payload }) });
+                } else if (action === 'reset_subject' && payload) {
+                    attendanceData = attendanceData.filter(a => a.subjectId !== payload);
+                    await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_subject_attendance', subjectId: payload }) });
+                } else if (action === 'reset_all') {
+                    attendanceData = []; followUps = [];
+                    await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_all_attendance' }) });
+                } else {
+                    // 'full' - ใช้สำหรับตั้งค่า/ครู/วิชา/นักเรียน/ผู้ใช้งาน ฯลฯ ยังคง fetch ข้อมูลล่าสุดมาผสาน attendanceData/followUps/logs ก่อนเขียนทับเสมอ กันไม่ให้ไปทับข้อมูลที่ถูกเช็คชื่อพร้อมกันจากอุปกรณ์อื่น
+                    let dataToSave = { settings, teachers, subjects, students, attendanceData, followUps, logs };
+                    const response = await fetch(GOOGLE_APP_SCRIPT_URL);
+                    const latestData = await response.json();
+                    if (latestData && latestData.attendanceData) {
+                        dataToSave.attendanceData = latestData.attendanceData; attendanceData = latestData.attendanceData;
+                        dataToSave.followUps = latestData.followUps || followUps; followUps = dataToSave.followUps;
+                        dataToSave.logs = mergeLogsArrays(latestData.logs, logs); logs = dataToSave.logs;
+                    }
+                    await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(dataToSave) });
+                }
+            } catch (e) { console.error("Save Error", e); }
+        }
+
+        // บันทึก Log การแก้ไขของผู้ใช้แต่ละคน (เก็บย้อนหลังสูงสุด 500 รายการล่าสุด)
+        // category: 'settings' = ปรับตั้งค่าระบบ, 'data' = ลงข้อมูลต่างๆ, 'account' = บัญชีผู้ใช้/เข้าออกระบบ
+        function logAction(action, details = '', category = 'data') {
+            logs.push({ id: generateId(), timestamp: new Date().toISOString(), username: currentUser ? currentUser.username : 'system', name: currentUser ? currentUser.name : 'ระบบ', action, details, category });
+            if (logs.length > 500) logs = logs.slice(logs.length - 500);
+        }
+
+        function seedSampleData() {
+            const sampleTeacher = "ครูสมใจ รักเรียน";
+            teachers.push({ id: generateId(), name: sampleTeacher, department: "ระบบ/อื่นๆ" });
+            students.push({ id: generateId(), roomId: 'm1_1', number: '1', name: 'ด.ช.รักเรียน เพียรศึกษา', status: 'active' });
+            subjects.push({ id: generateId(), roomId: 'm1_1', name: 'เช็คแถวเช้า', code: '', teacher: sampleTeacher, teacher2: '', credits: 0.5, schedules: [{day: 1, period: 0}] }); saveData('full');
+        }
+
+        function applyFavicon() {
+            const link = document.getElementById('faviconLink');
+            if (link) link.href = settings.faviconDataUrl && settings.faviconDataUrl.length > 0 ? settings.faviconDataUrl : 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/graduation-cap.svg';
+        }
+
+        function updateCurrentUserBadge() {
+            const badge = document.getElementById('currentUserBadge');
+            const nameEl = document.getElementById('currentUserBadgeName');
+            const roleEl = document.getElementById('currentUserBadgeRole');
+            if (!badge || !nameEl || !roleEl) return;
+            if (isAdmin && currentUser) {
+                nameEl.innerText = currentUser.name;
+                const isSuper = currentUser.role === 'super_admin';
+                roleEl.innerText = isSuper ? 'Super Admin' : 'เจ้าหน้าที่';
+                roleEl.className = `hidden sm:inline-block px-1.5 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black ${isSuper ? 'bg-purple-100 text-purple-700' : 'bg-indigo-100 text-indigo-700'}`;
+                badge.classList.remove('hidden'); badge.classList.add('flex');
+            } else {
+                badge.classList.add('hidden'); badge.classList.remove('flex');
+            }
+        }
+        window.showUserBadgeInfo = function() {
+            if (!isAdmin || !currentUser) return;
+            const roleLabel = currentUser.role === 'super_admin' ? 'Super Admin' : 'เจ้าหน้าที่';
+            showToast(`เข้าสู่ระบบในชื่อ: ${currentUser.name} (${roleLabel})`, "success");
+        };
+
+        function applyHeaderLogo() {
+            const icon = document.getElementById('navLogoIcon'), img = document.getElementById('navLogoImg');
+            if (!icon || !img) return;
+            if (settings.logoDataUrl && settings.logoDataUrl.length > 0) {
+                img.src = settings.logoDataUrl; img.classList.remove('hidden'); icon.classList.add('hidden');
+            } else {
+                img.classList.add('hidden'); img.src = ''; icon.classList.remove('hidden');
+            }
+        }
+
+        // ===== Dark Mode =====
+        function applyDarkModePreference() {
+            let pref = 'light';
+            try { pref = localStorage.getItem('bnksa_theme') || 'light'; } catch (e) {}
+            setDarkMode(pref === 'dark', false);
+        }
+        function setDarkMode(isDark, persist = true) {
+            document.documentElement.classList.toggle('dark', isDark);
+            const icon = document.getElementById('darkModeIcon');
+            if (icon) { icon.classList.toggle('fa-moon', !isDark); icon.classList.toggle('fa-sun', isDark); }
+            if (persist) { try { localStorage.setItem('bnksa_theme', isDark ? 'dark' : 'light'); } catch (e) {} }
+        }
+        window.toggleDarkMode = function() {
+            const isDark = !document.documentElement.classList.contains('dark');
+            setDarkMode(isDark, true);
+            showToast(isDark ? "เปิดโหมดมืดแล้ว" : "ปิดโหมดมืดแล้ว");
+            try { safeRenderState(history.state || { view: 'dashboard' }); } catch (e) {}
+        };
+
+        // ===== รีเฟรชข้อมูล (ใช้ได้ทุกหน้า) =====
+        window.refreshData = async function() {
+            const icon = document.getElementById('refreshIcon');
+            if (icon) icon.classList.add('fa-spin');
+            if (GOOGLE_APP_SCRIPT_URL === "YOUR_WEB_APP_URL_HERE") { if (icon) icon.classList.remove('fa-spin'); return; }
+            try {
+                const response = await fetch(GOOGLE_APP_SCRIPT_URL); const data = await response.json();
+                if (data) {
+                    attendanceData = data.attendanceData || attendanceData; followUps = data.followUps || followUps;
+                    if (!isAdmin) {
+                        teachers = data.teachers || teachers; subjects = data.subjects || subjects;
+                        students = (data.students || students).map(st => { if (st.title) { st.name = (st.title + (st.name || '')).trim(); st.title = ''; } return st; });
+                        if (data.settings) {
+                            if (data.settings.title) { settings.title = data.settings.title; document.getElementById('navTitle').innerText = settings.title; document.title = settings.title; }
+                            if (data.settings.faviconDataUrl !== undefined) { settings.faviconDataUrl = data.settings.faviconDataUrl; applyFavicon(); }
+                            if (data.settings.logoDataUrl !== undefined) { settings.logoDataUrl = data.settings.logoDataUrl; applyHeaderLogo(); }
+                            settings.announcement = data.settings.announcement || ''; settings.announcementStart = data.settings.announcementStart || ''; settings.announcementEnd = data.settings.announcementEnd || ''; updateAnnouncementBar();
+                            settings.holidays = data.settings.holidays || []; updateHolidayBar();
+                            if (data.settings.serverOnline !== undefined) { settings.serverOnline = data.settings.serverOnline; applyServerStatusBadge(); }
+                        }
+                    }
+                }
+                safeRenderState(history.state || { view: 'dashboard' });
+                showToast("รีเฟรชข้อมูลสำเร็จ");
+            } catch (e) { showToast("รีเฟรชข้อมูลไม่สำเร็จ ลองอีกครั้ง", "error"); }
+            if (icon) icon.classList.remove('fa-spin');
+        };
+
+        function isAnnouncementActive() {
+            const text = (settings.announcement || '').trim();
+            if (!text) return false;
+            const now = new Date();
+            if (settings.announcementStart) { const start = new Date(settings.announcementStart); if (!isNaN(start) && now < start) return false; }
+            if (settings.announcementEnd) { const end = new Date(settings.announcementEnd); if (!isNaN(end) && now > end) return false; }
+            return true;
+        }
+        function updateAnnouncementBar() {
+            const bar = document.getElementById('announcementBar');
+            const textEl = document.getElementById('announcementText');
+            if (!bar || !textEl) return;
+            if (isAnnouncementActive()) { textEl.innerText = (settings.announcement || '').trim(); bar.classList.remove('hidden'); }
+            else { bar.classList.add('hidden'); textEl.innerText = ''; }
+        }
+
+        // ===== ระบบวันหยุด =====
+        function getHolidayForDate(dateStr) {
+            return (settings.holidays || []).find(h => h.date === dateStr) || null;
+        }
+        function todayDateStr() {
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        }
+        function updateHolidayBar() {
+            const bar = document.getElementById('holidayBar');
+            const textEl = document.getElementById('holidayBarText');
+            if (!bar || !textEl) return;
+            const todayHoliday = getHolidayForDate(todayDateStr());
+            if (todayHoliday) { textEl.innerText = `วันนี้เป็นวันหยุด: ${todayHoliday.label}`; bar.classList.remove('hidden'); }
+            else { bar.classList.add('hidden'); textEl.innerText = ''; }
+        }
+
+        // ===== สถานะเซิร์ฟเวอร์ (ออนไลน์/ปิดปรับปรุง) =====
+        function applyServerStatusBadge() {
+            const badge = document.getElementById('serverStatusBadge');
+            const dot = document.getElementById('serverStatusDot');
+            const text = document.getElementById('serverStatusText');
+            if (!badge || !dot || !text) return;
+            const online = settings.serverOnline !== false;
+            badge.classList.remove('hidden'); badge.classList.add('inline-flex');
+            if (online) {
+                badge.className = 'inline-flex items-center gap-1 text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full border bg-emerald-50 border-emerald-200 text-emerald-700';
+                dot.className = 'w-1.5 h-1.5 rounded-full bg-emerald-500';
+                text.innerText = 'ออนไลน์';
+            } else {
+                badge.className = 'inline-flex items-center gap-1 text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full border bg-rose-50 border-rose-200 text-rose-600';
+                dot.className = 'w-1.5 h-1.5 rounded-full bg-rose-500';
+                text.innerText = 'ปิดปรับปรุง';
+            }
+        }
+        window.toggleServerOnline = function() {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่เปลี่ยนสถานะนี้ได้", "error"); return; }
+            const newVal = !(settings.serverOnline !== false);
+            showConfirm(newVal ? "เปิดสถานะออนไลน์" : "ปิดสถานะออนไลน์ (ปรับปรุงเว็บไซต์)", newVal ? "ต้องการเปลี่ยนสถานะเว็บไซต์กลับเป็นออนไลน์ใช่หรือไม่?" : "ต้องการตั้งสถานะเว็บไซต์เป็น 'ปิดปรับปรุง' ใช่หรือไม่? (ผู้ใช้ทุกคนจะเห็นสถานะนี้)", () => {
+                settings.serverOnline = newVal;
+                applyServerStatusBadge();
+                logAction(newVal ? 'เปิดสถานะเว็บไซต์เป็นออนไลน์' : 'ปิดสถานะเว็บไซต์ (ปรับปรุง)', '', 'settings');
+                saveData('full'); showToast(newVal ? "ตั้งสถานะเป็นออนไลน์แล้ว" : "ตั้งสถานะเป็นปิดปรับปรุงแล้ว"); renderAdminTab();
+            });
+        };
+
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            let icon = type === 'success' ? '<i class="fas fa-check-circle text-emerald-500 text-xl sm:text-2xl"></i>' : (type === 'info' ? '<i class="fas fa-sync fa-spin text-blue-500 text-xl sm:text-2xl"></i>' : '<i class="fas fa-exclamation-circle text-rose-500 text-xl sm:text-2xl"></i>');
+            let bg = type === 'success' ? 'bg-white border-emerald-100' : (type === 'info' ? 'bg-white border-blue-100' : 'bg-white border-rose-100');
+            toast.className = `flex items-center gap-3 sm:gap-4 p-3 sm:p-4 rounded-2xl shadow-xl border ${bg} pointer-events-auto toast-enter mx-4 sm:mx-0`;
+            toast.innerHTML = `${icon} <span class="font-bold text-slate-700 text-sm sm:text-base">${message}</span>`;
+            container.appendChild(toast); setTimeout(() => { toast.classList.remove('toast-enter'); toast.classList.add('toast-enter-active'); }, 10);
+            setTimeout(() => { toast.classList.remove('toast-enter-active'); toast.classList.add('toast-exit-active'); setTimeout(() => { container.removeChild(toast); }, 3000); }, 3000);
+        }
+
+        let confirmCallback = null, promptCallback = null;
+        function showConfirm(title, message, callback) { document.getElementById('confirmTitle').innerText = title; document.getElementById('confirmMessage').innerText = message; confirmCallback = callback; const modal = document.getElementById('confirmModal');
+            const box = document.getElementById('confirmModalBox'); modal.classList.remove('hidden'); setTimeout(() => { box.classList.remove('scale-95', 'opacity-0'); box.classList.add('scale-100', 'opacity-100'); }, 10);
+        }
+        function closeConfirm() { const modal = document.getElementById('confirmModal'); const box = document.getElementById('confirmModalBox');
+            box.classList.remove('scale-100', 'opacity-100'); box.classList.add('scale-95', 'opacity-0'); setTimeout(() => { modal.classList.add('hidden'); confirmCallback = null; }, 300);
+        }
+        document.getElementById('confirmBtn').addEventListener('click', () => { if (confirmCallback) confirmCallback(); closeConfirm(); });
+        function showPrompt(title, message, defaultValue, callback) { document.getElementById('promptTitle').innerText = title; document.getElementById('promptMessage').innerText = message; document.getElementById('promptInput').value = defaultValue; promptCallback = callback;
+            const modal = document.getElementById('promptModal'); const box = document.getElementById('promptModalBox'); modal.classList.remove('hidden'); setTimeout(() => { box.classList.remove('scale-95', 'opacity-0'); box.classList.add('scale-100', 'opacity-100'); document.getElementById('promptInput').focus(); }, 10);
+        }
+        function closePrompt() { const modal = document.getElementById('promptModal'); const box = document.getElementById('promptModalBox');
+            box.classList.remove('scale-100', 'opacity-100'); box.classList.add('scale-95', 'opacity-0'); setTimeout(() => { modal.classList.add('hidden'); promptCallback = null; }, 300);
+        }
+        document.getElementById('promptBtn').addEventListener('click', () => { const val = document.getElementById('promptInput').value.trim(); if (promptCallback) promptCallback(val); closePrompt(); });
+        function renderAdminLogin() {
+            if (isAdmin) { navigate('admin'); return; }
+            let rememberedUser = ''; let rememberedPass = ''; let rememberedChecked = false;
+            try {
+                const saved = localStorage.getItem('bnksa_remember_login');
+                if (saved) { const parsed = JSON.parse(saved); rememberedUser = parsed.u || ''; rememberedPass = parsed.p || ''; rememberedChecked = true; }
+            } catch (e) {}
+            document.getElementById('mainContent').innerHTML = `<div class="max-w-md mx-auto mt-8 sm:mt-16 bg-white rounded-[2rem] shadow-xl border border-slate-100 p-6 sm:p-10 transform transition-all mx-2 sm:mx-auto"><div class="text-center mb-8 sm:mb-10"><div class="w-16 h-16 sm:w-20 sm:h-20 bg-indigo-50 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6 text-indigo-600 text-2xl sm:text-3xl shadow-inner border border-indigo-100"><i class="fas fa-user-shield"></i></div><h2 class="text-2xl sm:text-3xl font-extrabold text-slate-800">ผู้ดูแลระบบ</h2><p class="text-sm sm:text-base text-slate-500 mt-2 font-medium">จัดการระบบเช็คชื่อนักเรียน</p></div><div class="space-y-4 sm:space-y-5"><div><label class="block text-xs sm:text-sm font-bold text-slate-700 mb-2 ml-1">ชื่อผู้ใช้งาน</label><input type="text" id="adminUser" value="${rememberedUser}" class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5 text-base focus:outline-none focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 font-medium text-slate-700" placeholder="Username" autocapitalize="off" autocorrect="off"></div><div><label class="block text-xs sm:text-sm font-bold text-slate-700 mb-2 ml-1">รหัสผ่าน</label><div class="relative"><input type="password" id="adminPass" value="${rememberedPass}" class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5 pr-12 text-base focus:outline-none focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 font-medium text-slate-700" placeholder="••••••••" onkeyup="if(event.key === 'Enter') window.processLogin()"><button type="button" onclick="window.toggleLoginPasswordVisibility()" tabindex="-1" class="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600 transition-colors"><i class="fas fa-eye" id="loginPassToggleIcon"></i></button></div></div><label class="flex items-center gap-2 pl-1 cursor-pointer select-none"><input type="checkbox" id="rememberLoginCheck" ${rememberedChecked ? 'checked' : ''} class="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"><span class="text-xs sm:text-sm font-bold text-slate-600">จดจำการเข้าสู่ระบบ</span></label><div class="pt-2 sm:pt-4 space-y-3"><button onclick="window.processLogin()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl py-3 sm:py-4 font-bold text-base sm:text-lg transition-all shadow-lg shadow-indigo-200 flex items-center justify-center gap-2"><i class="fas fa-sign-in-alt"></i> เข้าสู่ระบบ</button><button onclick="window.navigate('dashboard')" class="w-full bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 rounded-2xl py-3 sm:py-3.5 font-bold text-sm sm:text-base transition-colors">กลับหน้าหลัก</button></div></div></div>`;
+        }
+
+        window.toggleLoginPasswordVisibility = function() {
+            const input = document.getElementById('adminPass');
+            const icon = document.getElementById('loginPassToggleIcon');
+            if (!input || !icon) return;
+            const showing = input.type === 'text';
+            input.type = showing ? 'password' : 'text';
+            icon.classList.toggle('fa-eye', showing);
+            icon.classList.toggle('fa-eye-slash', !showing);
+        };
+
+        function processLogin() {
+            const uname = document.getElementById('adminUser').value.trim();
+            const pass = document.getElementById('adminPass').value;
+            // ล็อกอินด้วยชื่อผู้ใช้ตัวพิมพ์เล็ก-ใหญ่แบบไหนก็ได้ (ไม่สนตัวพิมพ์ใหญ่-เล็ก) ส่วนรหัสผ่านยังคงตรวจสอบตามตัวพิมพ์จริง
+            const found = (settings.users || []).find(u => u.username.toLowerCase() === uname.toLowerCase() && u.password === pass);
+            if (found) {
+                isAdmin = true; currentUser = { id: found.id, username: found.username, name: found.name, role: found.role };
+                const remember = document.getElementById('rememberLoginCheck').checked;
+                try {
+                    if (remember) localStorage.setItem('bnksa_remember_login', JSON.stringify({ u: uname, p: pass }));
+                    else localStorage.removeItem('bnksa_remember_login');
+                } catch (e) {}
+                document.getElementById('btnAdminLogin').classList.add('hidden'); document.getElementById('btnAdminPanel').classList.remove('hidden'); document.getElementById('btnAdminLogout').classList.remove('hidden'); updateCurrentUserBadge(); showToast("เข้าสู่ระบบสำเร็จ");
+                logAction('เข้าสู่ระบบ', `เข้าสู่ระบบด้วยบัญชี ${found.username}`, 'account'); saveData('full');
+                navigate('admin');
+            } else showToast("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง", "error");
+        }
+        function logoutAdmin() {
+            showConfirm("ออกจากระบบ", "คุณต้องการออกจากระบบผู้ดูแลใช่หรือไม่?", () => {
+                if (currentUser) { logAction('ออกจากระบบ', `ออกจากระบบบัญชี ${currentUser.username}`, 'account'); saveData('full'); }
+                isAdmin = false; currentUser = null;
+                document.getElementById('btnAdminLogin').classList.remove('hidden'); document.getElementById('btnAdminPanel').classList.add('hidden'); document.getElementById('btnAdminLogout').classList.add('hidden'); updateCurrentUserBadge(); showToast("ออกจากระบบแล้ว"); navigate('dashboard');
+            });
+        }
+
+        // ===== ออกจากระบบอัตโนมัติเมื่อไม่มีการใช้งานเกิน 30 นาที =====
+        let lastActivityTime = Date.now();
+        const INACTIVITY_LIMIT_MS = 30 * 60 * 1000;
+        function initInactivityTracking() {
+            ['click', 'keydown', 'touchstart', 'mousemove', 'scroll'].forEach(evt => {
+                window.addEventListener(evt, () => { lastActivityTime = Date.now(); }, { passive: true });
+            });
+            setInterval(() => {
+                if (isAdmin && (Date.now() - lastActivityTime > INACTIVITY_LIMIT_MS)) {
+                    autoLogoutDueToInactivity();
+                }
+            }, 60000);
+        }
+        function autoLogoutDueToInactivity() {
+            if (!isAdmin) return;
+            const uname = currentUser ? currentUser.username : '';
+            if (currentUser) { logAction('ออกจากระบบอัตโนมัติ (หมดเวลา)', `ไม่มีการใช้งานเกิน 30 นาที บัญชี ${uname}`, 'account'); saveData('full'); }
+            isAdmin = false; currentUser = null;
+            document.getElementById('btnAdminLogin').classList.remove('hidden'); document.getElementById('btnAdminPanel').classList.add('hidden'); document.getElementById('btnAdminLogout').classList.add('hidden'); updateCurrentUserBadge();
+            showToast("ออกจากระบบอัตโนมัติ เนื่องจากไม่มีการใช้งานเกิน 30 นาที", "error");
+            navigate('dashboard');
+        }
+
+        function renderDashboard() {
+            if(isAdmin) { document.getElementById('btnAdminLogin').classList.add('hidden');
+                document.getElementById('btnAdminPanel').classList.remove('hidden'); document.getElementById('btnAdminLogout').classList.remove('hidden'); }
+            const termCount = settings.termCount === 3 ? 3 : 2;
+            const termButtonsHtml = Array.from({length: termCount}, (_, i) => i + 1).map(tn => {
+                const st = getTermStatus(tn, settings.year);
+                const isActiveBtn = String(settings.term) === String(tn);
+                const guestLocked = st === 'not_opened' && !isAdmin;
+                if (guestLocked) {
+                    return `<button disabled title="เทอมนี้ยังไม่เปิดใช้งาน" class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg font-bold text-xs sm:text-sm flex items-center gap-1.5 bg-slate-200 text-slate-400 cursor-not-allowed"><i class="fas fa-lock"></i> เทอม ${tn}</button>`;
+                }
+                const activeCls = isActiveBtn ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white active:scale-95';
+                return `<button onclick="window.switchActiveTerm('${tn}')" class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg font-bold text-xs sm:text-sm transition-all flex items-center gap-1.5 ${activeCls}">${isActiveBtn ? '<i class="fas fa-check-circle"></i>' : ''} เทอม ${tn}</button>`;
+            }).join('');
+            const stCfg = termStatusCardConfig(currentTermStatus());
+            const justSwitched = !!window.__justSwitchedTerm; window.__justSwitchedTerm = false;
+            let html = `<div id="termStatusCard" class="mb-6 sm:mb-8 ${stCfg.wrap} border-2 rounded-2xl sm:rounded-3xl p-4 sm:p-6 transition-all ${justSwitched ? 'term-switch-flash term-switch-ring' : ''}"><div class="flex flex-col items-center text-center gap-1.5 mb-4"><div class="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-white shadow-sm flex items-center justify-center relative"><span class="absolute top-0 right-0 inline-flex h-3 w-3 rounded-full ${stCfg.dot}"></span><i class="fas ${stCfg.icon} ${stCfg.iconCls} text-xl sm:text-2xl"></i></div><p class="font-extrabold text-sm sm:text-lg ${stCfg.textCls}">${stCfg.text}</p><p class="text-[10px] sm:text-xs text-slate-500 font-bold"><i class="fas fa-calendar-alt"></i> ภาคเรียนที่ ${settings.term} ปีการศึกษา ${settings.year}</p></div><div class="flex items-center justify-center gap-1.5 bg-slate-100 p-1 rounded-xl w-max mx-auto">${termButtonsHtml}</div></div>`;
+            html += `<div class="text-center mb-8 sm:mb-12"><h2 class="text-2xl sm:text-4xl font-extrabold text-slate-800 tracking-tight">เลือกห้องเรียน</h2><p class="text-sm sm:text-lg text-slate-500 mt-2 sm:mt-3">เลือกระดับชั้นเพื่อดำเนินการเช็คชื่อหรือดูรายงาน</p></div><div class="grid grid-cols-1 gap-6 sm:gap-10">`;
+            const levelColors = {
+                1: { gradient: 'from-blue-500 to-indigo-600', icon: 'text-blue-500' },
+                2: { gradient: 'from-emerald-500 to-teal-600', icon: 'text-emerald-500' },
+                3: { gradient: 'from-amber-500 to-orange-600', icon: 'text-amber-500' },
+                4: { gradient: 'from-rose-500 to-pink-600', icon: 'text-rose-500' },
+                5: { gradient: 'from-purple-500 to-violet-600', icon: 'text-purple-500' },
+                6: { gradient: 'from-cyan-500 to-sky-600', icon: 'text-cyan-500' }
+            };
+            for (let i = 1; i <= 6; i++) {
+                let count = settings.roomCounts[`m${i}`] || 0; if (count === 0) continue;
+                let levelGradient = levelColors[i].gradient;
+                let iconColor = levelColors[i].icon;
+                html += `<div class="bg-white rounded-3xl sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-8 relative overflow-hidden group/level"><div class="absolute top-0 left-0 w-1.5 sm:w-2.5 h-full bg-gradient-to-b ${levelGradient}"></div><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800 mb-4 sm:mb-8 flex items-center gap-2 sm:gap-3 pl-3 sm:pl-4"><i class="fas fa-layer-group ${iconColor}"></i> มัธยมศึกษาปีที่ ${i}</h3><div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-5 pl-3 sm:pl-4">`;
+                for (let j = 1; j <= count; j++) { html += `<button onclick="window.navigate('classroom', {roomId: 'm${i}_${j}'})" class="bg-slate-50 hover:bg-white border border-slate-200 hover:border-indigo-300 rounded-xl sm:rounded-2xl p-3 sm:p-5 transition-all hover:-translate-y-1 hover:shadow-lg hover:shadow-indigo-100 text-left flex flex-col justify-between min-h-[80px] sm:min-h-[120px] group"><span class="text-xl sm:text-3xl font-black text-slate-700 group-hover:text-indigo-600 transition-colors">ม.${i}/${j}</span><span class="text-[10px] sm:text-sm text-slate-500 font-bold mt-2 sm:mt-3 flex items-center justify-between">เข้าสู่ห้องเรียน <i class="fas fa-arrow-right text-indigo-400 opacity-0 group-hover:opacity-100 transform -translate-x-3 group-hover:translate-x-0 transition-all duration-300"></i></span></button>`;
+                }
+                html += `</div></div>`;
+            }
+
+            html += `<div class="bg-white rounded-3xl sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-8 relative overflow-hidden group/level"><div class="absolute top-0 left-0 w-1.5 sm:w-2.5 h-full bg-gradient-to-b from-slate-500 to-slate-700"></div><button onclick="window.navigate('school_summary')" class="w-full text-left flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 pl-3 sm:pl-4 group"><div class="flex items-center gap-3 sm:gap-4"><div class="w-10 h-10 sm:w-14 sm:h-14 bg-slate-100 text-slate-700 rounded-xl sm:rounded-2xl flex items-center justify-center text-xl sm:text-2xl shrink-0 group-hover:scale-110 transition-transform shadow-sm"><i class="fas fa-school"></i></div><div><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800 flex items-center gap-2">รวมทุกห้อง</h3><p class="text-xs sm:text-sm text-slate-500 mt-1 font-medium">ภาพรวมจำนวนนักเรียนและสถิติการมาเรียนทั้งโรงเรียนรายเดือน</p></div></div><span class="shrink-0 bg-slate-700 group-hover:bg-slate-800 text-white px-4 py-2.5 sm:px-6 sm:py-3 rounded-xl font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-2 w-full sm:w-auto justify-center"><i class="fas fa-chart-pie"></i> ดูภาพรวมทั้งโรงเรียน</span></button></div>`;
+            
+            html += `</div><div class="mt-12 sm:mt-20 mb-8 border-t-2 border-slate-200/60 pt-10 sm:pt-16"><div class="text-center mb-8 sm:mb-10"><span class="bg-indigo-100 text-indigo-700 font-bold px-3 py-1 sm:px-4 sm:py-1.5 rounded-full text-xs sm:text-sm inline-block mb-3 sm:mb-4 shadow-sm border border-indigo-200">สำหรับคุณครูผู้สอน</span><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800 flex items-center justify-center gap-2 sm:gap-3"><i class="fas fa-chalkboard-teacher text-indigo-500"></i> ระบบจัดการประจำตัวครู</h2><p class="text-sm sm:text-lg text-slate-500 mt-2 sm:mt-3 font-medium px-4">เข้าถึงรายวิชาทั้งหมดของท่านเพื่อทำการเช็คชื่อ หรือดูรายงาน</p></div>`;
+            if (teachers.length === 0) { 
+                html += `<div class="text-center text-slate-400 p-6 sm:p-8 bg-slate-50 rounded-3xl border border-slate-200 border-dashed text-sm sm:text-lg font-medium">ยังไม่มีข้อมูลครูผู้สอนในระบบ</div>`;
+            } else { 
+                // Render teachers grouped by department
+                departmentsList.forEach(dept => {
+                    const deptTeachers = teachers.filter(t => (t.department || 'ระบบ/อื่นๆ') === dept);
+                    if (deptTeachers.length > 0) {
+                        const cfg = deptConfig[dept];
+                        html += `<div class="mb-8"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-4 flex items-center gap-3 border-b border-slate-200 pb-3"><div class="w-8 h-8 ${cfg.bg} ${cfg.text} rounded-lg flex items-center justify-center text-sm shadow-sm"><i class="fas ${cfg.icon}"></i></div>${dept}</h3><div class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-6">`;
+                        deptTeachers.sort((a,b) => a.name.localeCompare(b.name)).forEach(t => { 
+                            const taughtSubjects = activeSubjects().filter(s => s.teacher === t.name || s.teacher2 === t.name);
+                            html += `<button onclick="window.navigate('teacher_dash', {teacherName: '${t.name}'})" class="bg-white border ${cfg.border} rounded-2xl sm:rounded-3xl p-3 sm:p-6 transition-all hover:shadow-xl hover:-translate-y-1 text-left flex flex-col items-center text-center group relative overflow-hidden ${cfg.hover} min-h-[130px] sm:min-h-[170px] justify-start"><div class="w-10 h-10 sm:w-16 sm:h-16 ${cfg.bg} ${cfg.text} rounded-full flex items-center justify-center text-lg sm:text-2xl mb-2 sm:mb-4 group-hover:scale-110 transition-all shadow-sm shrink-0"><i class="fas fa-user-tie"></i></div><h4 class="font-extrabold text-xs sm:text-lg text-slate-800 group-hover:${cfg.text} relative w-full whitespace-nowrap overflow-hidden text-ellipsis px-1 leading-tight" title="${t.name}">${t.name}</h4><p class="text-[10px] sm:text-xs text-slate-500 mt-1 font-bold bg-slate-50 px-2 py-0.5 rounded-full border border-slate-200 shadow-sm relative mt-auto">${taughtSubjects.length} วิชา</p></button>`;
+                        });
+                        html += `</div></div>`;
+                    }
+                });
+            }
+            html += `</div>`; document.getElementById('mainContent').innerHTML = html;
+        }
+
+        function renderSchoolSummary(selectedMonth = null) {
+            let currentDate = new Date();
+            if (!selectedMonth) { let month = (currentDate.getMonth() + 1).toString().padStart(2, '0'); selectedMonth = `${currentDate.getFullYear()}-${month}`; }
+            const monthNames = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+            const displayMonthYear = `${monthNames[parseInt(selectedMonth.split('-')[1])-1]} ${parseInt(selectedMonth.split('-')[0])+543}`;
+            const activeStudents = students.filter(s => s.status !== 'resigned');
+            const resignedCount = students.length - activeStudents.length;
+            const levelCounts = computeLevelCounts();
+            const totals = computeSchoolMonthlyStats(selectedMonth);
+            const totalRecorded = Object.values(totals).reduce((a, b) => a + b, 0);
+            const roomCount = getRoomList().length;
+
+            let html = `<div class="mb-4 sm:mb-8 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 p-4 sm:p-8 relative overflow-hidden"><div class="absolute right-0 top-0 w-1/3 h-full bg-gradient-to-l from-slate-100 to-transparent opacity-60"></div><div class="relative z-10 flex gap-3 sm:gap-4 items-center"><div class="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-slate-700 to-slate-900 rounded-2xl flex items-center justify-center text-white text-2xl sm:text-3xl shadow-lg shrink-0"><i class="fas fa-school"></i></div><div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">รวมทุกห้อง (ภาพรวมทั้งโรงเรียน)</h2><p class="text-slate-500 font-bold mt-1 text-xs sm:text-sm">${roomCount} ห้องเรียน ทุกระดับชั้น</p></div></div><div class="relative z-10 flex flex-wrap gap-1.5 sm:gap-2 w-full lg:w-auto mt-2 lg:mt-0 items-center"><input type="month" value="${selectedMonth}" onchange="window.navigate('school_summary', {month: this.value})" class="flex-1 lg:flex-none bg-slate-50 border border-slate-200 text-slate-700 px-3 py-2 sm:py-2.5 rounded-xl text-sm font-bold outline-none"><button onclick="window.exportSectionInfographicPDF('schoolInfographicSection', 'ภาพรวมทั้งโรงเรียน_${selectedMonth}', 'pdf')" class="flex-1 lg:flex-none bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 sm:py-2.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-sm"><i class="fas fa-file-pdf"></i> <span class="hidden sm:inline">PDF</span></button><button onclick="window.exportSectionInfographicPDF('schoolInfographicSection', 'ภาพรวมทั้งโรงเรียน_${selectedMonth}', 'image')" class="flex-1 lg:flex-none bg-pink-600 hover:bg-pink-700 text-white px-3 py-2 sm:py-2.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-sm"><i class="fas fa-file-image"></i> <span class="hidden sm:inline">รูปภาพ</span></button><button onclick="window.navigate('dashboard')" class="flex-1 lg:flex-none bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-2 sm:py-2.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-sm"><i class="fas fa-arrow-left"></i> กลับ</button></div></div>`;
+
+            html += `<div id="schoolInfographicSection">`;
+
+            html += `<div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-4 mb-4 sm:mb-8">
+                <div class="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 text-center shadow-sm"><div class="w-9 h-9 sm:w-11 sm:h-11 bg-slate-100 text-slate-700 rounded-full flex items-center justify-center mx-auto mb-2 text-sm sm:text-base"><i class="fas fa-users"></i></div><div class="text-2xl sm:text-4xl font-black text-slate-800">${students.length}</div><div class="text-[10px] sm:text-xs font-bold text-slate-500 mt-1">นักเรียนทั้งหมด</div></div>
+                <div class="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 text-center shadow-sm"><div class="w-9 h-9 sm:w-11 sm:h-11 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-2 text-sm sm:text-base"><i class="fas fa-user-check"></i></div><div class="text-2xl sm:text-4xl font-black text-emerald-600">${activeStudents.length}</div><div class="text-[10px] sm:text-xs font-bold text-slate-500 mt-1">กำลังเรียนอยู่</div></div>
+                <div class="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 text-center shadow-sm col-span-2 sm:col-span-1"><div class="w-9 h-9 sm:w-11 sm:h-11 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-2 text-sm sm:text-base"><i class="fas fa-user-minus"></i></div><div class="text-2xl sm:text-4xl font-black text-rose-500">${resignedCount}</div><div class="text-[10px] sm:text-xs font-bold text-slate-500 mt-1">ออก/ย้าย</div></div>
+            </div>`;
+
+            html += `<div class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-8 mb-4 sm:mb-8"><h3 class="text-base sm:text-2xl font-extrabold text-slate-800 mb-4 sm:mb-6 flex items-center gap-2"><i class="far fa-calendar-check text-indigo-500"></i> สถิติการมาเรียนทั้งโรงเรียน เดือน${displayMonthYear}</h3><div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2 sm:gap-3">${Object.entries(totals).map(([name, count]) => { const style = statuses[name];
+                return `<div class="bg-white border border-slate-200 rounded-xl sm:rounded-2xl p-3 sm:p-4 text-center flex flex-col items-center justify-center gap-1.5"><div class="w-8 h-8 sm:w-10 sm:h-10 ${style.bg} ${style.color} rounded-full flex items-center justify-center text-sm sm:text-lg mb-1 border ${style.border}"><i class="fas ${style.icon}"></i></div><div class="${style.color} text-[9px] sm:text-xs font-extrabold">${name}</div><div class="text-xl sm:text-3xl font-black text-slate-800">${count}</div></div>`; }).join('')}</div>${totalRecorded === 0 ? `<div class="text-center text-slate-400 mt-4 text-xs sm:text-sm font-medium"><i class="fas fa-info-circle"></i> ยังไม่มีข้อมูลการเช็คชื่อในเดือนนี้</div>` : ''}</div>`;
+
+            html += `<div class="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6">
+                <div class="bg-white rounded-2xl sm:rounded-[2rem] border border-slate-200 shadow-sm p-4 sm:p-6"><h4 class="font-extrabold text-sm sm:text-lg text-slate-800 mb-3 sm:mb-4 flex items-center gap-2"><i class="fas fa-layer-group text-blue-500"></i> จำนวนนักเรียนแต่ละระดับชั้น</h4><div class="relative h-56 sm:h-72"><canvas id="schoolLevelChart"></canvas></div></div>
+                <div class="bg-white rounded-2xl sm:rounded-[2rem] border border-slate-200 shadow-sm p-4 sm:p-6"><h4 class="font-extrabold text-sm sm:text-lg text-slate-800 mb-3 sm:mb-4 flex items-center gap-2"><i class="fas fa-chart-pie text-purple-500"></i> สัดส่วนสถานะการมาเรียน (เดือน${displayMonthYear})</h4><div class="relative h-56 sm:h-72"><canvas id="schoolStatusChart"></canvas></div><div id="schoolStatusChartLegend" class="mt-4"></div></div>
+            </div>`;
+
+            html += `</div>`;
+
+            document.getElementById('mainContent').innerHTML = html;
+            const levelCtxEl = document.getElementById('schoolLevelChart');
+            if (levelCtxEl && typeof Chart !== 'undefined') {
+                new Chart(levelCtxEl, { type: 'bar', data: { labels: [1,2,3,4,5,6].map(i => `ม.${i}`), datasets: [{ label: 'จำนวนนักเรียน', data: [1,2,3,4,5,6].map(i => levelCounts[i] || 0), backgroundColor: ['#3b82f6','#10b981','#f59e0b','#f43f5e','#a855f7','#06b6d4'], borderRadius: 8, maxBarThickness: 50 }] },
+                    options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 24 } }, plugins: { legend: { display: false },
+                        datalabels: { display: (ctx) => ctx.dataset.data[ctx.dataIndex] > 0, color: chartTextColor(), anchor: 'end', align: 'top', offset: 2, font: { weight: 'bold', size: isMobileView() ? 10 : 12 }, formatter: percentLabelFormatter } },
+                        scales: { x: { ticks: { color: chartTextColor(), font: { weight: 'bold', size: isMobileView() ? 10 : 12 } }, grid: { display: false } }, y: { beginAtZero: true, ticks: { color: chartTextColor(), precision: 0 }, grid: { color: chartGridColor() } } } } });
+            }
+            makeStatusDoughnutChart('schoolStatusChart', totals);
+        }
+
+        function openTeacherDashboard(teacherName) {
+            const tSubjects = activeSubjects().filter(s => s.teacher === teacherName || s.teacher2 === teacherName);
+            const periods = [0, 1, 2, 3, 4, 'lunch', 5, 6, 7, 8];
+            let scheduleHtml = `<div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6 mb-6 overflow-hidden"><h3 class="font-extrabold text-base sm:text-lg text-slate-800 mb-4 flex items-center gap-2"><i class="fas fa-calendar-alt text-indigo-500"></i> ตารางสอนรายสัปดาห์</h3><div class="overflow-x-auto border border-slate-200 rounded-xl shadow-sm w-full"><table class="w-full text-center border-collapse min-w-[700px] sm:min-w-[950px] text-[10px] sm:text-sm"><thead class="bg-slate-100 text-slate-700"><tr><th class="p-2 sm:p-3 border-b border-slate-300 w-16 sm:w-24 bg-slate-100 sticky left-0 z-10">วัน / คาบ</th>`;
+            periods.forEach(p => { if (p === 'lunch') { scheduleHtml += `<th class="p-2 sm:p-3 border-b border-l border-amber-200 w-14 sm:w-20 bg-amber-50 text-amber-700"><i class="fas fa-utensils"></i><span class="hidden sm:inline"> พักเที่ยง</span></th>`; } else { scheduleHtml += `<th class="p-2 sm:p-3 border-b border-l border-slate-200 w-16 sm:w-24">คาบ ${p}</th>`; } });
+            scheduleHtml += `</tr></thead><tbody class="divide-y divide-slate-200">`;
+            for(let d = 1; d <= 5; d++) {
+                let subsOnDay = [];
+                tSubjects.forEach(sub => { if(sub.schedules) { sub.schedules.forEach(sch => { if(parseInt(sch.day) === d) subsOnDay.push({ ...sub, period: parseInt(sch.period) }); }); } });
+                scheduleHtml += `<tr class="hover:bg-slate-50 transition-colors"><td class="p-2 sm:p-3 font-extrabold text-slate-700 border-slate-300 bg-slate-50 sticky left-0 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">${daysLabel[d-1].replace('วัน','')}</td>`;
+                periods.forEach(p => { if (p === 'lunch') { scheduleHtml += `<td class="p-1 sm:p-2 border-l border-amber-100 bg-amber-50/70 h-full align-middle"><div class="flex flex-col items-center justify-center h-full min-h-[50px] text-amber-500"><i class="fas fa-utensils text-xs sm:text-sm"></i></div></td>`; return; } const subj = subsOnDay.find(s => s.period === p); if (subj) { scheduleHtml += `<td class="p-1 sm:p-2 border-l border-slate-100 bg-indigo-50/40 hover:bg-indigo-100 transition-colors h-full align-middle"><div class="flex flex-col items-center justify-center h-full min-h-[50px] p-1 sm:p-1.5 rounded-lg cursor-pointer" onclick="window.navigate('attendance', {subjectId: '${subj.id}', period: ${p}, fromTeacherDash: true})"><span class="font-black text-indigo-800 text-[9px] sm:text-xs leading-tight line-clamp-2" title="${subj.name}">${subj.name}</span><span class="text-[8px] sm:text-[10px] font-bold text-slate-600 mt-1 bg-white border border-indigo-200 px-1.5 py-0.5 rounded shadow-sm">ม.${subj.roomId.replace('m', '').replace('_', '/')}</span></div></td>`;
+                } else { scheduleHtml += `<td class="p-1 sm:p-2 border-l border-slate-100 text-slate-300 font-medium">-</td>`; } });
+                scheduleHtml += `</tr>`;
+            }
+            scheduleHtml += `</tbody></table></div></div>`;
+            let html = `<div class="mb-4 sm:mb-6 flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-6 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-1/3 h-full bg-gradient-to-l from-indigo-50 to-transparent opacity-60"></div><div class="relative z-10 flex gap-3 sm:gap-5 items-center"><div class="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-indigo-500 to-blue-600 rounded-full flex items-center justify-center text-white text-xl sm:text-3xl shadow-lg shadow-indigo-200 shrink-0"><i class="fas fa-chalkboard-teacher"></i></div><div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">ครู : ${teacherName}</h2><p class="text-slate-600 font-bold mt-1 flex flex-wrap items-center gap-2"><span class="bg-indigo-100 text-indigo-800 px-2 py-1 rounded text-[10px] sm:text-sm border border-indigo-200"><i class="fas fa-book-open"></i> สอนทั้งหมด ${tSubjects.length} วิชา</span></p></div></div><div class="relative z-10 w-full md:w-auto"><button onclick="window.navigate('dashboard')" class="w-full md:w-auto bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2.5 sm:py-3.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 font-bold text-sm sm:text-base"><i class="fas fa-arrow-left"></i> กลับ</button></div></div>${scheduleHtml}<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">`;
+            if (tSubjects.length === 0) { html += `<div class="col-span-full text-center text-slate-400 p-8 sm:p-12 bg-white rounded-3xl border border-slate-200 border-dashed shadow-sm text-sm sm:text-lg font-medium">ไม่มีรายวิชาที่สอนในระบบ</div>`;
+            } else {
+                tSubjects.sort((a,b) => a.roomId.localeCompare(b.roomId) || a.name.localeCompare(b.name)).forEach(sub => {
+                    let schedCards = (sub.schedules || []).map(sch => `<div class="flex items-center justify-between border-b border-slate-100 last:border-0 py-1.5 sm:py-2"><span class="text-slate-600 text-[10px] sm:text-sm"><i class="far fa-calendar-alt text-indigo-400 w-4"></i> ${daysLabel[sch.day - 1] || 'ไม่ระบุ'}</span><span class="text-indigo-700 font-bold bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 text-[10px] sm:text-xs">คาบ ${sch.period}</span></div>`).join('');
+                    html += `<div class="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-4 sm:p-5 hover:shadow-xl transition-all relative group flex flex-col h-full overflow-hidden stat-card-hover"><div class="absolute top-0 left-0 w-full h-1 bg-indigo-500"></div><div class="flex justify-between items-start mb-2 sm:mb-3 mt-1"><span class="bg-indigo-50 text-indigo-700 border border-indigo-100 text-[10px] sm:text-xs font-black px-2 py-1 rounded w-fit">ห้อง ${formatRoomName(sub.roomId)}</span><span class="bg-slate-100 text-slate-500 border border-slate-200 text-[9px] sm:text-xs font-bold px-2 py-1 rounded w-fit">${sub.credits || 0.5} นก.</span></div><h4 class="font-extrabold text-base sm:text-xl mb-1 text-slate-800 leading-tight line-clamp-2">${sub.name}</h4><p class="text-[10px] sm:text-sm text-slate-500 mb-3 font-mono bg-slate-50 px-2 py-1 rounded w-fit border border-slate-100">${sub.code || 'ไม่มีรหัสวิชา'}</p><div class="bg-slate-50 rounded-xl px-2.5 py-1 mb-4 border border-slate-100 font-medium text-slate-600 flex flex-col">${schedCards}</div><div class="mt-auto flex flex-col gap-2"><button onclick="window.navigate('attendance', {subjectId: '${sub.id}', fromTeacherDash: true})" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 sm:py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-md"><i class="fas fa-clipboard-check"></i> เช็คชื่อ</button><button onclick="window.navigate('subject_summary', {subjectId: '${sub.id}', fromTeacherDash: true})" class="w-full bg-emerald-50 hover:bg-emerald-600 text-emerald-600 hover:text-white border border-emerald-200 hover:border-emerald-600 py-2.5 sm:py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-sm"><i class="fas fa-chart-pie"></i> สรุปผล</button></div></div>`;
+                });
+            }
+            html += `</div>`; document.getElementById('mainContent').innerHTML = html;
+        }
+
+        function openClassroom(roomId, dayIndex = null) {
+            currentRoomId = roomId;
+            if (dayIndex === null) { let today = new Date().getDay(); dayIndex = (today >= 1 && today <= 5) ? today : 1; }
+            
+            const roomNameStr = formatRoomName(roomId);
+            const advData = settings.advisors && settings.advisors[roomId] ? settings.advisors[roomId] : [];
+            let advisorText = "ยังไม่ระบุ";
+            if (Array.isArray(advData)) { let validAdvs = advData.filter(a => a && a.trim() !== "");
+                if (validAdvs.length > 0) advisorText = validAdvs.join(' และ '); }
+
+            const roomSubjects = getRoomSubjects(roomId);
+            const roomStudents = students.filter(s => s.roomId === roomId).sort((a, b) => parseInt(a.number) - parseInt(b.number));
+            const activeStudents = roomStudents.filter(s => s.status !== 'resigned');
+            const daySubjects = [];
+            roomSubjects.forEach(s => { if(!s.schedules) return; const schedsOnDay = s.schedules.filter(sch => parseInt(sch.day) === dayIndex); schedsOnDay.forEach(sch => { daySubjects.push({ ...s, currentPeriod: parseInt(sch.period) }); }); });
+            let html = `<div class="mb-4 sm:mb-8 flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-48 sm:w-64 h-full bg-gradient-to-l from-indigo-50 to-transparent opacity-50"></div><div class="relative z-10"><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2 sm:gap-4"><div class="w-10 h-10 sm:w-14 sm:h-14 bg-indigo-600 text-white rounded-xl sm:rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-200"><i class="fas fa-door-open text-lg sm:text-2xl"></i></div> ห้องเรียน ${roomNameStr}</h2><div class="flex flex-wrap items-center gap-2 mt-3 text-[10px] sm:text-sm"><p class="text-slate-600 bg-slate-100 px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg border border-slate-200 font-bold flex items-center gap-1 sm:gap-2"><i class="fas fa-user-tie text-indigo-500"></i> <span class="hidden sm:inline">ที่ปรึกษา: </span><span class="text-indigo-700">${advisorText}</span></p><p class="text-slate-600 bg-slate-100 px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg border border-slate-200 font-bold flex items-center gap-1 sm:gap-2"><i class="fas fa-users text-blue-500"></i> <span class="hidden sm:inline">นักเรียน: </span><span class="text-blue-700">${activeStudents.length} คน</span></p></div></div><div class="relative z-10 flex flex-wrap gap-2 w-full md:w-auto"><button onclick="window.navigate('room_summary', {roomId: '${roomId}', tab: 'daily'})" class="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 px-3 py-2 sm:px-6 sm:py-3 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-xs sm:text-base"><i class="fas fa-chart-bar"></i> ภาพรวมห้อง</button><button onclick="window.navigate('dashboard')" class="flex-1 md:flex-none bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-2 sm:px-6 sm:py-3 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-xs sm:text-base"><i class="fas fa-arrow-left"></i> กลับ</button></div></div>`;
+            html += `<div class="bg-white rounded-2xl sm:rounded-3xl shadow-sm border border-slate-200 p-3 sm:p-8 mb-6 sm:mb-10"><div class="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4 sm:mb-8"><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800 flex items-center gap-2"><i class="far fa-calendar-alt text-blue-500 text-xl sm:text-3xl"></i> ตารางเรียน</h3><div class="flex overflow-x-auto gap-1.5 sm:gap-2 pb-2 md:pb-0 scrollbar-hide w-full md:w-auto">`;
+            for(let i = 1; i <= 5; i++) { const activeClass = (i === dayIndex) ? 'bg-blue-600 text-white shadow-md border-blue-600' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-blue-300';
+                html += `<button onclick="window.navigate('classroom', {roomId: '${roomId}', dayIndex: ${i}})" class="px-3 sm:px-5 py-2 rounded-lg border font-bold whitespace-nowrap transition-all text-[10px] sm:text-sm flex items-center gap-1 flex-1 justify-center sm:flex-none ${activeClass}">${i === dayIndex ? '<i class="fas fa-check-circle"></i>' : ''} ${daysLabel[i-1].replace('วัน','')}</button>`; }
+            
+            let dObj = new Date();
+            let currentDayOfWeek = dObj.getDay(); let dateToPass = new Date().toISOString().split('T')[0];
+            if (currentDayOfWeek >= 1 && currentDayOfWeek <= 5) { dObj.setDate(dObj.getDate() + (dayIndex - currentDayOfWeek));
+                dateToPass = dObj.toISOString().split('T')[0]; }
+            
+            html += `</div></div><div class="overflow-x-auto rounded-xl border border-slate-200 shadow-sm w-full"><table class="w-full text-left border-collapse min-w-[500px] sm:min-w-[700px]"><thead><tr class="bg-slate-50 text-slate-700 text-[10px] sm:text-sm border-b-2 border-slate-200 uppercase tracking-wider"><th class="p-2 sm:p-5 font-extrabold w-12 sm:w-24 text-center">คาบ</th><th class="p-2 sm:p-5 font-extrabold w-20 sm:w-36">เวลา</th><th class="p-2 sm:p-5 font-extrabold">วิชา / กิจกรรม</th><th class="p-2 sm:p-5 font-extrabold w-24 sm:w-56">ครูผู้สอน</th><th class="p-2 sm:p-5 font-extrabold text-center w-24 sm:w-40">จัดการ</th></tr></thead><tbody class="divide-y divide-slate-100">`;
+            timeSlots.forEach(slot => {
+                if (slot.period === -1) { html += `<tr class="bg-amber-50/70 border-y border-amber-100"><td class="p-2 sm:p-5 text-center font-bold text-amber-600 bg-amber-100/50 text-[10px] sm:text-base" colspan="2"><i class="fas fa-utensils mr-1 sm:mr-2"></i>${slot.time}</td><td class="p-2 sm:p-5 font-black text-amber-700 text-center tracking-widest text-xs sm:text-lg" colspan="3">${slot.name}</td></tr>`; } else {
+                    const subjectInSlot = daySubjects.find(s => s.currentPeriod === slot.period);
+                    
+                    if (subjectInSlot) { html += `<tr class="hover:bg-indigo-50/40 transition-colors group"><td class="p-2 sm:p-5 font-black text-slate-700 text-center bg-slate-50/50 text-xs sm:text-lg">${slot.period}</td><td class="p-2 sm:p-5 font-bold text-slate-500 font-mono bg-slate-50/30 text-[9px] sm:text-base">${slot.time}</td><td class="p-2 sm:p-5"><div class="font-extrabold text-blue-700 text-[11px] sm:text-lg">${subjectInSlot.name}</div>${subjectInSlot.code ? `<div class="text-[8px] sm:text-xs font-bold text-slate-400 mt-1 uppercase bg-slate-100 inline-block px-1.5 py-0.5 rounded border border-slate-200">${subjectInSlot.code}</div>` : ''}</td><td class="p-2 sm:p-5 font-bold text-slate-600 text-[9px] sm:text-base"><div class="flex items-center gap-2"><div class="hidden sm:flex w-8 h-8 rounded-full bg-slate-100 items-center justify-center text-slate-400 border border-slate-200"><i class="fas fa-chalkboard-teacher"></i></div>${subjectInSlot.teacher || '-'}${subjectInSlot.teacher2 ? '<br>และ ' + subjectInSlot.teacher2 : ''}</div></td><td class="p-1.5 sm:p-5 flex flex-col gap-1.5"><button onclick="window.navigate('attendance', {subjectId: '${subjectInSlot.id}', period: ${slot.period}, date: '${dateToPass}'})" class="w-full bg-indigo-50 hover:bg-indigo-600 text-indigo-600 hover:text-white border border-indigo-200 hover:border-indigo-600 py-1.5 rounded-lg text-[9px] sm:text-sm font-bold transition-all shadow-sm"><i class="fas fa-check"></i> เช็คชื่อ</button><button onclick="window.navigate('subject_summary', {subjectId: '${subjectInSlot.id}'})" class="w-full bg-white hover:bg-emerald-50 text-emerald-600 border border-slate-200 py-1.5 rounded-lg text-[9px] sm:text-xs font-bold transition-all shadow-sm"><i class="fas fa-chart-pie"></i> สรุป</button></td></tr>`;
+                    } 
+                    else { html += `<tr><td class="p-2 sm:p-5 font-bold text-slate-400 text-center bg-slate-50/50 text-xs sm:text-lg">${slot.period}</td><td class="p-2 sm:p-5 font-bold text-slate-400 font-mono bg-slate-50/30 text-[9px] sm:text-base">${slot.time}</td><td class="p-2 sm:p-5 text-slate-300 font-medium italic pl-4 sm:pl-8 border-l border-dashed border-slate-200 text-[10px] sm:text-sm">- ว่าง -</td><td class="p-2 sm:p-5"></td><td class="p-2 sm:p-5"></td></tr>`;
+                    }
+                }
+            });
+            html += `</tbody></table></div></div>`;
+            
+            html += `<h3 class="text-lg sm:text-2xl font-extrabold mb-4 sm:mb-6 text-slate-800 flex items-center gap-2"><i class="fas fa-users text-indigo-500 text-xl sm:text-3xl"></i> รายชื่อนักเรียนห้อง ${roomNameStr}</h3><div class="bg-white rounded-2xl sm:rounded-3xl shadow-sm border border-slate-200 overflow-hidden mb-8 w-full"><div class="overflow-x-auto w-full"><table class="w-full text-left border-collapse min-w-[300px] sm:min-w-[500px]"><thead><tr class="bg-slate-50 text-slate-700 text-[10px] sm:text-sm border-b-2 border-slate-200 uppercase tracking-wider"><th class="p-3 sm:p-5 font-extrabold w-[40px] sm:w-[80px] min-w-[40px] sm:min-w-[80px] text-center sticky left-0 z-20 bg-slate-50 border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">เลขที่</th><th class="p-3 sm:p-5 font-extrabold">ชื่อ-นามสกุล</th><th class="p-3 sm:p-5 font-extrabold text-center w-24 sm:w-48">ดูสถิติ</th></tr></thead><tbody class="divide-y divide-slate-100">`;
+            if (roomStudents.length === 0) { html += `<tr><td colspan="3" class="p-8 text-center text-slate-400 font-medium text-xs sm:text-lg">ยังไม่มีรายชื่อนักเรียน</td></tr>`;
+            } else {
+                roomStudents.forEach((st, idx) => {
+                    const statusBadge = st.status === 'resigned' ? `<span class="bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded text-[8px] sm:text-xs ml-1 sm:ml-2 border border-rose-200 font-black">ออก/ย้าย</span>` : ''; const rowClass = st.status === 'resigned' ? 'opacity-60 bg-slate-50' : (idx%2===0 ? 'bg-white' : 'bg-slate-50/50'); const bgForSticky = st.status === 'resigned' ? 'bg-slate-100' : (idx%2===0 ? 'bg-white' : 'bg-slate-50');
+                    html += `<tr class="${rowClass} hover:bg-slate-100 transition-colors"><td class="p-3 sm:p-5 text-center font-black text-slate-500 text-sm sm:text-lg sticky left-0 z-10 ${bgForSticky} border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">${st.number}</td><td class="p-3 sm:p-5 font-bold text-slate-800 text-[11px] sm:text-base">${st.name} ${statusBadge}</td><td class="p-2 sm:p-5 text-center bg-white"><button onclick="window.navigate('student_summary', {studentId: '${st.id}'})" class="bg-white hover:bg-blue-50 text-blue-600 border border-slate-200 px-2 sm:px-4 py-1.5 sm:py-2.5 rounded-lg text-[10px] sm:text-sm font-bold shadow-sm w-full"><i class="fas fa-chart-line"></i> รายบุคคล</button></td></tr>`;
+                });
+            }
+            html += `</tbody></table></div></div>`; document.getElementById('mainContent').innerHTML = html;
+        }
+
+        function openAttendance(subjectId, initialPeriod = null, fromTeacherDash = false, passedDate = null) {
+            currentSubjectId = subjectId;
+            const subject = subjects.find(s => s.id === subjectId); if (!subject) return;
+            const roomStudents = students.filter(s => s.roomId === subject.roomId).sort((a, b) => parseInt(a.number) - parseInt(b.number));
+            const today = passedDate || new Date().toISOString().split('T')[0];
+            let selectedPeriod = initialPeriod;
+            if (!selectedPeriod && subject.schedules && subject.schedules.length > 0) { const todayDay = new Date(today).getDay() || 7;
+                const todaySched = subject.schedules.find(s => parseInt(s.day) === todayDay); selectedPeriod = todaySched ? todaySched.period : subject.schedules[0].period;
+            }
+            let tcOptions = `<option value="" disabled selected>-- เลือกครูที่มาสอนแทน --</option>`;
+            teachers.forEach(t => { if(t.name !== subject.teacher && t.name !== subject.teacher2) tcOptions += `<option value="${t.name}">${t.name}</option>`; });
+            const backAction = fromTeacherDash ? `window.navigate('teacher_dash', {teacherName: '${subject.teacher}'})` : `window.navigate('classroom', {roomId: '${subject.roomId}'})`;
+
+            let html = `<div class="mb-4 sm:mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4 sm:gap-6 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="relative z-10 w-full"><div class="flex flex-wrap items-center gap-2 mb-2 sm:mb-3"><span class="bg-indigo-100 text-indigo-700 font-bold px-2 py-1 rounded text-[10px] sm:text-sm">ห้อง ${formatRoomName(subject.roomId)}</span></div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2"><i class="fas fa-clipboard-check text-indigo-500"></i> ${subject.name}</h2><p class="text-slate-500 mt-1 text-[11px] sm:text-base font-medium flex items-center gap-1.5"><i class="fas fa-chalkboard-teacher"></i> ครู: <span class="text-slate-700">${subject.teacher || '-'}${subject.teacher2 ? ' / ' + subject.teacher2 : ''}</span></p></div><div class="flex flex-col gap-3 relative z-10 w-full md:w-auto mt-2 md:mt-0"><div class="flex flex-row gap-2 w-full"><input type="date" id="attDate" value="${today}" onchange="window.updatePeriodDropdown(); window.updateAttendanceHolidayNote();" class="flex-1 bg-slate-50 border border-slate-200 text-slate-800 px-3 py-2 sm:py-3 rounded-xl shadow-inner focus:ring-2 focus:ring-indigo-500 text-base sm:text-sm font-bold outline-none"><select id="attPeriod" class="w-24 sm:w-32 bg-slate-50 border border-slate-200 text-slate-800 px-2 py-2 sm:py-3 rounded-xl shadow-inner focus:ring-2 focus:ring-indigo-500 text-base sm:text-sm font-bold outline-none"></select></div><label class="flex items-center gap-2 cursor-pointer bg-amber-50 p-2 sm:p-3 rounded-xl border border-amber-200 w-full"><input type="checkbox" id="isSubstitute" onchange="document.getElementById('substituteTeacher').classList.toggle('hidden', !this.checked)" class="w-4 h-4 text-amber-600 rounded"><span class="font-bold text-amber-800 text-[10px] sm:text-sm">มีการสอนแทน (ระบุชื่อผู้เช็คแทน)</span></label><select id="substituteTeacher" class="hidden w-full bg-white border border-amber-300 text-slate-800 px-3 py-2 rounded-xl shadow-inner focus:ring-2 focus:ring-amber-500 text-base sm:text-sm font-bold outline-none">${tcOptions}</select><button onclick="${backAction}" class="w-full bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2 sm:py-3 rounded-xl shadow-sm transition-all font-bold text-sm">ย้อนกลับ</button></div></div>`;
+            
+            html += `<div id="attHolidayNote" class="hidden mb-4 sm:mb-6 bg-rose-50 border-2 border-rose-300 rounded-2xl p-3 sm:p-4 flex items-center gap-3"><div class="w-9 h-9 sm:w-11 sm:h-11 bg-rose-500 text-white rounded-full flex items-center justify-center text-sm sm:text-lg shrink-0"><i class="fas fa-calendar-times"></i></div><span id="attHolidayNoteText" class="text-rose-700 font-bold text-xs sm:text-sm"></span></div>`;
+            if (getTermStatus(subject.term, subject.year) !== 'open') {
+                const st = getTermStatus(subject.term, subject.year);
+                const msg = st === 'not_opened' ? `เทอม ${subject.term}/${subject.year} ยังไม่เปิดใช้งาน (ยังไม่สามารถบันทึกการเช็คชื่อได้)` : `เทอม ${subject.term}/${subject.year} ถูกล็อคข้อมูลไว้ (ดูข้อมูลย้อนหลังได้ แต่ไม่สามารถบันทึกการเช็คชื่อได้)`;
+                html += `<div class="mb-4 sm:mb-6 bg-rose-50 border-2 border-rose-300 rounded-2xl p-3 sm:p-4 flex items-center gap-3"><div class="w-9 h-9 sm:w-11 sm:h-11 bg-rose-500 text-white rounded-full flex items-center justify-center text-sm sm:text-lg shrink-0"><i class="fas fa-lock"></i></div><span class="text-rose-700 font-bold text-xs sm:text-sm">${msg}</span></div>`;
+            }
+            
+            html += `<div class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 overflow-hidden mb-10"><div class="bg-slate-50 border-b border-slate-200 p-2.5 sm:p-4 flex flex-wrap gap-1.5 justify-center">${Object.entries(statuses).map(([name, style]) => `<div class="flex items-center gap-1 px-1.5 sm:px-3 py-1 bg-white border border-slate-200 rounded-lg shadow-sm text-[9px] sm:text-xs font-bold text-slate-600"><div class="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-${style.activeBg.replace('bg-','')}"></div> ${name}</div>`).join('')}</div><div class="block lg:hidden divide-y divide-slate-100">`;
+            if (roomStudents.length === 0) { html += `<div class="p-10 text-center text-slate-400 font-medium">ไม่มีรายชื่อนักเรียน</div>`;
+            } else {
+                roomStudents.forEach(st => {
+                    const isResigned = st.status === 'resigned'; const statusBadge = isResigned ? `<span class="bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded text-[8px] ml-1 font-black border border-rose-200">ออก/ย้าย</span>` : '';
+                    html += `<div class="p-3 sm:p-5 ${isResigned ? 'bg-slate-100/60 opacity-80' : 'bg-white'}"><div class="flex justify-between items-center mb-2 sm:mb-3 border-b border-slate-100 pb-2"><span class="font-extrabold text-slate-500 text-[10px] sm:text-sm bg-slate-100 px-2 py-1 rounded-md">เลขที่ ${st.number}</span><span class="font-bold text-slate-800 text-[11px] sm:text-base flex items-center flex-wrap">${st.name} ${statusBadge}</span></div><div class="flex flex-wrap gap-1.5 justify-center sm:grid sm:grid-cols-4">`;
+                    Object.keys(statuses).forEach(status => { const style = statuses[status]; html += `<label class="cursor-pointer flex-1 sm:flex-none min-w-[30%] ${isResigned ? 'pointer-events-none' : ''}"><input type="radio" name="att_mobile_${st.id}" value="${status}" onchange="syncRadio('${st.id}', '${status}')" class="peer sr-only"><div class="px-1 py-1.5 rounded-lg border ${style.border} ${style.bg} ${style.color} text-[10px] sm:text-xs font-bold transition-all peer-checked:${style.activeBg} peer-checked:text-white peer-checked:border-transparent peer-checked:shadow-md flex items-center justify-center gap-1 text-center leading-tight"><i class="fas ${style.icon} opacity-50 peer-checked:opacity-100 hidden sm:inline"></i> ${status}</div></label>`; });
+                    html += `</div></div>`;
+                });
+            }
+            
+            html += `</div><div class="hidden lg:block overflow-x-auto w-full"><table class="w-full text-left border-collapse min-w-[950px]"><thead><tr class="bg-white text-slate-700 border-b-2 border-slate-100 uppercase tracking-wider text-sm"><th class="p-5 font-extrabold w-[80px] min-w-[80px] text-center sticky left-0 z-20 bg-white border-r border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">เลขที่</th><th class="p-5 font-extrabold w-[250px] min-w-[250px] sticky left-[80px] z-20 bg-white border-r border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">ชื่อ-นามสกุล</th><th class="p-5 font-extrabold text-center bg-slate-50/50">สถานะการมาเรียน (รายคาบ)</th></tr></thead><tbody class="divide-y divide-slate-100" id="attendanceTableBody">`;
+            if (roomStudents.length > 0) {
+                roomStudents.forEach((st, idx) => {
+                    const isRes = st.status === 'resigned'; const statusBadge = isRes ? `<span class="bg-rose-100 text-rose-700 px-2 py-0.5 rounded text-[10px] ml-2 border border-rose-200 font-black">ออก/ย้าย</span>` : ''; const rowBg = isRes ? 'bg-slate-100/60 opacity-80' : (idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'); const bgForSticky = isRes ? 'bg-slate-100' : (idx % 2 === 0 ? 'bg-white' : 'bg-slate-50');
+                    html += `<tr class="${rowBg} hover:bg-indigo-50/30 transition-colors"><td class="p-5 text-center font-black text-slate-400 text-lg sticky left-0 z-10 ${bgForSticky} border-r border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">${st.number}</td><td class="p-5 font-bold text-slate-800 border-r border-slate-100 sticky left-[80px] z-10 ${bgForSticky} shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] flex items-center flex-wrap">${st.name} ${statusBadge}</td><td class="p-4 bg-slate-50/30"><div class="flex justify-center gap-2">`;
+                    Object.keys(statuses).forEach(status => { const style = statuses[status]; html += `<label class="cursor-pointer"><input type="radio" name="att_${st.id}" value="${status}" onchange="syncRadio('${st.id}', '${status}')" class="peer sr-only" ${isRes ? 'disabled' : ''}><div class="px-3 py-2 rounded-xl border-2 ${style.border} ${style.bg} ${style.color} text-sm font-bold transition-all peer-checked:${style.activeBg} peer-checked:text-white peer-checked:border-transparent peer-checked:shadow-md hover:scale-105 active:scale-95 flex items-center gap-1.5 whitespace-nowrap"><i class="fas ${style.icon} opacity-50 peer-checked:opacity-100"></i> ${status}</div></label>`; });
+                    html += `</div></td></tr>`;
+                });
+            }
+            html += `</tbody></table></div><div class="p-4 sm:p-8 bg-slate-50 border-t border-slate-200 flex flex-col justify-end items-center shadow-inner"><button id="saveAttBtn" onclick="window.saveAttendance(${fromTeacherDash})" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3.5 sm:py-4 rounded-xl sm:rounded-2xl font-extrabold text-base sm:text-lg transition-all shadow-xl shadow-indigo-200 flex items-center justify-center gap-2 hover:-translate-y-1"><i class="fas fa-cloud-upload-alt text-xl"></i> บันทึกข้อมูลเช็คชื่อ</button></div></div>`;
+            document.getElementById('mainContent').innerHTML = html;
+            
+            window.updatePeriodDropdown = function() {
+                const dateVal = document.getElementById('attDate').value;
+                const dObj = new Date(dateVal); const dayOfWeek = dObj.getDay() || 7;
+                const schedsOnDay = (subject.schedules || []).filter(s => parseInt(s.day) === dayOfWeek);
+                const selectEl = document.getElementById('attPeriod'), saveBtn = document.getElementById('saveAttBtn');
+                if (schedsOnDay.length > 0) {
+                    selectEl.innerHTML = schedsOnDay.map(sch => `<option value="${sch.period}" ${String(sch.period) === String(selectedPeriod) ? 'selected' : ''}>คาบ ${sch.period} (${daysLabel[sch.day-1]})</option>`).join('');
+                    selectEl.disabled = false; saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-cloud-upload-alt text-xl"></i> บันทึกข้อมูลเช็คชื่อ';
+                    saveBtn.classList.replace('bg-slate-400', 'bg-indigo-600'); saveBtn.classList.replace('hover:bg-slate-500', 'hover:bg-indigo-700');
+                    loadExistingAttendance(subjectId, dateVal, selectEl.value);
+                } else {
+                    selectEl.innerHTML = `<option value="">ไม่มีคาบสอน</option>`;
+                    selectEl.disabled = true; saveBtn.disabled = true;
+                    saveBtn.innerHTML = '<i class="fas fa-times-circle text-xl"></i> ไม่มีคาบสอนในวันที่เลือก';
+                    saveBtn.classList.replace('bg-indigo-600', 'bg-slate-400'); saveBtn.classList.replace('hover:bg-indigo-700', 'hover:bg-slate-500');
+                    document.querySelectorAll('input[type="radio"]').forEach(r => r.checked = false);
+                }
+            };
+            window.updateAttendanceHolidayNote = function() {
+                const dateVal = document.getElementById('attDate').value;
+                const noteEl = document.getElementById('attHolidayNote'), textEl = document.getElementById('attHolidayNoteText');
+                if (!noteEl || !textEl) return;
+                const holiday = getHolidayForDate(dateVal);
+                if (holiday) { textEl.innerText = `วันที่เลือกเป็นวันหยุด: ${holiday.label} (ยังสามารถเช็คชื่อได้ตามปกติหากมีการเรียนการสอน)`; noteEl.classList.remove('hidden'); }
+                else { noteEl.classList.add('hidden'); }
+            };
+            window.updatePeriodDropdown();
+            window.updateAttendanceHolidayNote();
+            document.getElementById('attPeriod').addEventListener('change', (e) => { loadExistingAttendance(subjectId, document.getElementById('attDate').value, e.target.value); });
+        }
+        
+        window.syncRadio = function(stId, val) {
+            const m = document.querySelector(`input[name="att_mobile_${stId}"][value="${val}"]`);
+            const d = document.querySelector(`input[name="att_${stId}"][value="${val}"]`);
+            if(m && !m.disabled) m.checked = true; if(d && !d.disabled) d.checked = true;
+        };
+        function loadExistingAttendance(subjectId, date, period) {
+            if (!period) return;
+            document.querySelectorAll('input[type="radio"]').forEach(r => r.checked = false);
+            document.getElementById('isSubstitute').checked = false; document.getElementById('substituteTeacher').classList.add('hidden'); document.getElementById('substituteTeacher').value = "";
+            let record = attendanceData.find(a => a.subjectId === subjectId && a.date === date && String(a.period) === String(period));
+            if (record) {
+                if(record.substituteTeacher) { document.getElementById('isSubstitute').checked = true;
+                    document.getElementById('substituteTeacher').classList.remove('hidden'); document.getElementById('substituteTeacher').value = record.substituteTeacher; }
+                Object.keys(record.records).forEach(stId => { syncRadio(stId, record.records[stId]); });
+                showToast(`โหลดข้อมูลเก่าแล้ว`, "success");
+            } else { document.querySelectorAll('input[type="radio"][value="มา"]').forEach(r => { if(!r.disabled) r.checked = true; });
+            }
+        }
+
+        window.saveAttendance = async function(fromTeacherDash = false) {
+            const date = document.getElementById('attDate').value, period = document.getElementById('attPeriod').value;
+            const isSub = document.getElementById('isSubstitute').checked, subTeacher = document.getElementById('substituteTeacher').value;
+            if (!period) return; if (isSub && !subTeacher) { showToast("กรุณาเลือกชื่อครูที่มาสอนแทน", "error"); return;
+            }
+            const subject = subjects.find(s => s.id === currentSubjectId), roomStudents = students.filter(s => s.roomId === subject.roomId);
+            if (guardAttendanceLock(subject.term, subject.year)) return;
+            let records = {}, allFilled = true;
+            roomStudents.forEach(st => { if (st.status !== 'resigned') { const selected = document.querySelector(`input[name="att_${st.id}"]:checked`) || document.querySelector(`input[name="att_mobile_${st.id}"]:checked`); if (selected) records[st.id] = selected.value; else allFilled = false; } });
+            if (!allFilled) { showToast("กรุณาเช็คชื่อให้ครบทุกคน", "error"); return; }
+            const payloadData = { id: generateId(), subjectId: currentSubjectId, date: date, period: period, records: records };
+            if(isSub) payloadData.substituteTeacher = subTeacher;
+            showToast("กำลังบันทึกข้อมูล... (อัปเดตแบบเรียลไทม์)", "info"); document.body.style.pointerEvents = 'none';
+            await saveData('attendance', payloadData); document.body.style.pointerEvents = 'auto'; showToast("บันทึกข้อมูลสำเร็จ!");
+            if (fromTeacherDash) { navigate('teacher_dash', {teacherName: subject.teacher}); } else { navigate('classroom', {roomId: subject.roomId});
+            }
+        };
+
+        window.resetSubjectAttendance = async function(subjectId) {
+            const subChk = subjects.find(s => s.id === subjectId);
+            if (subChk && guardAttendanceLock(subChk.term, subChk.year)) return;
+            showConfirm("ยืนยันการล้างข้อมูล", "ข้อมูลการเช็คชื่อทั้งหมดในวิชานี้จะถูกลบอย่างถาวรและไม่สามารถกู้คืนได้ คุณแน่ใจหรือไม่?", async () => {
+                showToast("กำลังล้างข้อมูล... (อัปเดตแบบเรียลไทม์)", "info"); 
+                document.body.style.pointerEvents = 'none';
+                const sub = subjects.find(s => s.id === subjectId);
+                logAction('ล้างข้อมูลเช็คชื่อของวิชา', sub ? sub.name : subjectId);
+                await saveData('reset_subject', subjectId); 
+                document.body.style.pointerEvents = 'auto'; 
+                showToast("ล้างข้อมูลวิชาเรียบร้อยแล้ว", "success"); 
+                openSubjectSummary(subjectId);
+            });
+        };
+
+        function openSubjectSummary(subjectId, fromTeacherDash = false) {
+            const subject = subjects.find(s => s.id === subjectId);
+            if (!subject) return;
+            const roomStudents = students.filter(s => s.roomId === subject.roomId).sort((a, b) => parseInt(a.number) - parseInt(b.number));
+            const subjectAtt = attendanceData.filter(a => a.subjectId === subjectId).sort((a, b) => new Date(a.date) - new Date(b.date) || parseInt(a.period || 0) - parseInt(b.period || 0));
+            let uniqueCols = []; subjectAtt.forEach(att => { const key = `${att.date}_${att.period}`; if (!uniqueCols.find(c => c.key === key)) { uniqueCols.push({ key, date: att.date, period: att.period, data: att.records, subTeacher: att.substituteTeacher }); } });
+            const totalClasses = uniqueCols.length;
+            const backAction = fromTeacherDash ? `window.navigate('teacher_dash', {teacherName: '${subject.teacher}'})` : `window.navigate('classroom', {roomId: '${subject.roomId}'})`;
+            let html = `<div class="mb-4 sm:mb-8 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-1/3 h-full bg-gradient-to-l from-emerald-50 to-transparent opacity-60"></div><div class="relative z-10 flex gap-3 items-center"><div class="w-12 h-12 sm:w-20 sm:h-20 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-full flex items-center justify-center text-white text-xl sm:text-3xl shadow-lg border-2 sm:border-4 border-white shrink-0"><i class="fas fa-book"></i></div><div><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800 tracking-tight leading-tight">${subject.name}</h2><p class="text-slate-600 font-bold mt-1 sm:mt-2 flex flex-wrap items-center gap-1 sm:gap-3"><span class="bg-emerald-100 text-emerald-900 px-2 sm:px-4 py-0.5 sm:py-1.5 rounded-md sm:rounded-xl text-[10px] sm:text-sm shadow-sm">ห้อง ${formatRoomName(subject.roomId)}</span><span class="bg-slate-100 text-slate-700 px-2 sm:px-4 py-0.5 sm:py-1.5 rounded-md sm:rounded-xl text-[10px] sm:text-sm shadow-sm"><i class="fas fa-chalkboard-teacher mr-1"></i> ${subject.teacher || '-'}${subject.teacher2 ? ' / ' + subject.teacher2 : ''}</span></p></div></div><div class="relative z-10 flex flex-wrap gap-1.5 sm:gap-3 w-full lg:w-auto mt-2 lg:mt-0">${isAdmin ? `<button onclick="window.resetSubjectAttendance('${subjectId}')" class="flex-1 sm:flex-none bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors"><i class="fas fa-redo"></i> ล้าง</button>` : ''}<button onclick="window.navigate('attendance', {subjectId: '${subjectId}', fromTeacherDash: ${fromTeacherDash}})" class="flex-1 sm:flex-none bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors"><i class="fas fa-edit"></i> แก้ไข</button><button onclick="window.downloadInfographicPDF('${subjectId}')" class="flex-1 sm:flex-none bg-purple-600 hover:bg-purple-700 text-white border border-purple-700 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors"><i class="fas fa-file-pdf"></i> PDF</button><button onclick="window.exportSubjectExcel('${subjectId}')" class="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors"><i class="fas fa-file-excel"></i> Excel</button><button onclick="${backAction}" class="flex-1 sm:flex-none bg-white border border-slate-200 text-slate-700 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors">กลับ</button></div></div>`;
+            
+            html += `<div class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 overflow-hidden p-3 sm:p-8"><div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 sm:mb-6 gap-2"><h3 class="text-lg sm:text-3xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-table text-indigo-500"></i> บันทึกเวลาเรียน</h3><div class="bg-slate-100 px-3 py-1.5 sm:px-5 sm:py-3 rounded-xl text-slate-600 font-bold border border-slate-200 shadow-inner text-xs sm:text-base w-full sm:w-auto text-center"><i class="fas fa-history text-slate-400"></i> สอนแล้ว: <span class="text-indigo-600 text-base sm:text-2xl font-black">${totalClasses}</span> ครั้ง</div></div><div class="overflow-x-auto rounded-xl border border-slate-200 shadow-sm relative max-h-[600px] w-full"><table class="w-full text-left border-collapse min-w-[500px] sm:min-w-[700px] text-[10px] sm:text-sm"><thead class="sticky top-0 z-30 shadow-sm bg-slate-100"><tr class="bg-slate-100 text-slate-700 border-b-2 border-slate-300 uppercase tracking-wider"><th class="p-2 sm:p-4 font-extrabold w-[40px] sm:w-[60px] min-w-[40px] sm:min-w-[60px] text-center border-r border-slate-300 sticky left-0 bg-slate-100 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">เลขที่</th><th class="p-2 sm:p-4 font-extrabold w-[120px] sm:w-[200px] min-w-[120px] sm:min-w-[200px] border-r border-slate-300 sticky left-[40px] sm:left-[60px] bg-slate-100 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">ชื่อ-นามสกุล</th>`;
+            if (totalClasses === 0) { html += `<th class="p-4 font-bold text-center text-slate-400">ยังไม่มีข้อมูล</th>`;
+            } else { uniqueCols.forEach(col => { const d = new Date(col.date); html += `<th class="p-1 sm:p-2 font-extrabold text-center border-r border-slate-200 min-w-[50px] sm:min-w-[80px] bg-slate-50 relative group" title="${col.date}"><div class="text-[9px] sm:text-sm">${d.getDate()}/${d.getMonth()+1}</div><div class="text-[8px] sm:text-[10px] text-slate-500 bg-slate-200/70 px-1 py-0.5 rounded inline-block mt-0.5 border border-slate-300">ค.${col.period || '-'}</div>${col.subTeacher ? `<i class="fas fa-user-edit text-amber-500 absolute top-1 right-1 text-[8px]" title="สอนแทนโดย: ${col.subTeacher}"></i>` : ''}</th>`; });
+            }
+            html += `<th class="p-2 sm:p-4 font-extrabold text-center bg-emerald-100 text-emerald-900 border-l-2 border-emerald-300 min-w-[60px]">รวมมา</th></tr></thead><tbody class="divide-y divide-slate-100 font-medium">`;
+            let subjectTotals = { 'มา': 0, 'ร่วมกิจกรรม': 0, 'สาย': 0, 'ลาป่วย': 0, 'ลากิจ': 0, 'ขาด': 0, 'โดดเรียน': 0 };
+            roomStudents.forEach((st, idx) => {
+                let validCount = 0; let lateCount = 0; let absentCount = 0;
+                const percent = totalClasses > 0 ? Math.round((validCount/totalClasses)*100) : 0; const scoreColor = percent >= 80 ? 'text-emerald-700 bg-emerald-50' : (percent >= 50 ? 'text-amber-700 bg-amber-50' : 'text-rose-700 bg-rose-50');
+                const isRes = st.status === 'resigned'; const rowBg = isRes ? 'bg-slate-100/60 opacity-80' : (idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'); const bgForSticky = isRes ? 'bg-slate-100' : (idx % 2 === 0 ? 'bg-white' : 'bg-slate-50');
+                
+                html += `<tr class="${rowBg} hover:bg-indigo-50/60 transition-colors"><td class="p-2 sm:p-4 text-center text-slate-600 border-r border-slate-200 font-black sticky left-0 z-10 ${bgForSticky} text-xs sm:text-base shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">${st.number}</td><td class="p-2 sm:p-4 text-slate-800 border-r border-slate-200 font-bold whitespace-nowrap sticky left-[40px] sm:left-[60px] z-10 ${bgForSticky} text-[10px] sm:text-sm shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">${st.name} ${isRes?'<span class="text-[8px] bg-rose-100 text-rose-700 px-1 rounded ml-1 border border-rose-200">ออก</span>':''}</td>`;
+                if (totalClasses === 0) { html += `<td class="p-4 text-center text-slate-300">-</td>`;
+                } else {
+                    uniqueCols.forEach(col => {
+                        const status = col.data[st.id] || '-'; if (status === 'มา' || status === 'ร่วมกิจกรรม') validCount++; if (status === 'สาย') lateCount++; if (status === 'ขาด') absentCount++;
+                        if (!isRes && subjectTotals[status] !== undefined) subjectTotals[status]++;
+                        let dotClass = 'bg-slate-200 text-slate-400'; if(status !== '-') dotClass = statuses[status].bg + ' border-' + statuses[status].activeBg.replace('bg-','') + ' ' + statuses[status].color;
+                        html += `<td class="p-1 sm:p-2 text-center border-r border-slate-100" title="${status}">${status !== '-' ? `<div class="w-5 h-5 sm:w-7 sm:h-7 rounded-full mx-auto border-2 text-[8px] sm:text-[10px] flex items-center justify-center font-black ${dotClass} shadow-sm">${status.substring(0,1)}</div>` : '-'}</td>`;
+                    });
+                }
+                
+                let remarks = [];
+                if (lateCount >= (settings.thresholds?.late||4)) remarks.push(`สาย ${lateCount}`); if (absentCount >= (settings.thresholds?.absent||4)) remarks.push(`ขาด ${absentCount}`);
+                let remarkHtml = remarks.length > 0 ? `<div class="text-[8px] sm:text-[10px] text-rose-600 font-bold mt-1 bg-rose-50 rounded px-1.5 py-0.5 border border-rose-200 inline-block shadow-sm w-max whitespace-nowrap"><i class="fas fa-exclamation-circle"></i> ${remarks.join(', ')} ครั้ง</div>` : '';
+                html += `<td class="p-2 sm:p-4 text-center font-black text-sm sm:text-xl ${scoreColor} border-l-2 border-emerald-200">${validCount} <span class="text-[8px] sm:text-[10px] font-bold text-slate-400">/ ${totalClasses}</span><br>${remarkHtml}</td></tr>`;
+            });
+            let subNotesList = uniqueCols.filter(c => c.subTeacher);
+            let subNotesHtml = '';
+            if (subNotesList.length > 0) {
+                subNotesHtml = `<div class="mt-4 sm:mt-6 bg-amber-50 border border-amber-200 p-3 sm:p-4 rounded-xl shadow-inner"><h4 class="font-bold text-amber-800 text-xs sm:text-sm mb-2 flex items-center gap-2"><i class="fas fa-user-edit"></i> หมายเหตุ: การสอนแทน</h4><ul class="text-[10px] sm:text-xs text-amber-700 list-disc list-inside pl-2 sm:pl-5 space-y-1">`;
+                subNotesList.forEach(c => { subNotesHtml += `<li>วันที่ ${c.date.split('-').reverse().join('/')} คาบ ${c.period} - สอนแทนโดย <strong>${c.subTeacher}</strong></li>`; });
+                subNotesHtml += `</ul></div>`;
+            }
+
+            html += `</tbody></table></div><div class="mt-4 sm:mt-6 flex flex-wrap gap-1.5 sm:gap-3 text-[9px] sm:text-xs font-bold text-slate-600 justify-center bg-slate-50 border border-slate-200 p-2.5 sm:p-4 rounded-xl shadow-inner"><span class="mr-1 sm:mr-2 text-slate-400 flex items-center gap-1"><i class="fas fa-info-circle"></i> สัญลักษณ์:</span>${Object.entries(statuses).map(([name, style]) => `<div class="flex items-center gap-1 bg-white px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md border border-slate-200 shadow-sm"><div class="w-3 h-3 sm:w-5 sm:h-5 rounded-full border-2 border-${style.activeBg.replace('bg-','')} ${style.bg} ${style.color} flex items-center justify-center text-[7px] sm:text-[9px] font-black">${name.substring(0,1)}</div> <span>${name}</span></div>`).join('')}</div>${subNotesHtml}</div>`;
+            const subjectTotalRecorded = Object.values(subjectTotals).reduce((a, b) => a + b, 0);
+            html += `<div id="subjectChartInfographicSection" class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-6 mt-4 sm:mt-6"><div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3"><h3 class="text-sm sm:text-lg font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-chart-pie text-emerald-500"></i> กราฟสรุปสถิติการมาเรียนของวิชานี้</h3>${subjectTotalRecorded > 0 ? `<div class="flex gap-1.5"><button onclick="window.exportSectionInfographicPDF('subjectChartInfographicSection', 'กราฟวิชา_${subject.name}', 'pdf')" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm flex items-center gap-1.5 transition-colors"><i class="fas fa-file-pdf"></i> PDF</button><button onclick="window.exportSectionInfographicPDF('subjectChartInfographicSection', 'กราฟวิชา_${subject.name}', 'image')" class="bg-pink-600 hover:bg-pink-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm flex items-center gap-1.5 transition-colors"><i class="fas fa-file-image"></i> รูปภาพ</button></div>` : ''}</div>${subjectTotalRecorded === 0 ? `<div class="text-center text-slate-400 py-8 text-xs sm:text-sm font-medium"><i class="fas fa-info-circle"></i> ยังไม่มีข้อมูลการเช็คชื่อ</div>` : `<div class="relative h-56 sm:h-72"><canvas id="subjectStatusChart"></canvas></div><div id="subjectStatusChartLegend" class="mt-4"></div>`}</div>`;
+            document.getElementById('mainContent').innerHTML = html;
+            if (subjectTotalRecorded > 0) makeStatusDoughnutChart('subjectStatusChart', subjectTotals);
+        }
+
+        function openStudentSummary(studentId, selectedMonth = null) {
+            const student = students.find(s => s.id === studentId);
+            if (!student) return;
+            let currentDate = new Date(); if (!selectedMonth) { let month = (currentDate.getMonth() + 1).toString().padStart(2, '0');
+                selectedMonth = `${currentDate.getFullYear()}-${month}`; }
+            const roomName = formatRoomName(student.roomId), roomSubjects = getRoomSubjects(student.roomId);
+            let dailyRaw = {}; attendanceData.forEach(record => { const sub = roomSubjects.find(s => s.id === record.subjectId); if (sub) { const status = record.records[studentId]; if (status) { if (!dailyRaw[record.date]) dailyRaw[record.date] = []; dailyRaw[record.date].push({ period: record.period || 1, status: status }); } } });
+            let dailyRecords = {}; Object.keys(dailyRaw).forEach(date => { dailyRecords[date] = { status: calculateDailyStatus(dailyRaw[date]) }; });
+            const filteredDates = Object.keys(dailyRecords).filter(d => d.startsWith(selectedMonth)).sort();
+            let monthlyStats = { 'มา':0, 'ร่วมกิจกรรม':0, 'สาย':0, 'ลาป่วย':0, 'ลากิจ':0, 'ขาด':0, 'โดดเรียน':0 };
+            let weeklyStats = {};
+            for(let i=1; i<=5; i++) weeklyStats[i] = { 'มา':0, 'ร่วมกิจกรรม':0, 'สาย':0, 'ลาป่วย':0, 'ลากิจ':0, 'ขาด':0, 'โดดเรียน':0 };
+            filteredDates.forEach(d => { const status = dailyRecords[d].status; if(status && monthlyStats[status] !== undefined) monthlyStats[status]++; const dayNum = parseInt(d.split('-')[2]); let week = Math.ceil(dayNum / 7); if(week > 5) week = 5; if(status && weeklyStats[week][status] !== undefined) weeklyStats[week][status]++; });
+            const monthNames = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+            const displayMonthYear = `${monthNames[parseInt(selectedMonth.split('-')[1])-1]} ${parseInt(selectedMonth.split('-')[0])+543}`;
+            const statusBadge = student.status === 'resigned' ? `<span class="bg-rose-100 text-rose-800 px-2 py-0.5 rounded text-[10px] border border-rose-200 font-black">ออก/ย้าย</span>` : '';
+            const backAction = `window.navigate('classroom', {roomId: '${student.roomId}'})`;
+            window.tempStudentReport = { student: student, room: roomName, month: selectedMonth, monthly: monthlyStats, weekly: weeklyStats, daily: dailyRecords, dates: filteredDates };
+            let html = `<div class="mb-4 sm:mb-8 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-1/3 h-full bg-gradient-to-l from-blue-50 to-transparent opacity-60"></div><div class="relative z-10 flex gap-3 sm:gap-4 items-center"><div class="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-white text-2xl sm:text-3xl shadow-lg border-2 sm:border-4 border-white shrink-0"><i class="fas fa-user-graduate"></i></div><div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">${student.name}</h2><p class="text-slate-600 font-bold mt-1 flex flex-wrap gap-1.5"><span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-[10px] sm:text-xs">เลขที่ ${student.number}</span><span class="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded text-[10px] sm:text-xs">ห้อง ${roomName}</span>${statusBadge}</p></div></div><div class="relative z-10 flex flex-wrap gap-1.5 w-full lg:w-auto mt-2 lg:mt-0 items-center"><select id="studentPdfType" class="bg-slate-50 border border-slate-200 text-slate-700 px-2 py-1.5 sm:px-3 sm:py-2.5 rounded-xl font-bold text-xs sm:text-sm outline-none shadow-sm h-full"><option value="monthly">PDF สรุปรายเดือน</option><option value="weekly">PDF สรุปรายสัปดาห์</option><option value="daily">PDF บันทึกรายวัน</option></select><button onclick="window.downloadStudentPDF('${student.id}', '${selectedMonth}')" class="flex-1 lg:flex-none bg-purple-600 hover:bg-purple-700 text-white px-2 py-1.5 sm:px-4 sm:py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-1.5 transition-colors h-full"><i class="fas fa-file-pdf"></i> โหลด</button><button onclick="window.exportStudentExcel('${student.id}', '${selectedMonth}')" class="flex-1 lg:flex-none bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1.5 sm:px-4 sm:py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-1.5 transition-colors h-full"><i class="fas fa-file-excel"></i> Excel</button><button onclick="${backAction}" class="w-full sm:w-auto bg-white border border-slate-200 text-slate-700 px-3 py-1.5 sm:px-4 sm:py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-sm transition-colors mt-1 sm:mt-0 h-full">กลับ</button></div></div>`;
+            html += `<div class="bg-slate-800 rounded-2xl sm:rounded-[2rem] shadow-xl p-4 sm:p-6 mb-4 sm:mb-8 flex flex-col sm:flex-row justify-between items-center gap-3 text-white relative overflow-hidden"><div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div><h3 class="text-base sm:text-xl font-extrabold flex items-center gap-2 relative z-10"><i class="far fa-calendar-check text-blue-400"></i> สถิติประจำเดือน: <span class="text-blue-300">${displayMonthYear}</span></h3><input type="month" value="${selectedMonth}" class="w-full sm:w-auto relative z-10 bg-slate-700/50 border border-slate-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-400 font-bold text-sm outline-none" onchange="window.navigate('student_summary', {studentId: '${student.id}', month: this.value})"></div><div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2 sm:gap-4 mb-6 sm:mb-10">${Object.entries(monthlyStats).map(([name, count]) => { const style = statuses[name];
+                return `<div class="bg-white border border-slate-200 rounded-xl sm:rounded-2xl p-3 sm:p-4 text-center flex flex-col items-center justify-center gap-1.5 relative overflow-hidden"><div class="absolute inset-0 bg-gradient-to-t from-${style.bg.replace('bg-','')} to-transparent opacity-50"></div><div class="w-8 h-8 sm:w-10 sm:h-10 ${style.bg} ${style.color} rounded-full flex items-center justify-center text-sm sm:text-lg mb-1 relative z-10 border ${style.border}"><i class="fas ${style.icon}"></i></div><div class="${style.color} text-[10px] sm:text-xs font-extrabold relative z-10">${name}</div><div class="text-2xl sm:text-4xl font-black text-slate-800 relative z-10">${count}</div></div>`;
+            }).join('')}</div><div class="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6"><div class="bg-white rounded-2xl border border-slate-200 overflow-hidden flex flex-col shadow-sm"><div class="p-3 sm:p-5 border-b border-slate-200 bg-slate-50 flex items-center gap-2"><div class="w-8 h-8 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center text-sm"><i class="fas fa-calendar-week"></i></div><h4 class="font-extrabold text-base sm:text-xl text-slate-800">สรุปรายสัปดาห์</h4></div><div class="overflow-x-auto w-full"><table class="w-full text-center text-[10px] sm:text-xs min-w-[400px]"><thead class="bg-white text-slate-500 border-b-2 border-slate-100"><tr><th class="p-2 sm:p-3">สัปดาห์</th><th class="p-2 text-emerald-600">มา</th><th class="p-2 text-cyan-600">กิจกรรม</th><th class="p-2 text-amber-500">สาย</th><th class="p-2 text-blue-500">ป่วย</th><th class="p-2 text-indigo-500">ลากิจ</th><th class="p-2 text-rose-500">ขาด</th><th class="p-2 text-purple-600">โดด</th></tr></thead><tbody class="divide-y divide-slate-100 font-bold">${[1,2,3,4,5].map(w => `<tr><td class="p-2 bg-slate-50/50">สัปดาห์ ${w}</td><td class="p-2 bg-emerald-50/30">${weeklyStats[w]['มา']||'-'}</td><td class="p-2 bg-cyan-50/30">${weeklyStats[w]['ร่วมกิจกรรม']||'-'}</td><td class="p-2 bg-amber-50/30">${weeklyStats[w]['สาย']||'-'}</td><td class="p-2 bg-blue-50/30">${weeklyStats[w]['ลาป่วย']||'-'}</td><td class="p-2 bg-indigo-50/30">${weeklyStats[w]['ลากิจ']||'-'}</td><td class="p-2 bg-rose-50/30">${weeklyStats[w]['ขาด']||'-'}</td><td class="p-2 bg-purple-50/30">${weeklyStats[w]['โดดเรียน']||'-'}</td></tr>`).join('')}</tbody></table></div></div><div class="bg-white rounded-2xl border border-slate-200 overflow-hidden flex flex-col shadow-sm"><div class="p-3 sm:p-5 border-b border-slate-200 bg-slate-50 flex items-center gap-2"><div class="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center text-sm"><i class="fas fa-history"></i></div><h4 class="font-extrabold text-base sm:text-xl text-slate-800">ประวัติรายวัน</h4></div><div class="overflow-y-auto max-h-[300px] p-2 sm:p-4 bg-slate-50/30">${filteredDates.length > 0 ? `<ul class="space-y-1.5 sm:space-y-2">${filteredDates.map(d => { const stat = dailyRecords[d].status; const style = statuses[stat]; return `<li class="p-2.5 sm:p-3 rounded-xl border border-slate-200 bg-white shadow-sm flex justify-between items-center"><div class="flex items-center gap-2"><div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 text-xs"><i class="far fa-calendar-alt"></i></div><span class="font-extrabold text-slate-800 text-xs sm:text-sm">${d.split('-').reverse().join('/')}</span></div><span class="px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg border-2 ${style.border} ${style.bg} ${style.color} text-[9px] sm:text-xs font-extrabold flex items-center gap-1"><i class="fas ${style.icon}"></i> ${stat}</span></li>`; }).join('')}</ul>` : `<div class="p-8 text-center text-slate-400 font-medium text-xs"><i class="fas fa-box-open text-2xl mb-2 opacity-50"></i> ไม่มีข้อมูลในเดือนนี้</div>`}</div></div></div>`;
+            document.getElementById('mainContent').innerHTML = html;
+        }
+
+        window.markFollowUp = async function(studentId, month) {
+            showConfirm("ยืนยันการบันทึก", "ยืนยันว่าครูที่ปรึกษาได้ทำการติดตามนักเรียนคนนี้แล้ว?", async () => {
+                showToast("กำลังบันทึกข้อมูล... (อัปเดตแบบเรียลไทม์)", "info"); await saveData('followup', { studentId, month, timestamp: new Date().toISOString() }); showToast("บันทึกติดตามเรียบร้อยแล้ว", "success"); if (currentRoomId) openRoomSummary(currentRoomId, month, 'monthly');
+            });
+        };
+
+        function openRoomSummary(roomId, selectedMonth = null, tab = 'monthly') {
+            let currentDate = new Date();
+            if (!selectedMonth) { let month = (currentDate.getMonth() + 1).toString().padStart(2, '0'); selectedMonth = `${currentDate.getFullYear()}-${month}`;
+            }
+            const roomName = formatRoomName(roomId), roomStudents = students.filter(s => s.roomId === roomId).sort((a,b) => parseInt(a.number) - parseInt(b.number)), roomSubjects = getRoomSubjects(roomId);
+            const monthNames = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+            const displayMonthYear = `${monthNames[parseInt(selectedMonth.split('-')[1])-1]} ${parseInt(selectedMonth.split('-')[0])+543}`;
+            const backAction = `window.navigate('classroom', {roomId: '${roomId}'})`;
+            let roomTotals = null;
+            let html = `<div class="mb-4 sm:mb-8 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-1/3 h-full bg-gradient-to-l from-emerald-50 to-transparent opacity-60"></div><div class="relative z-10 flex gap-3 items-center"><div class="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center text-white text-xl sm:text-3xl shadow-lg shrink-0"><i class="fas fa-chart-bar"></i></div><div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">รายงานห้อง ${roomName}</h2></div></div><div class="relative z-10 flex flex-wrap gap-2 w-full lg:w-auto mt-2 lg:mt-0"><button onclick="window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'monthly'})" class="flex-1 sm:flex-none px-3 py-2 rounded-xl font-bold text-[10px] sm:text-sm ${tab === 'monthly' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 border border-slate-200'}">ภาพรวม (เดือน)</button><button onclick="window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'daily'})" class="flex-1 sm:flex-none px-3 py-2 rounded-xl font-bold text-[10px] sm:text-sm ${tab === 'daily' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 border border-slate-200'}">สรุปรายวัน</button><button onclick="${backAction}" class="w-full sm:w-auto px-3 py-2 rounded-xl font-bold text-[10px] sm:text-sm bg-white border border-slate-200 lg:ml-auto">กลับ</button></div></div>`;
+
+            if (tab === 'monthly') {
+                let roomDailyRaw = {}; roomStudents.forEach(st => roomDailyRaw[st.id] = {});
+                attendanceData.forEach(record => { if (record.date.startsWith(selectedMonth)) { const sub = roomSubjects.find(s => s.id === record.subjectId); if (sub) { roomStudents.forEach(st => { const status = record.records[st.id]; 
+                if (status) { if (!roomDailyRaw[st.id][record.date]) roomDailyRaw[st.id][record.date] = []; roomDailyRaw[st.id][record.date].push({ period: record.period || 1, status: status }); } }); } } });
+
+                let studentSummaries = [];
+                roomStudents.forEach(st => {
+                    let sStats = { 'มา':0, 'ร่วมกิจกรรม':0, 'สาย':0, 'ลาป่วย':0, 'ลากิจ':0, 'ขาด':0, 'โดดเรียน':0 }, wStats = { 1:0, 2:0, 3:0, 4:0, 5:0 };
+                    Object.keys(roomDailyRaw[st.id]).forEach(date => { const dayStatus = calculateDailyStatus(roomDailyRaw[st.id][date]); if (dayStatus) { sStats[dayStatus]++; if (dayStatus === 'มา' || dayStatus === 'ร่วมกิจกรรม' || dayStatus === 'สาย') { const dayNum = parseInt(date.split('-')[2]); let week = Math.ceil(dayNum / 7); if (week > 5) week = 5; wStats[week]++; } } });
+                    studentSummaries.push({ student: st, monthly: sStats, weekly: wStats });
+                });
+                window.tempRoomReport = { roomId: roomId, month: selectedMonth, data: studentSummaries };
+                roomTotals = { 'มา': 0, 'ร่วมกิจกรรม': 0, 'สาย': 0, 'ลาป่วย': 0, 'ลากิจ': 0, 'ขาด': 0, 'โดดเรียน': 0 };
+                studentSummaries.forEach(row => { Object.keys(roomTotals).forEach(k => roomTotals[k] += (row.monthly[k] || 0)); });
+                const roomTotalRecorded = Object.values(roomTotals).reduce((a, b) => a + b, 0);
+                html += `<div id="roomChartInfographicSection" class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-6 mb-4 sm:mb-6"><div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3"><h3 class="text-sm sm:text-lg font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-chart-pie text-emerald-500"></i> กราฟสรุปสถิติการมาเรียนของห้อง เดือน${displayMonthYear}</h3>${roomTotalRecorded > 0 ? `<div class="flex gap-1.5"><button onclick="window.exportSectionInfographicPDF('roomChartInfographicSection', 'กราฟห้อง_${roomName}_${selectedMonth}', 'pdf')" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm flex items-center gap-1.5 transition-colors"><i class="fas fa-file-pdf"></i> PDF</button><button onclick="window.exportSectionInfographicPDF('roomChartInfographicSection', 'กราฟห้อง_${roomName}_${selectedMonth}', 'image')" class="bg-pink-600 hover:bg-pink-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm flex items-center gap-1.5 transition-colors"><i class="fas fa-file-image"></i> รูปภาพ</button></div>` : ''}</div>${roomTotalRecorded === 0 ? `<div class="text-center text-slate-400 py-8 text-xs sm:text-sm font-medium"><i class="fas fa-info-circle"></i> ยังไม่มีข้อมูลการเช็คชื่อในเดือนนี้</div>` : `<div class="relative h-64 sm:h-72"><canvas id="roomMonthlyChart"></canvas></div><div id="roomMonthlyChartLegend" class="mt-4"></div>`}</div>`;
+                html += `<div class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 overflow-hidden p-3 sm:p-8"><div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-3"><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800 flex items-center gap-2"><i class="far fa-calendar-check text-indigo-500"></i> เดือน ${displayMonthYear}</h3><div class="flex flex-wrap gap-1.5 sm:gap-2 w-full md:w-auto"><input type="month" value="${selectedMonth}" onchange="window.navigate('room_summary', {roomId: '${roomId}', month: this.value, tab: 'monthly'})" class="flex-1 md:flex-none bg-slate-50 border border-slate-200 text-slate-700 px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg text-base sm:text-sm font-bold outline-none"><button onclick="window.downloadRoomInfographicPDF('${roomId}', '${selectedMonth}')" class="flex-1 md:flex-none bg-purple-600 hover:bg-purple-700 text-white px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg text-[10px] sm:text-sm font-bold shadow-sm flex gap-1.5 items-center justify-center transition-colors"><i class="fas fa-file-pdf"></i> PDF</button><button onclick="window.exportRoomMonthlyExcel('${roomId}', '${selectedMonth}')" class="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg text-[10px] sm:text-sm font-bold shadow-sm flex gap-1.5 items-center justify-center transition-colors"><i class="fas fa-file-excel"></i> Excel</button></div></div><div class="overflow-x-auto rounded-xl border border-slate-200 shadow-sm max-h-[600px] w-full"><table class="w-full text-center border-collapse min-w-[700px] sm:min-w-[900px] text-[10px] sm:text-sm"><thead class="sticky top-0 z-30 shadow-sm bg-slate-100 text-slate-700 uppercase"><tr class="border-b border-slate-200"><th class="p-2 font-extrabold sticky left-0 z-20 bg-slate-100 border-r border-slate-300 w-[40px] sm:w-[60px] min-w-[40px] sm:min-w-[60px] text-center shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">เลขที่</th><th class="p-2 font-extrabold sticky left-[40px] sm:left-[60px] z-20 bg-slate-100 border-r border-slate-300 w-[150px] sm:w-[250px] min-w-[150px] sm:min-w-[250px] text-left shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">ชื่อ-นามสกุล / การติดตาม</th><th class="p-2 font-extrabold border-x border-slate-200 bg-slate-50" colspan="5">สัปดาห์ที่ (เข้าเรียน)</th><th class="p-2 font-extrabold bg-blue-50" colspan="7">รวมทั้งเดือน (วัน)</th></tr><tr class="border-b-2 border-slate-300"><th class="p-1 border-r border-slate-300 bg-slate-100 sticky left-0 z-20 top-[33px] sm:top-[41px]"></th><th class="p-1 border-r border-slate-300 bg-slate-100 sticky left-[40px] sm:left-[60px] z-20 top-[33px] sm:top-[41px]"></th><th class="p-1 border-x border-slate-200">1</th><th class="p-1 border-r border-slate-200">2</th><th class="p-1 border-r border-slate-200">3</th><th class="p-1 border-r border-slate-200">4</th><th class="p-1 border-r border-slate-200">5</th><th class="p-1 text-emerald-700">มา/สาย</th><th class="p-1 text-cyan-700">กิจ</th><th class="p-1 text-amber-700">สาย</th><th class="p-1 text-blue-700">ป่วย</th><th class="p-1 text-indigo-700">ลากิจ</th><th class="p-1 text-rose-700">ขาด</th><th class="p-1 text-purple-700">โดด</th></tr></thead><tbody class="divide-y divide-slate-100 font-medium">`;
+                if (studentSummaries.length === 0) { html += `<tr><td colspan="14" class="p-10 text-slate-400">ไม่มีข้อมูล</td></tr>`;
+                } 
+                else {
+                    studentSummaries.forEach((row, idx) => {
+                        const isRes = row.student.status === 'resigned'; const bg = isRes ? 'bg-slate-100/60 opacity-80' : (idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'); const bgForSticky = isRes ? 'bg-slate-100' : (idx % 2 === 0 ? 'bg-white' : 'bg-slate-50');
+                        let valid = row.monthly['มา'] + row.monthly['ร่วมกิจกรรม'] + row.monthly['สาย'];
+                        
+                        let lateCount = row.monthly['สาย'] || 0; let absentCount = row.monthly['ขาด'] || 0;
+                        let lateLimit = settings.thresholds?.late || 4; let absLimit = settings.thresholds?.absent || 4;
+                        let needsFollowUp = (lateCount >= lateLimit) || (absentCount >= absLimit);
+                        let alertHtml = '';
+            
+                        if (needsFollowUp) {
+                            const isFollowedUp = followUps.find(f => f.studentId === row.student.id && f.month === selectedMonth);
+                            if (isFollowedUp) { alertHtml = `<div class="mt-1 text-[9px] font-bold text-emerald-700 bg-emerald-100 border border-emerald-200 px-1.5 py-0.5 rounded inline-flex items-center gap-1 shadow-sm"><i class="fas fa-check-circle"></i> ที่ปรึกษาติดตามแล้ว</div>`;
+                            } 
+                            else {
+                                alertHtml = `<div class="mt-1 flex flex-col sm:flex-row items-start sm:items-center gap-1.5"><span class="text-[9px] font-bold text-rose-700 bg-rose-100 border border-rose-200 px-1.5 py-0.5 rounded inline-flex items-center gap-1 shadow-sm"><i class="fas fa-exclamation-triangle"></i> ต้องติดตาม</span>`;
+                                if (isAdmin) { alertHtml += `<button onclick="window.markFollowUp('${row.student.id}', '${selectedMonth}')" class="text-[9px] bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-0.5 rounded shadow-sm transition-colors border border-indigo-700"><i class="fas fa-clipboard-check"></i> บันทึกติดตาม</button>`;
+                                }
+                                alertHtml += `</div>`;
+                            }
+                        }
+
+                        html += `<tr class="${bg} hover:bg-slate-100 transition-colors"><td class="p-1.5 sm:p-2 text-center sticky left-0 z-10 ${bgForSticky} border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] font-black text-slate-500">${row.student.number}</td><td class="p-1.5 sm:p-3 text-left sticky left-[40px] sm:left-[60px] z-10 ${bgForSticky} border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] font-bold text-[9px] sm:text-sm break-words"><div class="flex items-center flex-wrap">${row.student.name} ${isRes?'<span class="text-[8px] bg-rose-100 text-rose-700 px-1 rounded border border-rose-200 ml-1">ออก</span>':''}</div>${alertHtml}</td><td class="p-1.5">${row.weekly[1]||'-'}</td><td class="p-1.5">${row.weekly[2]||'-'}</td><td class="p-1.5">${row.weekly[3]||'-'}</td><td class="p-1.5">${row.weekly[4]||'-'}</td><td class="p-1.5 border-r border-slate-200">${row.weekly[5]||'-'}</td><td class="p-1.5 font-black text-emerald-600 bg-emerald-50/30">${valid||'-'}</td><td class="p-1.5 font-black text-cyan-600">${row.monthly['ร่วมกิจกรรม']||'-'}</td><td class="p-1.5 font-black text-amber-500">${row.monthly['สาย']||'-'}</td><td class="p-1.5 font-black text-blue-500">${row.monthly['ลาป่วย']||'-'}</td><td class="p-1.5 font-black text-indigo-500">${row.monthly['ลากิจ']||'-'}</td><td class="p-1.5 font-black text-rose-500">${row.monthly['ขาด']||'-'}</td><td class="p-1.5 font-black text-purple-600">${row.monthly['โดดเรียน']||'-'}</td></tr>`;
+                    });
+                }
+                html += `</tbody></table></div></div>`;
+            } 
+            else if (tab === 'daily') {
+                const todayStr = new Date().toISOString().split('T')[0];
+                const displayDate = window.tempDailyDate || todayStr; const dObj = new Date(displayDate); const dayOfWeek = dObj.getDay();
+                let dayIndexForSched = (dayOfWeek >= 1 && dayOfWeek <= 5) ? dayOfWeek : 1;
+                const monday = new Date(dObj);
+                const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek; monday.setDate(dObj.getDate() + diffToMonday);
+                const subjectsToday = [];
+                roomSubjects.forEach(s => { if (s.schedules) { s.schedules.forEach(sch => { if (parseInt(sch.day) === dayIndexForSched) { subjectsToday.push({ ...s, period: parseInt(sch.period) }); } }); } });
+                subjectsToday.sort((a,b) => a.period - b.period);
+                const dailyAttRecords = attendanceData.filter(a => a.date === displayDate && subjectsToday.some(st => st.id === a.subjectId && String(st.period) === String(a.period)));
+                let dayButtonsHtml = `<div class="flex flex-wrap gap-1 w-full mt-2 sm:mt-0 sm:w-auto justify-center bg-slate-50 p-1.5 rounded-lg border border-slate-200">`;
+                for(let i=1; i<=5; i++) { let iterDate = new Date(monday); iterDate.setDate(monday.getDate() + (i-1)); let iterDateStr = iterDate.toISOString().split('T')[0];
+                    let isActive = iterDateStr === displayDate; let activeCls = isActive ? 'bg-indigo-600 text-white shadow-md' : 'bg-transparent text-slate-600 hover:bg-slate-200';
+                    dayButtonsHtml += `<button onclick="window.tempDailyDate='${iterDateStr}'; window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'daily'})" class="px-2 py-1 sm:px-3 sm:py-1.5 rounded text-[10px] sm:text-sm font-bold transition-colors ${activeCls}">${daysLabel[i-1].replace('วัน','')}</button>`;
+                }
+                dayButtonsHtml += `</div>`;
+                html += `<div class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 p-3 sm:p-8"><div class="flex flex-col mb-4 gap-2"><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800 flex items-center gap-2"><i class="far fa-calendar-day text-indigo-500"></i> เช็คชื่อรวมรายวิชา</h3><div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2"><div class="flex flex-col sm:flex-row gap-2 w-full md:w-auto"><input type="date" value="${displayDate}" onchange="window.tempDailyDate=this.value; window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'daily'})" class="w-full sm:w-auto bg-slate-50 border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-[11px] sm:text-sm font-bold shadow-inner outline-none focus:ring-2 focus:ring-indigo-500">${dayButtonsHtml}</div><div class="flex gap-1.5 w-full md:w-auto mt-2 md:mt-0"><button onclick="window.downloadRoomDailyPDF('${roomId}', '${displayDate}')" class="flex-1 md:flex-none bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm flex gap-1 items-center justify-center transition-colors"><i class="fas fa-file-pdf"></i> PDF</button><button onclick="window.exportRoomDailyExcel('${roomId}', '${displayDate}')" class="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm flex gap-1 items-center justify-center transition-colors"><i class="fas fa-file-excel"></i> Excel</button></div></div></div><div class="overflow-x-auto rounded-xl border border-slate-200 shadow-sm max-h-[600px] w-full"><table class="w-full text-center border-collapse text-[10px] sm:text-sm min-w-[500px] sm:min-w-[800px]"><thead class="bg-slate-100 sticky top-0 z-30 shadow-sm border-b-2 border-slate-200"><tr><th class="p-2 font-extrabold sticky left-0 z-20 bg-slate-100 border-r border-slate-300 w-[40px] sm:w-[60px] min-w-[40px] sm:min-w-[60px] text-center shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">เลขที่</th><th class="p-2 font-extrabold sticky left-[40px] sm:left-[60px] z-20 bg-slate-100 border-r border-slate-300 w-[120px] sm:w-[200px] min-w-[120px] sm:min-w-[200px] text-left shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">ชื่อ-นามสกุล</th>`;
+                if (subjectsToday.length === 0) { html += `<th class="p-2 text-slate-500">ไม่มีวิชาเรียนในวันนี้</th>`;
+                } else { subjectsToday.forEach(sub => { html += `<th class="p-1 sm:p-2 border-r border-slate-200 bg-slate-50 min-w-[60px] sm:min-w-[80px]"><div class="font-extrabold text-indigo-700 break-words line-clamp-2 max-w-[100px] mx-auto leading-tight" title="${sub.name}">${sub.name}</div><div class="text-[8px] sm:text-[10px] text-slate-500 mt-0.5 bg-slate-200/50 rounded inline-block px-1 border border-slate-300">ค.${sub.period}</div></th>`; });
+                }
+                html += `</tr></thead><tbody class="divide-y divide-slate-100">`;
+                if (roomStudents.length > 0) {
+                    roomStudents.forEach((st, idx) => {
+                        const isRes = st.status === 'resigned'; const bg = isRes ? 'bg-slate-100/60 opacity-80' : (idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'); const bgForSticky = isRes ? 'bg-slate-100' : (idx % 2 === 0 ? 'bg-white' : 'bg-slate-50');
+                        html += `<tr class="${bg} hover:bg-slate-100 transition-colors"><td class="p-1.5 sm:p-2 text-center sticky left-0 z-10 ${bgForSticky} border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] font-black text-slate-500">${st.number}</td><td class="p-1.5 sm:p-2 text-left sticky left-[40px] sm:left-[60px] z-10 ${bgForSticky} border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] font-bold text-[9px] sm:text-sm break-words">${st.name} ${isRes?'<span class="text-[8px] bg-rose-100 text-rose-700 px-1 rounded border border-rose-200">ออก</span>':''}</td>`;
+                        if (subjectsToday.length === 0) html += `<td>-</td>`;
+                        else { subjectsToday.forEach(sub => { const attRecord = dailyAttRecords.find(a => a.subjectId === sub.id && String(a.period) === String(sub.period)); let statusStr = '-'; let displayHtml = '<span class="text-slate-300">-</span>'; if (attRecord && attRecord.records[st.id]) { statusStr = attRecord.records[st.id]; const stl = statuses[statusStr]; displayHtml = `<span class="${stl.color} font-bold text-[8px] sm:text-[10px] bg-white border ${stl.border} px-1 py-0.5 rounded shadow-sm whitespace-nowrap">${statusStr}</span>`; } html += `<td class="p-1 sm:p-2 border-r border-slate-100">${displayHtml}</td>`; });
+                        }
+                        html += `</tr>`;
+                    });
+                }
+                html += `</tbody></table></div></div>`;
+            }
+            document.getElementById('mainContent').innerHTML = html;
+            if (roomTotals) { const rSum = Object.values(roomTotals).reduce((a,b)=>a+b,0); if (rSum > 0) makeStatusDoughnutChart('roomMonthlyChart', roomTotals); }
+        }
+
+        function renderAdmin() {
+            const isSuperAdmin = currentUser && currentUser.role === 'super_admin';
+            window.__pendingNotifs = computePendingNotifications();
+            let notifHtml = window.__pendingNotifs.length > 0 ? `<div class="mb-4 sm:mb-6 bg-amber-50 border-2 border-amber-300 rounded-2xl p-3 sm:p-5"><h3 class="text-xs sm:text-base font-extrabold text-amber-800 mb-2 flex items-center gap-2"><i class="fas fa-bell"></i> แถบแจ้งเตือนที่รอการแก้ไข (${window.__pendingNotifs.length})</h3><div class="flex flex-wrap gap-1.5">${window.__pendingNotifs.map((n, idx) => `<button onclick="window.goToNotification(${idx})" class="bg-white border border-amber-200 hover:bg-amber-100/60 text-slate-700 text-[10px] sm:text-xs font-bold px-2.5 py-1.5 rounded-lg transition-colors">${n.text}</button>`).join('')}</div></div>` : '';
+            let html = notifHtml + `<div class="mb-4 sm:mb-8 flex flex-col md:flex-row md:items-center justify-between gap-3"><div><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2"><i class="fas fa-tools text-indigo-500"></i> จัดการระบบ</h2>${currentUser ? `<p class="text-xs sm:text-sm text-slate-500 font-bold mt-1">เข้าสู่ระบบในชื่อ: ${currentUser.name} <span class="ml-1 ${currentUser.role === 'super_admin' ? 'bg-purple-100 text-purple-700 border-purple-200' : 'bg-indigo-100 text-indigo-700 border-indigo-200'} border px-2 py-0.5 rounded-full text-[10px] font-black">${currentUser.role === 'super_admin' ? 'Super Admin' : 'เจ้าหน้าที่'}</span></p>` : ''}</div></div><div class="flex overflow-x-auto gap-1.5 mb-4 sm:mb-8 bg-slate-200/50 p-1.5 rounded-xl w-full scrollbar-hide shadow-inner"><button onclick="window.navigate('admin', {tab: 'settings'})" class="${currentAdminTab === 'settings' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-cog"></i> ตั้งค่า</button><button onclick="window.navigate('admin', {tab: 'data_status'})" class="${currentAdminTab === 'data_status' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-database"></i> สถานะข้อมูล</button><button onclick="window.navigate('admin', {tab: 'teachers'})" class="${currentAdminTab === 'teachers' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-chalkboard-teacher"></i> ครู</button><button onclick="window.navigate('admin', {tab: 'subjects'})" class="${currentAdminTab === 'subjects' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-book"></i> วิชา</button><button onclick="window.navigate('admin', {tab: 'students'})" class="${currentAdminTab === 'students' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-users"></i> นักเรียน</button>${isSuperAdmin ? `<button onclick="window.navigate('admin', {tab: 'users'})" class="${currentAdminTab === 'users' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-user-cog"></i> ผู้ใช้งาน</button>` : ''}<button onclick="window.navigate('admin', {tab: 'holidays'})" class="${currentAdminTab === 'holidays' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-calendar-times"></i> วันหยุด</button><button onclick="window.navigate('admin', {tab: 'logs'})" class="${currentAdminTab === 'logs' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-history"></i> Log</button></div><div id="adminContent" class="bg-white rounded-2xl sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-8 w-full"></div>`;
+            document.getElementById('mainContent').innerHTML = html; renderAdminTab();
+        }
+
+        function renderAdminTab() {
+            const content = document.getElementById('adminContent');
+            if (currentAdminTab === 'settings') {
+                const isSuperAdminSettings = currentUser && currentUser.role === 'super_admin';
+                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-server text-indigo-500"></i> สถานะเว็บไซต์</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 flex items-center justify-between gap-3 flex-wrap"><div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full ${settings.serverOnline !== false ? 'bg-emerald-500' : 'bg-rose-500'}"></span><span class="font-bold text-sm sm:text-base ${settings.serverOnline !== false ? 'text-emerald-700' : 'text-rose-600'}">${settings.serverOnline !== false ? 'ออนไลน์ (เปิดใช้งานปกติ)' : 'ปิดปรับปรุง'}</span></div>${isSuperAdminSettings ? `<button onclick="window.toggleServerOnline()" class="${settings.serverOnline !== false ? 'bg-rose-50 border-rose-200 hover:bg-rose-100 text-rose-600' : 'bg-emerald-50 border-emerald-200 hover:bg-emerald-100 text-emerald-700'} border px-3 py-1.5 rounded-lg font-bold text-xs sm:text-sm transition-colors flex items-center gap-1.5"><i class="fas fa-power-off"></i> ${settings.serverOnline !== false ? 'ปิดสถานะออนไลน์' : 'เปิดสถานะออนไลน์'}</button>` : `<span class="text-[10px] sm:text-xs font-bold text-slate-400 flex items-center gap-1"><i class="fas fa-lock"></i> เฉพาะ Super Admin</span>`}</div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-heading text-indigo-500"></i> ชื่อหัวเรื่องระบบ</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100">${!isSuperAdminSettings ? `<div class="flex items-center gap-1.5 text-[10px] sm:text-xs font-bold text-slate-400 mb-2"><i class="fas fa-lock"></i> เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้</div>` : ''}<label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ชื่อระบบ (แสดงที่แถบด้านบน)</label><input type="text" id="setSiteTitle" value="${settings.title || 'ระบบเช็คชื่อนักเรียนอัจฉริยะ'}" ${!isSuperAdminSettings ? 'disabled' : ''} class="w-full ${!isSuperAdminSettings ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white'} border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="เช่น ระบบเช็คชื่อนักเรียนอัจฉริยะ">${isSuperAdminSettings ? `<div class="flex justify-end mt-3"><button onclick="window.saveSiteTitleSettings()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกชื่อระบบ</button></div>` : ''}</div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-icons text-indigo-500"></i> ไอคอนเว็บไซต์ (Favicon)</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 flex items-center gap-4 flex-wrap"><img id="faviconPreview" src="${settings.faviconDataUrl || 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/graduation-cap.svg'}" class="w-14 h-14 rounded-xl border border-slate-200 bg-white object-contain p-1 shadow-sm"><div class="flex-1 min-w-[200px]">${isSuperAdminSettings ? `<input type="file" id="faviconFileInput" accept="image/*" class="hidden" onchange="window.handleFaviconUpload(event)"><button onclick="document.getElementById('faviconFileInput').click()" class="bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors"><i class="fas fa-upload"></i> เลือกรูปไอคอนใหม่</button><p class="text-[10px] sm:text-xs text-slate-400 mt-1.5 font-medium">แนะนำไฟล์ภาพสี่เหลี่ยมจัตุรัส ระบบจะปรับขนาดให้อัตโนมัติ และบันทึกทันทีที่เลือกไฟล์</p>` : `<div class="flex items-center gap-1.5 text-[10px] sm:text-xs font-bold text-slate-400"><i class="fas fa-lock"></i> เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้</div>`}</div></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-image text-indigo-500"></i> โลโก้บนแถบหัวเว็บไซต์</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 flex items-center gap-4 flex-wrap"><div id="navLogoPreviewBox" class="w-14 h-14 rounded-xl border border-slate-200 bg-white flex items-center justify-center overflow-hidden shadow-sm">${settings.logoDataUrl ? `<img id="navLogoPreview" src="${settings.logoDataUrl}" class="w-full h-full object-cover">` : `<i class="fas fa-graduation-cap text-indigo-400 text-xl" id="navLogoPreview"></i>`}</div><div class="flex-1 min-w-[200px]">${isSuperAdminSettings ? `<input type="file" id="navLogoFileInput" accept="image/*" class="hidden" onchange="window.handleHeaderLogoUpload(event)"><button onclick="document.getElementById('navLogoFileInput').click()" class="bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors"><i class="fas fa-upload"></i> เลือกรูปโลโก้ใหม่</button>${settings.logoDataUrl ? `<button onclick="window.removeHeaderLogo()" class="ml-2 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-600 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors"><i class="fas fa-times"></i> ลบโลโก้</button>` : ''}<p class="text-[10px] sm:text-xs text-slate-400 mt-1.5 font-medium">แสดงแทนไอคอนหมวกบัณฑิตที่มุมซ้ายบนของเว็บ บันทึกทันทีที่เลือกไฟล์</p>` : `<div class="flex items-center gap-1.5 text-[10px] sm:text-xs font-bold text-slate-400"><i class="fas fa-lock"></i> เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้</div>`}</div></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-bullhorn text-amber-500"></i> ประกาศแจ้งเตือน (แสดงบนสุดของเว็บ)</h3><div class="mb-6 bg-amber-50/70 p-3 sm:p-4 rounded-xl border border-amber-200 space-y-3">${isAnnouncementActive() ? `<div class="flex items-center gap-1.5 text-[10px] sm:text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full w-max"><i class="fas fa-circle text-[6px]"></i> กำลังแสดงอยู่ตอนนี้</div>` : (settings.announcement ? `<div class="flex items-center gap-1.5 text-[10px] sm:text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-full w-max"><i class="fas fa-clock"></i> มีข้อความอยู่ แต่ยังไม่อยู่ในช่วงเวลาที่ตั้งไว้ (หรือหมดเวลาแล้ว)</div>` : '')}<div><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ข้อความประกาศ (เว้นว่างไว้เพื่อซ่อนแถบประกาศ)</label><textarea id="setAnnouncement" rows="2" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-amber-400 outline-none resize-none" placeholder="เช่น ปิดเรียนวันที่ 5 กันยายน เนื่องในกิจกรรมกีฬาสี">${settings.announcement || ''}</textarea></div><div class="grid grid-cols-1 sm:grid-cols-2 gap-3"><div><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">เริ่มแสดงตั้งแต่ (เว้นว่าง = แสดงทันที)</label><input type="datetime-local" id="setAnnouncementStart" value="${settings.announcementStart || ''}" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-amber-400 outline-none"></div><div><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">สิ้นสุดการแสดง (เว้นว่าง = ไม่มีวันหมดเวลา)</label><input type="datetime-local" id="setAnnouncementEnd" value="${settings.announcementEnd || ''}" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-amber-400 outline-none"></div></div><div class="flex flex-wrap gap-2 pt-1"><button onclick="window.saveAnnouncementSettings()" class="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกประกาศ</button>${settings.announcement ? `<button onclick="window.clearAnnouncementNow()" class="bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-600 px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-trash-alt"></i> ลบประกาศทันที</button>` : ''}</div></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-sliders-h text-indigo-500"></i> ข้อมูลภาคเรียน</h3><div class="mb-3 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100"><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-2">ภาคเรียนปัจจุบันของระบบ (คลิกปุ่มเพื่อสลับได้ทันที)</label><div class="flex items-center gap-1.5 flex-wrap mb-3">${Array.from({length: settings.termCount === 3 ? 3 : 2}, (_, i) => i + 1).map(tn => { const isAct = String(settings.term) === String(tn); const st = getTermStatus(tn, settings.year); const stIcon = st === 'open' ? 'fa-circle-check text-emerald-500' : (st === 'not_opened' ? 'fa-power-off text-slate-400' : 'fa-box-archive text-blue-500'); return `<button onclick="window.setAdminActiveTerm('${tn}')" class="${isAct ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'} px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all flex items-center gap-1.5"><i class="fas ${isAct ? 'fa-check-circle' : stIcon}"></i> เทอม ${tn}</button>`; }).join('')}</div><label class="flex items-center gap-2 cursor-pointer mb-3"><input type="checkbox" id="setTermCount3" ${settings.termCount === 3 ? 'checked' : ''} onchange="window.toggleTermCount(this.checked)" class="w-4 h-4 text-indigo-600 rounded"><span class="text-xs sm:text-sm font-bold text-slate-600">เปิดใช้เทอม 3 (ปกติระบบมี 2 เทอมต่อปีการศึกษา)</span></label><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ปีการศึกษา</label><div class="flex gap-2"><input type="text" id="setYear" value="${settings.year}" class="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"><button onclick="window.saveYearSetting()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5 shrink-0"><i class="fas fa-save"></i> บันทึกปี</button></div></div><h3 class="text-base sm:text-lg font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-toggle-on text-indigo-500"></i> สถานะการใช้งานเทอม ${settings.term}/${settings.year}</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100"><div class="grid grid-cols-1 sm:grid-cols-3 gap-2">${[
+                    { key: 'open', label: 'เปิดใช้งาน', desc: 'ลงข้อมูล/เช็คชื่อได้ปกติ', icon: 'fa-wifi', activeCls: 'bg-emerald-600 text-white border-emerald-600', idleCls: 'bg-white border-slate-200 text-emerald-600 hover:bg-emerald-50' },
+                    { key: 'not_opened', label: 'ยังไม่เปิดใช้งาน', desc: 'ผู้ใช้ทั่วไปสลับมาเทอมนี้ไม่ได้', icon: 'fa-power-off', activeCls: 'bg-slate-500 text-white border-slate-500', idleCls: 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100' },
+                    { key: 'locked', label: 'ล็อคข้อมูล', desc: 'ปิดใช้งานแล้ว แต่ดูข้อมูลย้อนหลังได้', icon: 'fa-box-archive', activeCls: 'bg-blue-600 text-white border-blue-600', idleCls: 'bg-white border-slate-200 text-blue-600 hover:bg-blue-50' }
+                ].map(opt => `<button onclick="window.setTermStatus('${opt.key}')" class="${currentTermStatus() === opt.key ? opt.activeCls : opt.idleCls} border-2 rounded-xl px-3 py-2.5 sm:py-3 font-bold text-xs sm:text-sm transition-all flex flex-col items-center gap-1 text-center"><i class="fas ${opt.icon} text-base sm:text-lg"></i><span>${opt.label}</span><span class="text-[9px] sm:text-[10px] font-medium opacity-80">${opt.desc}</span></button>`).join('')}</div></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-cubes text-indigo-500"></i> จำนวนห้อง (ต่อชั้นปี)</h3><div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3 mb-3">`;
+                for(let i=1; i<=6; i++) { html += `<div class="bg-slate-50 p-2 sm:p-3 rounded-lg border border-slate-100 text-center"><label class="block font-black text-[10px] sm:text-xs text-slate-700 mb-1 sm:mb-2">ม.${i}</label><input type="number" id="setCountM${i}" value="${settings.roomCounts[`m${i}`]}" min="0" max="15" class="w-full text-center py-1.5 sm:py-2 rounded border border-slate-200 font-bold text-indigo-600 outline-none text-base sm:text-sm"></div>`;
+                }
+                html += `</div><div class="flex justify-end mb-6"><button onclick="window.saveRoomCountsSettings()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกจำนวนห้อง</button></div><h3 class="text-lg sm:text-xl font-extrabold text-rose-600 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-bell"></i> ตั้งค่าการแจ้งเตือนติดตาม (ต่อเดือน)</h3><div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3 bg-rose-50 p-3 sm:p-4 rounded-xl border border-rose-100 shadow-inner"><div><label class="block text-[10px] sm:text-xs font-bold text-rose-700 mb-1">สายเกิน (ครั้ง)</label><input type="number" id="setLateThresh" value="${settings.thresholds?.late || 4}" class="w-full bg-white border border-rose-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none text-rose-700"></div><div><label class="block text-[10px] sm:text-xs font-bold text-rose-700 mb-1">ขาดเกิน (ครั้ง)</label><input type="number" id="setAbsentThresh" value="${settings.thresholds?.absent || 4}" class="w-full bg-white border border-rose-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none text-rose-700"></div></div><div class="flex justify-end mb-6"><button onclick="window.saveThresholdSettings()" class="bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกเกณฑ์แจ้งเตือน</button></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-id-badge text-indigo-500"></i> ครูที่ปรึกษา และ เจ้าหน้าที่</h3><div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-8">`;
+                let tcOptions = `<option value="">-- เลือกเจ้าหน้าที่ --</option>`;
+                let adv1BaseOptions = `<option value="">-- เลือกครูที่ปรึกษาคนที่ 1 --</option>`;
+                let adv2BaseOptions = `<option value="">-- เลือกครูที่ปรึกษาคนที่ 2 --</option>`;
+                if (teachers && teachers.length > 0) {
+                    teachers.sort((a,b) => a.name.localeCompare(b.name)).forEach(t => {
+                        tcOptions += `<option value="${t.name}">${t.name}</option>`;
+                        adv1BaseOptions += `<option value="${t.name}">${t.name}</option>`;
+                        adv2BaseOptions += `<option value="${t.name}">${t.name}</option>`;
+                    });
+                }
+
+                getRoomList().forEach(roomId => { 
+                    const advs = settings.advisors[roomId] || ["", ""]; const adv1 = Array.isArray(advs) ? advs[0] : (advs || ""); const adv2 = Array.isArray(advs) ? (advs[1] || "") : ""; 
+                    const staff = settings.staffs && settings.staffs[roomId] ? settings.staffs[roomId] : "";
+                    let currentTcOptions = tcOptions;
+                    if (staff) currentTcOptions = currentTcOptions.replace(`value="${staff}"`, `value="${staff}" selected`);
+                    let currentAdv1Options = adv1BaseOptions;
+                    if (adv1) currentAdv1Options = currentAdv1Options.replace(`value="${adv1}"`, `value="${adv1}" selected`);
+                    let currentAdv2Options = adv2BaseOptions;
+                    if (adv2) currentAdv2Options = currentAdv2Options.replace(`value="${adv2}"`, `value="${adv2}" selected`);
+                    
+                    html += `<div class="bg-slate-50 p-2.5 rounded-lg border border-slate-100 flex flex-col gap-1.5 shadow-sm"><div class="font-black text-indigo-800 text-[10px] sm:text-sm mb-1"><i class="fas fa-users"></i> ห้อง ${formatRoomName(roomId)}</div><select id="adv1_${roomId}" class="w-full bg-white border border-slate-200 rounded px-2 py-1.5 text-base sm:text-sm font-bold focus:ring-1 focus:ring-indigo-500 outline-none text-slate-600">${currentAdv1Options}</select><select id="adv2_${roomId}" class="w-full bg-white border border-slate-200 rounded px-2 py-1.5 text-base sm:text-sm font-bold focus:ring-1 focus:ring-indigo-500 outline-none text-slate-600">${currentAdv2Options}</select><select id="staff_${roomId}" class="w-full bg-white border border-slate-200 rounded px-2 py-1.5 text-base sm:text-sm font-bold focus:ring-1 focus:ring-indigo-500 outline-none text-slate-600">${currentTcOptions}</select></div>`;
+                });
+                html += `</div><div class="flex justify-end mb-8"><button onclick="window.saveAdvisors()" class="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-bold shadow-sm transition-colors text-sm"><i class="fas fa-save"></i> บันทึกบุคลากรประจำห้อง</button></div><h3 class="text-lg sm:text-xl font-extrabold text-rose-600 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-exclamation-triangle"></i> ล้างข้อมูลทั้งระบบ</h3><div class="bg-rose-50 p-4 rounded-xl border border-rose-200 shadow-sm flex flex-col sm:flex-row justify-between items-center gap-4"><div><h4 class="font-bold text-rose-800 text-sm sm:text-base">ล้างข้อมูลการเช็คชื่อทั้งหมด</h4><p class="text-[10px] sm:text-xs text-rose-600 font-medium">ลบประวัติการเช็คชื่อของทุกวิชา ทุกห้อง ทุกวัน (ไม่สามารถกู้คืนได้)</p></div><button onclick="window.resetAllAttendanceData()" class="w-full sm:w-auto bg-rose-600 hover:bg-rose-700 text-white px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-bold shadow-sm transition-colors text-sm whitespace-nowrap"><i class="fas fa-trash-alt"></i> ล้างข้อมูลทั้งหมด</button></div>`;
+                content.innerHTML = html;
+            } 
+            else if (currentAdminTab === 'data_status') {
+                // ===== 1. ขนาดข้อมูลที่ใช้ไป (Progress) พร้อมขีดจำกัดที่ตั้งเองได้ =====
+                const isSuperAdminDS = currentUser && currentUser.role === 'super_admin';
+                const fullJson = JSON.stringify({ settings, teachers, subjects, students, attendanceData, followUps, logs });
+                const totalBytes = new Blob([fullJson]).size;
+                const limitChars = settings.storageLimitChars || 50000;
+                const usagePct = Math.min(100, Math.round((fullJson.length / limitChars) * 100));
+                const barColor = usagePct >= 100 ? 'bg-rose-600' : (usagePct >= 90 ? 'bg-rose-500' : (usagePct >= 70 ? 'bg-amber-500' : 'bg-emerald-500'));
+                const fmtSize = (b) => b < 1024 ? `${b} B` : (b < 1024*1024 ? `${(b/1024).toFixed(1)} KB` : `${(b/1024/1024).toFixed(2)} MB`);
+                let statusMsg, statusBg, statusIcon;
+                if (usagePct >= 100) { statusMsg = 'เกินขีดจำกัดที่ตั้งไว้แล้ว! ข้อมูลอาจบันทึกไม่สำเร็จ ควรลดขนาดข้อมูลหรือเพิ่มขีดจำกัดโดยด่วน'; statusBg = 'bg-rose-50 border-rose-300 text-rose-700'; statusIcon = 'fa-exclamation-triangle'; }
+                else if (usagePct >= 90) { statusMsg = 'ใกล้เต็มขีดจำกัดมาก ควรตรวจสอบและวางแผนจัดการพื้นที่โดยเร็ว'; statusBg = 'bg-rose-50 border-rose-200 text-rose-600'; statusIcon = 'fa-exclamation-circle'; }
+                else if (usagePct >= 70) { statusMsg = 'เริ่มใกล้ขีดจำกัด ควรติดตามอย่างใกล้ชิด'; statusBg = 'bg-amber-50 border-amber-200 text-amber-700'; statusIcon = 'fa-exclamation-circle'; }
+                else { statusMsg = 'ปริมาณข้อมูลอยู่ในเกณฑ์ปกติ ไม่ต้องกังวล'; statusBg = 'bg-emerald-50 border-emerald-200 text-emerald-700'; statusIcon = 'fa-check-circle'; }
+                const sizeBreakdown = [
+                    { label: 'ข้อมูลนักเรียน', icon: 'fa-users', color: 'bg-blue-400', bytes: new Blob([JSON.stringify(students)]).size },
+                    { label: 'ข้อมูลรายวิชา', icon: 'fa-book', color: 'bg-indigo-400', bytes: new Blob([JSON.stringify(subjects)]).size },
+                    { label: 'ข้อมูลครู', icon: 'fa-chalkboard-teacher', color: 'bg-purple-400', bytes: new Blob([JSON.stringify(teachers)]).size },
+                    { label: 'ประวัติการเช็คชื่อ', icon: 'fa-calendar-check', color: 'bg-emerald-400', bytes: new Blob([JSON.stringify(attendanceData)]).size },
+                    { label: 'การติดตามนักเรียน', icon: 'fa-clipboard-list', color: 'bg-amber-400', bytes: new Blob([JSON.stringify(followUps)]).size },
+                    { label: 'ประวัติ Log', icon: 'fa-history', color: 'bg-cyan-400', bytes: new Blob([JSON.stringify(logs)]).size },
+                    { label: 'โลโก้ + ไอคอนเว็บไซต์', icon: 'fa-image', color: 'bg-rose-400', bytes: new Blob([JSON.stringify({a: settings.faviconDataUrl, b: settings.logoDataUrl})]).size },
+                ];
+                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-hdd text-indigo-500"></i> ขนาดข้อมูลที่ใช้ไป</h3><div class="mb-4 bg-slate-50 p-4 sm:p-6 rounded-2xl border border-slate-100"><div class="flex justify-between items-end mb-2"><div><span class="text-2xl sm:text-3xl font-black text-slate-800">${fmtSize(totalBytes)}</span><span class="text-slate-400 font-bold text-xs sm:text-sm ml-1">ใช้ไปแล้ว จากขนาด ${(limitChars/1024/1024).toFixed(2)} MB (ขีดจำกัด ${limitChars.toLocaleString()} ตัวอักษร)</span></div><span class="text-lg sm:text-2xl font-black ${usagePct >= 90 ? 'text-rose-500' : (usagePct >= 70 ? 'text-amber-500' : 'text-emerald-500')}">${usagePct}%</span></div><div class="w-full h-4 sm:h-5 bg-slate-200 rounded-full overflow-hidden shadow-inner"><div class="${barColor} h-full rounded-full transition-all duration-700 shadow-sm" style="width: ${usagePct}%"></div></div><div class="flex items-center gap-2 mt-3 border rounded-lg px-3 py-2 ${statusBg}"><i class="fas ${statusIcon}"></i><span class="text-[11px] sm:text-sm font-bold">${statusMsg}</span></div>${isSuperAdminDS ? `<div class="flex flex-wrap items-end gap-2 mt-4 pt-4 border-t border-slate-200"><div class="flex-1 min-w-[160px]"><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ตั้งขีดจำกัดพื้นที่จัดเก็บ (ตัวอักษร)</label><input type="number" id="setStorageLimit" value="${limitChars}" min="1000" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"></div><button onclick="window.saveStorageLimit()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกขีดจำกัด</button></div><p class="text-[10px] sm:text-xs text-slate-400 font-medium mt-2"><i class="fas fa-info-circle"></i> ค่าเริ่มต้นอ้างอิงขีดจำกัด 10MB (ประมาณ 10,000,000 ตัวอักษร) ของ DriveApp.createFile() ในกรณีระบบหลังบ้านเก็บฐานข้อมูลเป็นไฟล์ JSON บน Google Drive (เผื่อระยะปลอดภัยไว้ที่ 8,000,000 ตัวอักษร) หากระบบหลังบ้านของท่านมีขีดจำกัดจริงต่างออกไป สามารถปรับตัวเลขนี้ให้ตรงกับของจริงได้</p>` : ''}<div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-5">${sizeBreakdown.sort((a,b)=>b.bytes-a.bytes).map(s => `<div class="flex items-center gap-2.5 bg-white border border-slate-200 rounded-lg px-3 py-2"><div class="w-7 h-7 ${s.color} text-white rounded-lg flex items-center justify-center text-[10px] shrink-0"><i class="fas ${s.icon}"></i></div><span class="flex-1 text-xs sm:text-sm font-bold text-slate-700 truncate">${s.label}</span><span class="text-xs sm:text-sm font-black text-slate-500">${fmtSize(s.bytes)}</span></div>`).join('')}</div></div>`;
+
+                // ===== 1.5 เก็บถาวรข้อมูลเช็คชื่อเก่า (ลดขนาดข้อมูลระยะยาว) =====
+                const oldestDate = attendanceData.reduce((min, a) => (a.date && (!min || a.date < min)) ? a.date : min, null);
+                html += `<div class="mb-8 bg-purple-50/60 p-4 sm:p-6 rounded-2xl border border-purple-200"><h3 class="text-base sm:text-lg font-extrabold text-purple-800 mb-2 flex items-center gap-2"><i class="fas fa-archive text-purple-500"></i> เก็บถาวรข้อมูลเช็คชื่อเก่า (เก็บด่วน/นอกรอบ)</h3><p class="text-[10px] sm:text-xs text-purple-600 font-medium mb-3">ระบบหลังบ้านมีนโยบายเก็บถาวรข้อมูลเช็คชื่อที่เก่ากว่า 2 ปีให้อัตโนมัติอยู่แล้วทุกครั้งที่บันทึกข้อมูล เครื่องมือนี้ไว้ใช้เผื่อต้องการเก็บถาวรข้อมูลเร็วกว่ากำหนด หรือกำหนดวันที่เอง เช่น ก่อนขึ้นเทอมใหม่${oldestDate ? ` (ข้อมูลเก่าสุดที่มีอยู่: ${oldestDate.split('-').reverse().join('/')})` : ''}</p><div class="flex flex-wrap items-end gap-2"><div class="flex-1 min-w-[160px]"><label class="block text-[10px] sm:text-xs font-bold text-purple-700 mb-1">เก็บถาวรข้อมูลที่บันทึกก่อนวันที่</label><input type="date" id="archiveCutoffDate" onchange="window.updateArchivePreview()" class="w-full bg-white border border-purple-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-purple-400 outline-none"></div><button onclick="window.archiveOldAttendance()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-file-download"></i> ส่งออก + เก็บถาวร</button></div><p id="archivePreviewText" class="text-[10px] sm:text-xs text-purple-500 font-bold mt-2">เลือกวันที่เพื่อดูจำนวนข้อมูลที่จะถูกเก็บถาวร</p></div>`;
+
+                // ===== 1.6 ดูข้อมูลเช็คชื่อที่เก็บถาวรแล้ว =====
+                html += `<div class="mb-8 bg-purple-50/60 p-4 sm:p-6 rounded-2xl border border-purple-200"><div class="flex flex-wrap items-center justify-between gap-2 mb-2"><h3 class="text-base sm:text-lg font-extrabold text-purple-800 flex items-center gap-2"><i class="fas fa-box-open text-purple-500"></i> ดูข้อมูลเช็คชื่อที่เก็บถาวรแล้ว</h3><button onclick="window.loadArchiveList()" class="bg-white border border-purple-300 hover:bg-purple-100 text-purple-700 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-sync-alt"></i> โหลดรายชื่อไฟล์</button></div><p class="text-[10px] sm:text-xs text-purple-600 font-medium mb-3">รายชื่อไฟล์ข้อมูลเช็คชื่อเก่าที่เคยถูกเก็บถาวรไว้ทั้งหมด (ทั้งแบบอัตโนมัติทุก 2 ปี และแบบเก็บด่วนด้านบน) กดปุ่ม "โหลดรายชื่อไฟล์" เพื่อเริ่มดู แล้วเลือกไฟล์ที่ต้องการดาวน์โหลดเป็น Excel เพื่อดูรายละเอียด</p><div id="archiveListContainer" class="space-y-0"><div class="text-center text-slate-400 py-4 text-xs sm:text-sm font-medium">กดปุ่ม "โหลดรายชื่อไฟล์" ด้านบนเพื่อเริ่มต้น</div></div></div>`;
+
+                // ===== 2. สถานะการลงข้อมูลนักเรียนรายห้อง =====
+                const roomList = getRoomList();
+                const roomsWithNone = roomList.filter(r => students.filter(s => s.roomId === r).length === 0);
+                const TOTAL_WEEKLY_SLOTS = 45; // 5 วัน x 9 คาบ (0-8 ไม่รวมพักเที่ยง)
+                const roomsFullSchedule = roomList.filter(r => { const filled = new Set(); getRoomSubjects(r).forEach(s => (s.schedules || []).forEach(sch => filled.add(sch.day + '-' + sch.period))); return filled.size >= TOTAL_WEEKLY_SLOTS; });
+                html += `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-clipboard-check text-indigo-500"></i> สถานะการลงข้อมูลนักเรียนรายห้อง</h3><div class="mb-3 flex flex-wrap gap-2"><span class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded-full"><i class="fas fa-check-circle"></i> ลงข้อมูลแล้ว ${roomList.length - roomsWithNone.length} ห้อง</span><span class="bg-rose-50 border border-rose-200 text-rose-600 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded-full"><i class="fas fa-exclamation-circle"></i> ยังไม่ได้ลงข้อมูล ${roomsWithNone.length} ห้อง</span><span class="bg-indigo-50 border border-indigo-200 text-indigo-700 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded-full"><i class="fas fa-calendar-check"></i> ตารางเต็มแล้ว ${roomsFullSchedule.length} ห้อง</span></div><div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 mb-8">${roomList.map(r => { const cnt = students.filter(s => s.roomId === r).length; const activeCnt = students.filter(s => s.roomId === r && s.status !== 'resigned').length; const done = cnt > 0;
+                    const roomSubjects = getRoomSubjects(r);
+                    const filledSlots = new Set(); roomSubjects.forEach(s => (s.schedules || []).forEach(sch => filledSlots.add(sch.day + '-' + sch.period)));
+                    const missingSlots = TOTAL_WEEKLY_SLOTS - filledSlots.size; const isFullSchedule = filledSlots.size >= TOTAL_WEEKLY_SLOTS;
+                    return `<div class="rounded-xl border p-3 ${done ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'}"><div class="flex items-center justify-between mb-1"><span class="font-black text-slate-700 text-xs sm:text-sm">ห้อง ${formatRoomName(r)}</span><i class="fas ${done ? 'fa-check-circle text-emerald-500' : 'fa-times-circle text-rose-400'} text-sm"></i></div><div class="text-[10px] sm:text-xs font-bold ${done ? 'text-emerald-700' : 'text-rose-500'} mb-1.5">${done ? `${activeCnt} คน` : 'ยังไม่มีข้อมูล'}</div><div class="text-[9px] sm:text-[10px] font-bold ${isFullSchedule ? 'text-indigo-600' : 'text-amber-600'} border-t pt-1.5 ${done ? 'border-emerald-200' : 'border-rose-200'}">${isFullSchedule ? `<i class="fas fa-calendar-check"></i> ตารางเต็มแล้ว (${roomSubjects.length} วิชา)` : `<i class="fas fa-calendar-day"></i> ${roomSubjects.length} วิชา · ขาด ${missingSlots} คาบ`}</div></div>`; }).join('')}</div>`;
+
+                // ===== 3. สถานะการลงข้อมูลรายวิชาของครู =====
+                html += `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-chalkboard-teacher text-indigo-500"></i> สถานะการลงข้อมูลรายวิชาของครู</h3>`;
+                if (teachers.length === 0) {
+                    html += `<div class="text-center text-slate-400 py-10 font-medium bg-slate-50 rounded-xl border border-slate-100">ยังไม่มีข้อมูลครูในระบบ</div>`;
+                } else {
+                    html += `<div class="overflow-x-auto rounded-xl border border-slate-200"><table class="w-full text-left text-xs sm:text-sm min-w-[500px]"><thead class="bg-slate-100"><tr><th class="p-2.5 font-extrabold">ชื่อครู</th><th class="p-2.5 font-extrabold text-center">จำนวนวิชา</th><th class="p-2.5 font-extrabold text-center">จำนวนชั้น</th><th class="p-2.5 font-extrabold text-center">จำนวนห้อง</th></tr></thead><tbody class="divide-y divide-slate-100">`;
+                    teachers.slice().sort((a,b) => a.name.localeCompare(b.name)).forEach(t => {
+                        const taught = activeSubjects().filter(s => s.teacher === t.name || s.teacher2 === t.name);
+                        const rooms = [...new Set(taught.map(s => s.roomId))];
+                        const levels = [...new Set(rooms.map(r => r.split('_')[0]))];
+                        html += `<tr class="hover:bg-slate-50 transition-colors"><td class="p-2.5 font-bold text-slate-700">${t.name}</td><td class="p-2.5 text-center font-black ${taught.length === 0 ? 'text-rose-400' : 'text-indigo-600'}">${taught.length}</td><td class="p-2.5 text-center font-black text-slate-600">${levels.length}</td><td class="p-2.5 text-center font-black text-slate-600">${rooms.length}</td></tr>`;
+                    });
+                    html += `</tbody></table></div>`;
+                }
+                content.innerHTML = html;
+            }
+            else if (currentAdminTab === 'teachers') {
+                let deptOptions = departmentsList.map(d => `<option value="${d}">${d}</option>`).join('');
+                let html = `<div class="flex flex-col sm:flex-row justify-between sm:items-center mb-3 gap-2"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-chalkboard-teacher text-indigo-500"></i> จัดการครูผู้สอน</h3><button onclick="window.openTeacherModal()" class="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg font-bold text-sm shadow-sm transition-colors"><i class="fas fa-plus"></i> เพิ่มครูใหม่</button></div>`;
+                html += `<div class="mb-4 bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-sm"><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><i class="fas fa-search text-slate-400"></i></div><input type="text" id="searchTeacherInput" onkeyup="window.filterTeachers()" class="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-400 shadow-inner" placeholder="ค้นหาชื่อครู หรือกลุ่มสาระฯ..."></div></div>`;
+                html += `<div id="teacherModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-3 transition-opacity"><div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto transform scale-95 opacity-0 transition-all duration-300" id="teacherModalBox"><div class="p-4 sm:p-6"><div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-extrabold text-lg" id="teacherModalTitle">เพิ่มครูใหม่</h4><button onclick="window.closeTeacherModal()" class="text-slate-400 text-xl hover:text-rose-500 transition-colors"><i class="fas fa-times"></i></button></div><div class="flex flex-col gap-3 mb-4"><div><label class="block text-[10px] sm:text-xs font-bold mb-1">ชื่อ-นามสกุล ครูผู้สอน</label><input type="text" id="newTcName" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-400" placeholder="เช่น ครูสมใจ รักเรียน"></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">กลุ่มสาระการเรียนรู้</label><select id="newTcDept" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-400">${deptOptions}</select></div></div><div class="flex justify-end gap-2"><button onclick="window.closeTeacherModal()" class="bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded font-bold text-sm transition-colors">ยกเลิก</button><button onclick="window.saveTeacherForm()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded font-bold text-sm shadow-sm transition-colors"><i class="fas fa-save"></i> บันทึก</button></div></div></div></div>`;
+                html += `<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3" id="adminTeacherGrid">`;
+                teachers.sort((a,b) => a.name.localeCompare(b.name)).forEach(t => { const count = activeSubjects().filter(s => s.teacher === t.name || s.teacher2 === t.name).length; const dept = t.department || 'ระบบ/อื่นๆ'; html += `<div class="bg-white border border-slate-200 rounded-xl p-3 text-center relative group shadow-sm hover:shadow-md transition-shadow teacher-card" data-search="${t.name} ${dept}"><div class="absolute top-1.5 right-1.5 flex gap-1"><button onclick="window.prepareEditTeacher('${t.id}')" class="w-6 h-6 bg-amber-50 hover:bg-amber-100 text-amber-600 rounded-full flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity"><i class="fas fa-edit text-[10px]"></i></button><button onclick="window.deleteTeacher('${t.id}', ${count})" class="w-6 h-6 bg-rose-50 hover:bg-rose-100 text-rose-500 rounded-full flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity"><i class="fas fa-trash text-[10px]"></i></button></div><div class="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto text-lg mb-2"><i class="fas fa-user-tie"></i></div><h4 class="font-bold text-slate-800 text-[11px] sm:text-sm line-clamp-2" title="${t.name}">${t.name}</h4><div class="text-[8px] sm:text-[9px] text-slate-400 mt-0.5 line-clamp-1">${dept}</div><span class="text-[9px] sm:text-[10px] font-bold text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded mt-1 inline-block border border-slate-100">สอน ${count} วิชา</span></div>`; });
+                html += `</div>`;
+                content.innerHTML = html;
+            }
+            else if (currentAdminTab === 'subjects') {
+                let tcOptions = '';
+                if (teachers.length > 0) {
+                    const deptGroups = {};
+                    teachers.forEach(t => { const dept = t.department || 'ไม่ระบุกลุ่มสาระ'; if (!deptGroups[dept]) deptGroups[dept] = []; deptGroups[dept].push(t); });
+                    Object.keys(deptGroups).sort((a, b) => a.localeCompare(b)).forEach(dept => {
+                        tcOptions += `<optgroup label="${dept}">`;
+                        deptGroups[dept].sort((a, b) => a.name.localeCompare(b.name)).forEach(t => { tcOptions += `<option value="${t.name}">${t.name}</option>`; });
+                        tcOptions += `</optgroup>`;
+                    });
+                } else { tcOptions = `<option value="" disabled selected>-- ไม่มีข้อมูล --</option>`; }
+                const subjRoomList = getRoomList();
+                if (!window.adminSelectedSubjectRoom) window.adminSelectedSubjectRoom = 'all';
+                if (window.adminSelectedSubjectRoom !== 'all' && !subjRoomList.includes(window.adminSelectedSubjectRoom)) window.adminSelectedSubjectRoom = 'all';
+                const isAllRooms = window.adminSelectedSubjectRoom === 'all';
+                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-book-open text-indigo-500"></i> จัดการวิชา <span class="text-[10px] sm:text-xs font-bold text-slate-400">(เทอม ${settings.term}/${settings.year})</span></h3>`;
+                if (currentTermStatus() === 'locked') { html += `<div class="mb-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl px-3 py-2 text-[10px] sm:text-sm font-bold flex items-center gap-2"><i class="fas fa-lock"></i> เทอมนี้ถูกล็อคข้อมูลไว้ (เก็บถาวร) ไม่สามารถเพิ่ม/แก้ไข/ลบวิชาได้ (ไปเปลี่ยนสถานะที่แท็บ "ตั้งค่า")</div>`; }
+                else if (currentTermStatus() === 'not_opened') { html += `<div class="mb-3 bg-slate-100 border border-slate-200 text-slate-600 rounded-xl px-3 py-2 text-[10px] sm:text-sm font-bold flex items-center gap-2"><i class="fas fa-power-off"></i> เทอมนี้ยังไม่เปิดใช้งาน ครูยังเช็คชื่อไม่ได้ แต่แอดมินยังจัดเตรียมรายวิชาล่วงหน้าได้ตามปกติ</div>`; }
+                html += `<div class="flex flex-col lg:flex-row justify-between lg:items-center mb-3 gap-2"><select id="adminSubjectRoomSelect" onchange="window.adminSelectedSubjectRoom = this.value; window.renderAdminTab();" class="bg-white border-2 border-slate-200 rounded-lg px-3 py-1.5 font-bold text-sm w-full lg:w-auto outline-none focus:border-indigo-400 shadow-sm"><option value="all" ${isAllRooms ? 'selected' : ''}>รวมทุกห้อง (ทั้งหมด)</option>${subjRoomList.map(r => `<option value="${r}" ${window.adminSelectedSubjectRoom === r ? 'selected' : ''}>ห้อง ${formatRoomName(r)}</option>`).join('')}</select><div class="flex flex-wrap gap-1.5"><button onclick="window.openSubjectModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm transition-colors flex items-center justify-center gap-1.5 flex-1 sm:flex-none"><i class="fas fa-plus"></i> เพิ่มวิชาใหม่${!isAllRooms ? ` (ห้อง ${formatRoomName(window.adminSelectedSubjectRoom)})` : ''}</button>${!isAllRooms ? `<button onclick="window.downloadSubjectTemplate()" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-2 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-download"></i> โหลดฟอร์มวิชา</button><label class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg font-bold text-[10px] sm:text-sm cursor-pointer flex-1 sm:flex-none text-center shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-import"></i> นำเข้ารายวิชา Excel<input type="file" accept=".xlsx, .xls" class="hidden" onchange="window.handleImportSubjects(event)"></label><button onclick="window.clearRoomSubjects('${window.adminSelectedSubjectRoom}')" class="bg-rose-600 hover:bg-rose-700 text-white px-3 py-2 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-broom"></i> ลบวิชาทั้งหมดในห้อง</button>` : `<span class="text-[10px] sm:text-xs text-slate-400 font-bold flex items-center px-2">เลือกห้องที่ต้องการเพื่อนำเข้า/โหลดฟอร์ม/ลบวิชา</span>`}</div></div>`;
+                if (!isAllRooms) {
+                    const rst = computeRoomScheduleStatus(window.adminSelectedSubjectRoom);
+                    const dupes = findDuplicateSubjectsInRoom(window.adminSelectedSubjectRoom);
+                    html += `<div class="mb-3 flex flex-wrap gap-2">`;
+                    html += rst.done ? `<span class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded-full"><i class="fas fa-calendar-check"></i> ตารางเรียนครบแล้ว (${rst.filled}/${rst.total} คาบ)</span>` : `<span class="bg-amber-50 border border-amber-200 text-amber-700 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded-full"><i class="fas fa-calendar-day"></i> ยังลงตารางไม่ครบ (${rst.filled}/${rst.total} คาบ)</span>`;
+                    if (dupes.size > 0) html += `<span class="bg-rose-50 border border-rose-200 text-rose-600 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded-full"><i class="fas fa-clone"></i> พบวิชาซ้ำ ${dupes.size} รายการ (ชื่อ/รหัสวิชาซ้ำกัน)</span>`;
+                    html += `</div>`;
+                }
+
+                html += `<div class="mb-4 bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-sm"><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><i class="fas fa-search text-slate-400"></i></div><input type="text" id="searchSubjectInput" onkeyup="window.filterSubjects()" class="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-400 shadow-inner" placeholder="ค้นหา รหัสวิชา, ชื่อวิชา, ครูผู้สอน..."></div></div>`;
+                html += `<div id="subjectModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-3 transition-opacity"><div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto transform scale-95 opacity-0 transition-all duration-300" id="subjectModalBox"><div class="p-4 sm:p-6"><div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-extrabold text-lg" id="subjectModalTitle">เพิ่ม</h4><button onclick="window.closeSubjectModal()" class="text-slate-400 text-xl hover:text-rose-500 transition-colors"><i class="fas fa-times"></i></button></div><div id="subjectTemplatePickerWrap" class="mb-4 bg-indigo-50 border border-indigo-200 rounded-xl p-3"><label class="block text-[10px] sm:text-xs font-bold text-indigo-700 mb-1"><i class="fas fa-copy"></i> คัดลอกข้อมูลจากวิชาที่มีอยู่แล้วในระดับชั้นเดียวกัน (ไม่บังคับ)</label><select id="subjectTemplatePicker" onchange="window.applySubjectTemplate(this.value)" class="w-full bg-white border border-indigo-200 rounded px-2 py-2 text-base sm:text-sm outline-none focus:ring-1 focus:ring-indigo-400"><option value="">-- พิมพ์ข้อมูลใหม่เอง --</option></select></div><div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2.5 mb-4"><div><label class="block text-[10px] sm:text-xs font-bold mb-1">ห้อง</label><select id="newSubRoom" onchange="window.populateSubjectTemplateOptions()" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm">${subjRoomList.map(r => `<option value="${r}">${formatRoomName(r)}</option>`).join('')}</select></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">รหัสวิชา</label><input type="text" id="newSubCode" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm outline-none focus:ring-1 focus:ring-indigo-400" placeholder="เช่น ว31101"></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">ชื่อวิชา</label><input type="text" id="newSubName" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm outline-none focus:ring-1 focus:ring-indigo-400"></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">ครู (หลัก)</label><select id="newSubTeacher" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm">${tcOptions}</select></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">ครู (ร่วมสอน)</label><select id="newSubTeacher2" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm"><option value="">-- ไม่มี --</option>${tcOptions}</select></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">หน่วยกิต (คาบ)</label><select id="newSubCredit" onchange="window.renderScheduleInputs()" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm"><option value="0.5">0.5 (1 คาบ)</option><option value="1.0">1.0 (2 คาบ)</option><option value="1.5">1.5 (3 คาบ)</option><option value="2.0">2.0 (4 คาบ)</option><option value="2.5">2.5 (5 คาบ)</option><option value="3.0">3.0 (6 คาบ)</option></select></div></div><div id="scheduleContainer" class="grid grid-cols-1 sm:grid-cols-3 gap-2 border-t pt-3 mb-4"></div><div class="flex justify-end gap-2"><button onclick="window.closeSubjectModal()" class="bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded font-bold text-sm transition-colors">ยกเลิก</button><button onclick="window.saveSubjectForm()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded font-bold text-sm shadow-sm transition-colors"><i class="fas fa-save"></i> บันทึก</button></div></div></div></div>`;
+                html += `<div class="overflow-x-auto rounded-xl border border-slate-200 max-h-[500px] w-full"><table class="w-full text-left text-[10px] sm:text-sm min-w-[500px]"><thead class="bg-slate-100 sticky top-0 z-10 border-b"><tr>${isAllRooms ? '<th class="p-2 w-16 text-center">ห้อง</th>' : ''}<th class="p-2">วิชา</th><th class="p-2">ครู</th><th class="p-2 min-w-[120px]">ตาราง</th><th class="p-2 text-center w-16">จัดการ</th></tr></thead><tbody class="divide-y divide-slate-100" id="adminSubjectTableBody">`;
+                const filteredSubjects = isAllRooms ? activeSubjects().slice() : getRoomSubjects(window.adminSelectedSubjectRoom);
+                if (filteredSubjects.length === 0) {
+                    html += `<tr><td colspan="${isAllRooms ? 5 : 4}" class="p-8 text-center text-slate-400 font-medium">ยังไม่มีข้อมูลวิชาในห้องนี้</td></tr>`;
+                } else {
+                    const dupSet = isAllRooms ? new Set() : findDuplicateSubjectsInRoom(window.adminSelectedSubjectRoom);
+                    const conflicts = findTeacherConflicts();
+                    filteredSubjects.sort((a,b) => a.roomId.localeCompare(b.roomId) || a.name.localeCompare(b.name)).forEach(sub => { let schedText = (sub.schedules||[]).map(sch => `<span class="bg-slate-100 px-1 py-0.5 rounded text-[8px] sm:text-[10px] border border-slate-200 mr-1 mb-1 inline-block whitespace-nowrap">${daysLabel[sch.day-1].replace('วัน','')} ค.${sch.period}</span>`).join('');
+                        const isDup = dupSet.has(sub.id); const conflictGroup = conflicts.find(g => g.some(x => x.subjectId === sub.id));
+                        const rowClass = conflictGroup ? 'bg-rose-50 hover:bg-rose-100' : (isDup ? 'bg-amber-50 hover:bg-amber-100' : 'hover:bg-slate-50');
+                        const warnBadges = `${isDup ? '<span class="inline-block bg-amber-100 text-amber-700 border border-amber-300 text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded mr-1 mb-1"><i class="fas fa-clone"></i> ซ้ำ</span>' : ''}${conflictGroup ? '<span class="inline-block bg-rose-100 text-rose-700 border border-rose-300 text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded mr-1 mb-1" title="ครูมีคาบสอนชนกัน"><i class="fas fa-exclamation-triangle"></i> คาบชน</span>' : ''}${sub.locked ? '<span class="inline-block bg-slate-200 text-slate-600 border border-slate-300 text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded mr-1 mb-1"><i class="fas fa-lock"></i> ล็อค</span>' : ''}`;
+                        html += `<tr class="${rowClass} transition-colors" data-room="${sub.roomId}" data-search="${sub.code || ''} ${sub.name} ${sub.teacher} ${sub.teacher2 || ''}">${isAllRooms ? `<td class="p-2 font-bold text-center">${formatRoomName(sub.roomId).replace('ม.','')}</td>` : ''}<td class="p-2">${warnBadges ? `<div class="mb-1">${warnBadges}</div>` : ''}<div class="font-bold text-indigo-700 line-clamp-2">${sub.name}</div>${sub.code ? `<div class="text-[9px] text-slate-500 font-mono mt-0.5">${sub.code}</div>` : ''}</td><td class="p-2 text-[9px] sm:text-sm">${sub.teacher}${sub.teacher2 ? '<br><span class="text-slate-400">' + sub.teacher2 + '</span>' : ''}</td><td class="p-2 whitespace-normal">${schedText}</td><td class="p-2 text-center flex justify-center gap-1"><button onclick="window.toggleSubjectLock('${sub.id}')" title="${sub.locked ? 'ปลดล็อควิชา' : 'ล็อควิชา'}" class="${sub.locked ? 'text-slate-600 bg-slate-200 hover:bg-slate-300' : 'text-slate-400 bg-slate-50 hover:bg-slate-100'} p-1.5 rounded transition-colors"><i class="fas ${sub.locked ? 'fa-lock' : 'fa-lock-open'}"></i></button><button onclick="window.prepareEditSubject('${sub.id}')" class="text-amber-500 bg-amber-50 hover:bg-amber-100 p-1.5 rounded transition-colors"><i class="fas fa-edit"></i></button><button onclick="window.deleteSubject('${sub.id}')" class="text-rose-500 bg-rose-50 hover:bg-rose-100 p-1.5 rounded transition-colors"><i class="fas fa-trash"></i></button></td></tr>`; });
+                }
+                html += `</tbody></table></div>`;
+                content.innerHTML = html;
+            }
+            else if (currentAdminTab === 'students') {
+                const roomList = getRoomList();
+                if(!window.adminSelectedRoom && roomList.length > 0) window.adminSelectedRoom = roomList[0];
+                let html = `<div class="flex flex-col lg:flex-row justify-between lg:items-center mb-3 gap-2"><select id="adminRoomSelect" onchange="window.adminSelectedRoom = this.value; window.renderAdminTab();" class="bg-white border-2 border-slate-200 rounded-lg px-3 py-1.5 font-bold text-sm w-full lg:w-auto outline-none focus:border-indigo-400 shadow-sm">${roomList.map(r => `<option value="${r}" ${window.adminSelectedRoom === r ? 'selected' : ''}>ห้อง ${formatRoomName(r)}</option>`).join('')}</select><div class="flex flex-wrap gap-1.5"><button onclick="window.openStudentModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-plus"></i> เพิ่ม 1 คน</button><button onclick="window.downloadStudentTemplate()" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-download"></i> โหลดฟอร์ม</button><label class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm cursor-pointer flex-1 sm:flex-none text-center shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-import"></i> นำเข้า Excel<input type="file" accept=".xlsx, .xls" class="hidden" onchange="window.handleImportStudents(event)"></label><button onclick="window.exportAllStudentsExcel('${window.adminSelectedRoom}')" class="bg-teal-600 hover:bg-teal-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-download"></i> โหลดสรุป</button></div></div>`;
+                html += `<div class="mb-4 bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-sm"><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><i class="fas fa-search text-slate-400"></i></div><input type="text" id="searchStudentInput" onkeyup="window.filterAdminStudents()" class="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-400 shadow-inner" placeholder="ค้นหา เลขที่, ชื่อ-นามสกุล..."></div></div>`;
+                html += `<div id="studentModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-3 transition-opacity"><div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto transform scale-95 opacity-0 transition-all duration-300" id="studentModalBox"><div class="p-4 sm:p-6"><div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-extrabold text-lg" id="studentModalTitle">เพิ่ม</h4><button onclick="window.closeStudentModal()" class="text-slate-400 text-xl hover:text-rose-500 transition-colors"><i class="fas fa-times"></i></button></div><div class="grid grid-cols-2 gap-2.5 mb-4"><div><label class="block text-[10px] sm:text-xs font-bold mb-1">เลขที่</label><input type="number" id="newStuNum" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm outline-none focus:ring-1 focus:ring-indigo-400"></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">สถานะ</label><select id="newStuStatus" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm outline-none"><option value="active">เรียนอยู่</option><option value="resigned">ออก/ย้าย</option></select></div><div class="col-span-2"><label class="block text-[10px] sm:text-xs font-bold mb-1">คำนำหน้า + ชื่อ-นามสกุล</label><input type="text" id="newStuName" placeholder="เช่น นาย สมชาย ใจดี" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm outline-none focus:ring-1 focus:ring-indigo-400"></div></div><div class="flex justify-end gap-2"><button onclick="window.closeStudentModal()" class="bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded font-bold text-sm transition-colors">ยกเลิก</button><button onclick="window.saveStudentForm()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded font-bold text-sm shadow-sm transition-colors"><i class="fas fa-save"></i> บันทึก</button></div></div></div></div><div class="overflow-x-auto rounded-xl border border-slate-200 max-h-[500px] w-full"><table class="w-full text-left text-[10px] sm:text-sm min-w-[300px] sm:min-w-[400px]"><thead class="bg-slate-100 sticky top-0 z-10 border-b"><tr><th class="p-2 w-12 sm:w-16 text-center sticky left-0 bg-slate-100 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">เลขที่</th><th class="p-2">ชื่อ-นามสกุล</th><th class="p-2 text-center w-20">จัดการ</th></tr></thead><tbody class="divide-y divide-slate-100" id="adminStudentTableBody">`;
+                const roomStudents = students.filter(s => s.roomId === window.adminSelectedRoom).sort((a,b) => parseInt(a.number) - parseInt(b.number));
+                if(roomStudents.length === 0) { html += `<tr><td colspan="3" class="p-8 text-center text-slate-400 font-medium">ยังไม่มีข้อมูลนักเรียน</td></tr>`;
+                } else { roomStudents.forEach(st => { const badge = st.status === 'resigned' ? `<span class="bg-rose-100 text-rose-700 px-1 py-0.5 rounded text-[8px] sm:text-[10px] ml-1 border border-rose-200 font-bold">ออก/ย้าย</span>` : ''; html += `<tr class="hover:bg-slate-50 transition-colors" data-search="${st.number} ${st.name}"><td class="p-2 text-center font-bold text-slate-500 sticky left-0 bg-white shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">${st.number}</td><td class="p-2 font-bold ${st.status==='resigned'?'text-slate-400':''} text-[11px] sm:text-sm">${st.name} ${badge}</td><td class="p-2 text-center flex justify-center gap-1"><button onclick="window.prepareEditStudent('${st.id}')" class="text-amber-500 bg-amber-50 hover:bg-amber-100 p-1.5 rounded transition-colors"><i class="fas fa-edit"></i></button><button onclick="window.deleteStudent('${st.id}')" class="text-rose-500 bg-rose-50 hover:bg-rose-100 p-1.5 rounded transition-colors"><i class="fas fa-trash"></i></button></td></tr>`;
+                }); }
+                html += `</tbody></table></div>`;
+                content.innerHTML = html;
+            }
+            else if (currentAdminTab === 'users') {
+                if (!currentUser || currentUser.role !== 'super_admin') {
+                    content.innerHTML = `<div class="text-center text-slate-400 py-16 font-bold"><i class="fas fa-lock text-3xl mb-3"></i><br>เฉพาะ Super Admin เท่านั้นที่จัดการผู้ใช้งานได้</div>`;
+                    return;
+                }
+                let html = `<div class="flex justify-between items-center mb-4 flex-wrap gap-2"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-user-cog text-indigo-500"></i> จัดการผู้ใช้งาน (แอดมิน)</h3><button onclick="window.openUserModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-user-plus"></i> เพิ่มผู้ใช้ใหม่</button></div>`;
+                html += `<div id="userModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-3 transition-opacity"><div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-md transform scale-95 opacity-0 transition-all duration-300" id="userModalBox"><div class="p-4 sm:p-6"><div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-extrabold text-lg" id="userModalTitle">เพิ่มผู้ใช้งาน</h4><button onclick="window.closeUserModal()" class="text-slate-400 text-xl hover:text-rose-500 transition-colors"><i class="fas fa-times"></i></button></div><div class="space-y-3 mb-4"><div><label class="block text-xs font-bold mb-1">ชื่อ-นามสกุล (แสดงในระบบ)</label><input type="text" id="newUserName" class="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-400" placeholder="เช่น เจ้าหน้าที่ทะเบียน"></div><div><label class="block text-xs font-bold mb-1">ชื่อผู้ใช้ (Username)</label><input type="text" id="newUserUsername" class="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-400" placeholder="username"></div><div><label class="block text-xs font-bold mb-1">รหัสผ่าน</label><input type="text" id="newUserPassword" class="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-400" placeholder="ตั้งรหัสผ่าน"></div><div class="bg-indigo-50 border border-indigo-200 text-indigo-700 text-[10px] sm:text-xs font-bold rounded-lg px-3 py-2 flex items-center gap-1.5"><i class="fas fa-info-circle"></i> ผู้ใช้ใหม่จะได้รับสิทธิ์ "เจ้าหน้าที่" (ไม่สามารถเพิ่ม/แก้ไข/ลบผู้ใช้งานอื่นได้)</div></div><div class="flex justify-end gap-2"><button onclick="window.closeUserModal()" class="bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded font-bold text-sm transition-colors">ยกเลิก</button><button onclick="window.saveUserForm()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded font-bold text-sm shadow-sm transition-colors"><i class="fas fa-save"></i> บันทึก</button></div></div></div></div>`;
+                html += `<div class="space-y-2.5">`;
+                (settings.users || []).forEach(u => {
+                    const isSuper = u.role === 'super_admin';
+                    html += `<div class="flex items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-xl p-3 sm:p-4"><div class="flex items-center gap-3 min-w-0"><div class="w-9 h-9 sm:w-11 sm:h-11 rounded-full flex items-center justify-center text-sm sm:text-lg shrink-0 ${isSuper ? 'bg-purple-100 text-purple-700' : 'bg-indigo-100 text-indigo-700'}"><i class="fas ${isSuper ? 'fa-crown' : 'fa-user'}"></i></div><div class="min-w-0"><div class="font-bold text-slate-800 text-sm sm:text-base truncate">${u.name} ${isSuper ? '<span class="bg-purple-100 text-purple-700 border border-purple-200 text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded-full ml-1">Super Admin</span>' : '<span class="bg-indigo-100 text-indigo-700 border border-indigo-200 text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded-full ml-1">เจ้าหน้าที่</span>'}</div><div class="text-[10px] sm:text-xs text-slate-500 font-medium truncate">Username: ${u.username}</div></div></div><div class="flex gap-1.5 shrink-0">${isSuper ? `<span class="text-slate-400 text-[10px] sm:text-xs font-bold px-2 flex items-center gap-1"><i class="fas fa-lock"></i> ล็อกไว้</span>` : `<button onclick="window.openUserModal('${u.id}')" class="text-amber-500 bg-amber-50 hover:bg-amber-100 p-2 rounded-lg transition-colors"><i class="fas fa-edit"></i></button><button onclick="window.deleteUser('${u.id}')" class="text-rose-500 bg-rose-50 hover:bg-rose-100 p-2 rounded-lg transition-colors"><i class="fas fa-trash"></i></button>`}</div></div>`;
+                });
+                html += `</div>`;
+                content.innerHTML = html;
+            }
+            else if (currentAdminTab === 'holidays') {
+                if (window.holidayCalYear === undefined) { const now = new Date(); window.holidayCalYear = now.getFullYear(); window.holidayCalMonth = now.getMonth(); }
+                const year = window.holidayCalYear, month = window.holidayCalMonth;
+                const monthNamesFull = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+                const dayNamesShort = ['อา','จ','อ','พ','พฤ','ศ','ส'];
+                const firstDay = new Date(year, month, 1);
+                const startWeekday = firstDay.getDay();
+                const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-2 flex items-center gap-2"><i class="fas fa-calendar-times text-rose-500"></i> จัดการวันหยุด / วันสอบ</h3><p class="text-[10px] sm:text-xs text-slate-500 font-medium mb-4"><i class="fas fa-info-circle"></i> คลิกวันที่ในปฏิทินเพื่อเพิ่ม/แก้ไข/ลบวันหยุด ระบบจะแสดงหมายเหตุในหน้าเช็คชื่อทุกรายวิชาของวันนั้น และขึ้นประกาศบนหน้าเว็บอัตโนมัติในวันนั้นด้วย (ใช้ได้ทั้งวันหยุดราชการและวันสอบ)</p>`;
+
+                html += `<div id="holidayModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-3 transition-opacity"><div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-md transform scale-95 opacity-0 transition-all duration-300" id="holidayModalBox"><div class="p-4 sm:p-6"><div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-extrabold text-lg" id="holidayModalTitle">เพิ่มวันหยุด</h4><button onclick="window.closeHolidayModal()" class="text-slate-400 text-xl hover:text-rose-500 transition-colors"><i class="fas fa-times"></i></button></div><div class="space-y-3 mb-4"><div><label class="block text-xs font-bold mb-1">วันที่</label><input type="text" id="holidayModalDate" disabled class="w-full bg-slate-100 text-slate-500 border border-slate-200 rounded px-3 py-2 text-sm font-bold outline-none"></div><div><label class="block text-xs font-bold mb-1">หมายเหตุ / เหตุผล</label><input type="text" id="holidayModalLabel" class="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-rose-400" placeholder="เช่น วันหยุดราชการ, วันสอบปลายภาค"></div></div><div class="flex justify-between items-center gap-2"><button id="holidayModalDeleteBtn" onclick="window.deleteHoliday(document.getElementById('holidayModalDate').value)" class="hidden bg-rose-50 hover:bg-rose-100 text-rose-600 px-3 py-1.5 rounded font-bold text-xs sm:text-sm transition-colors"><i class="fas fa-trash"></i> ลบวันหยุดนี้</button><div class="flex gap-2 ml-auto"><button onclick="window.closeHolidayModal()" class="bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded font-bold text-sm transition-colors">ยกเลิก</button><button onclick="window.saveHolidayForm()" class="bg-rose-600 hover:bg-rose-700 text-white px-4 py-1.5 rounded font-bold text-sm shadow-sm transition-colors"><i class="fas fa-save"></i> บันทึก</button></div></div></div></div></div>`;
+
+                html += `<div class="flex items-center justify-between mb-4 bg-slate-50 rounded-xl border border-slate-100 p-2 sm:p-3"><button onclick="window.changeHolidayMonth(-1)" class="w-9 h-9 sm:w-10 sm:h-10 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg flex items-center justify-center text-slate-600 shadow-sm transition-colors"><i class="fas fa-chevron-left"></i></button><span class="font-extrabold text-sm sm:text-lg text-slate-800">${monthNamesFull[month]} ${year + 543}</span><button onclick="window.changeHolidayMonth(1)" class="w-9 h-9 sm:w-10 sm:h-10 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg flex items-center justify-center text-slate-600 shadow-sm transition-colors"><i class="fas fa-chevron-right"></i></button></div>`;
+
+                html += `<div class="grid grid-cols-7 gap-1 sm:gap-1.5 mb-8">`;
+                dayNamesShort.forEach(d => { html += `<div class="text-center text-[9px] sm:text-xs font-black text-slate-400 py-1">${d}</div>`; });
+                for (let i = 0; i < startWeekday; i++) html += `<div></div>`;
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                    const holiday = getHolidayForDate(dateStr);
+                    const isToday = dateStr === todayDateStr();
+                    html += `<button onclick="window.openHolidayModal('${dateStr}')" class="aspect-square rounded-lg sm:rounded-xl border p-1 sm:p-1.5 flex flex-col items-center justify-start transition-all hover:shadow-md ${holiday ? 'bg-rose-50 border-rose-300' : 'bg-white border-slate-200 hover:border-indigo-300'} ${isToday ? 'ring-2 ring-indigo-400' : ''}"><span class="text-[10px] sm:text-sm font-black ${holiday ? 'text-rose-600' : 'text-slate-700'}">${day}</span>${holiday ? `<span class="text-[7px] sm:text-[9px] font-bold text-rose-500 leading-tight text-center hidden sm:block overflow-hidden" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${holiday.label}</span><i class="fas fa-circle text-rose-400 text-[5px] sm:hidden mt-0.5"></i>` : ''}</button>`;
+                }
+                html += `</div>`;
+
+                const allHolidays = (settings.holidays || []).slice().sort((a, b) => a.date.localeCompare(b.date));
+                html += `<h4 class="font-extrabold text-sm sm:text-lg text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-list text-rose-500"></i> รายการวันหยุดทั้งหมด (${allHolidays.length})</h4>`;
+                if (allHolidays.length === 0) {
+                    html += `<div class="text-center text-slate-400 py-8 text-xs sm:text-sm font-medium bg-slate-50 rounded-xl border border-slate-100">ยังไม่มีการตั้งวันหยุด</div>`;
+                } else {
+                    html += `<div class="space-y-1.5 max-h-80 overflow-y-auto pr-1">${allHolidays.map(h => `<div class="flex items-center justify-between gap-2 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2"><div class="min-w-0"><span class="font-black text-rose-700 text-xs sm:text-sm">${h.date.split('-').reverse().join('/')}</span><span class="text-rose-600 text-xs sm:text-sm font-bold ml-2">${h.label}</span></div><button onclick="window.deleteHoliday('${h.date}')" class="shrink-0 text-rose-500 hover:text-rose-700 p-1.5"><i class="fas fa-trash"></i></button></div>`).join('')}</div>`;
+                }
+                content.innerHTML = html;
+            }
+            else if (currentAdminTab === 'logs') {
+                if (!window.logFilterCategory) window.logFilterCategory = 'all';
+                if (!window.logFilterUser) window.logFilterUser = 'all';
+                const catMeta = {
+                    all: { label: 'ทั้งหมด', icon: 'fa-list', color: 'slate' },
+                    settings: { label: 'ปรับตั้งค่าระบบ', icon: 'fa-cog', color: 'indigo' },
+                    data: { label: 'ลงข้อมูลต่างๆ', icon: 'fa-database', color: 'emerald' },
+                    account: { label: 'บัญชีผู้ใช้', icon: 'fa-user-shield', color: 'purple' },
+                };
+                const uniqueUsers = [...new Set(logs.map(l => l.name))].sort((a,b) => a.localeCompare(b));
+                const isSuperAdminLogs = currentUser && currentUser.role === 'super_admin';
+                let html = `<div class="flex justify-between items-center mb-4 flex-wrap gap-2"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-history text-indigo-500"></i> Log</h3><div class="flex gap-1.5"><button onclick="window.refreshLogView(this)" class="bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-sync-alt" id="logRefreshIcon"></i> รีเฟรช Log</button>${isSuperAdminLogs && logs.length > 0 ? `<button onclick="window.clearAllLogs()" class="bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-600 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-trash-alt"></i> ล้างประวัติ Log ทั้งหมด</button>` : ''}</div></div>`;
+                html += `<div class="flex flex-wrap gap-1.5 mb-3">${Object.entries(catMeta).map(([key, m]) => `<button onclick="window.filterLogCategory('${key}')" class="px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-bold border transition-colors flex items-center gap-1.5 ${window.logFilterCategory === key ? `bg-${m.color}-600 text-white border-${m.color}-600` : `bg-white text-slate-600 border-slate-200 hover:bg-slate-50`}"><i class="fas ${m.icon}"></i> ${m.label}</button>`).join('')}</div>`;
+                if (window.logFilterCategory === 'account') { html += `<div class="mb-3 flex items-start gap-2 bg-purple-50 border border-purple-200 text-purple-700 rounded-lg px-3 py-2.5"><i class="fas fa-info-circle mt-0.5"></i><span class="text-[10px] sm:text-xs font-bold leading-relaxed">ระบบจะออกจากระบบให้อัตโนมัติหากไม่มีการใช้งานเกิน 30 นาที (เพื่อความปลอดภัยของบัญชี) เหตุการณ์นี้จะถูกบันทึกเป็น "ออกจากระบบอัตโนมัติ (หมดเวลา)" ในหมวดนี้เช่นกัน</span></div>`; }
+                html += `<div class="mb-4 flex items-center gap-2 flex-wrap"><label class="text-[10px] sm:text-xs font-bold text-slate-500 flex items-center gap-1.5"><i class="fas fa-user"></i> กรองเฉพาะบัญชี:</label><select onchange="window.filterLogUser(this.value)" class="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[10px] sm:text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-400"><option value="all" ${window.logFilterUser === 'all' ? 'selected' : ''}>ทุกบัญชี</option>${uniqueUsers.map(u => `<option value="${u}" ${window.logFilterUser === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>`;
+                let filteredLogs = (window.logFilterCategory === 'all') ? logs.slice() : logs.filter(l => (l.category || 'data') === window.logFilterCategory);
+                if (window.logFilterUser !== 'all') filteredLogs = filteredLogs.filter(l => l.name === window.logFilterUser);
+                const sortedLogs = filteredLogs.slice().reverse().slice(0, 200);
+                html += `<div class="mb-3"><span class="text-[10px] sm:text-xs text-slate-400 font-bold">แสดงล่าสุด ${sortedLogs.length} จาก ${filteredLogs.length} รายการ${window.logFilterCategory !== 'all' ? ` (หมวด: ${catMeta[window.logFilterCategory].label})` : ''}${window.logFilterUser !== 'all' ? ` (บัญชี: ${window.logFilterUser})` : ''}</span></div>`;
+                if (sortedLogs.length === 0) {
+                    html += `<div class="text-center text-slate-400 py-16 font-medium"><i class="fas fa-inbox text-3xl mb-3"></i><br>ยังไม่มีประวัติในหมวดนี้</div>`;
+                } else {
+                    html += `<div class="space-y-2 max-h-[600px] overflow-y-auto pr-1">`;
+                    sortedLogs.forEach(l => {
+                        const d = new Date(l.timestamp);
+                        const dateStr = isNaN(d) ? '' : d.toLocaleString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                        const m = catMeta[l.category || 'data'] || catMeta.data;
+                        html += `<div class="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-start sm:items-center gap-1.5 sm:gap-3"><div class="shrink-0 text-[10px] sm:text-xs font-bold text-slate-400 sm:w-36">${dateStr}</div><div class="shrink-0 text-[10px] sm:text-xs font-black text-${m.color}-700 bg-${m.color}-50 border border-${m.color}-200 px-2 py-0.5 rounded-full w-max"><i class="fas ${m.icon}"></i> ${m.label}</div><div class="shrink-0 text-[10px] sm:text-xs font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full w-max">${l.name}</div><div class="flex-1 min-w-0"><span class="font-bold text-slate-700 text-xs sm:text-sm">${l.action}</span>${l.details ? `<span class="text-slate-500 text-[10px] sm:text-xs ml-1">— ${l.details}</span>` : ''}</div></div>`;
+                    });
+                    html += `</div>`;
+                }
+                content.innerHTML = html;
+            }
+        }
+        window.filterLogCategory = function(cat) { window.logFilterCategory = cat; renderAdminTab(); };
+        window.filterLogUser = function(name) { window.logFilterUser = name; renderAdminTab(); };
+        window.refreshLogView = async function(btn) {
+            const icon = document.getElementById('logRefreshIcon');
+            if (icon) icon.classList.add('fa-spin');
+            if (btn) btn.disabled = true;
+            await window.refreshData();
+        };
+        window.clearAllLogs = function() {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่ล้างประวัติ Log ได้", "error"); return; }
+            showConfirm("ล้างประวัติ Log ทั้งหมด", "ประวัติการแก้ไขทั้งหมดที่บันทึกไว้จะถูกลบอย่างถาวรและไม่สามารถกู้คืนได้ คุณแน่ใจหรือไม่?", () => {
+                logs = [];
+                logAction('ล้างประวัติ Log ทั้งหมด', '', 'account');
+                saveData('full'); showToast("ล้างประวัติ Log เรียบร้อยแล้ว"); renderAdminTab();
+            });
+        };
+
+        // ===== จัดการวันหยุด/วันสอบ =====
+        window.changeHolidayMonth = function(delta) {
+            if (window.holidayCalYear === undefined) { const now = new Date(); window.holidayCalYear = now.getFullYear(); window.holidayCalMonth = now.getMonth(); }
+            window.holidayCalMonth += delta;
+            if (window.holidayCalMonth > 11) { window.holidayCalMonth = 0; window.holidayCalYear++; }
+            if (window.holidayCalMonth < 0) { window.holidayCalMonth = 11; window.holidayCalYear--; }
+            renderAdminTab();
+        };
+        window.openHolidayModal = function(dateStr) {
+            const holiday = getHolidayForDate(dateStr);
+            document.getElementById('holidayModalTitle').innerText = holiday ? 'แก้ไขวันหยุด' : 'เพิ่มวันหยุด';
+            document.getElementById('holidayModalDate').value = dateStr;
+            document.getElementById('holidayModalLabel').value = holiday ? holiday.label : '';
+            document.getElementById('holidayModalDeleteBtn').classList.toggle('hidden', !holiday);
+            document.getElementById('holidayModal').classList.remove('hidden');
+            setTimeout(() => { document.getElementById('holidayModalBox').classList.remove('scale-95', 'opacity-0'); document.getElementById('holidayModalBox').classList.add('scale-100', 'opacity-100'); }, 10);
+        };
+        window.closeHolidayModal = function() {
+            document.getElementById('holidayModalBox').classList.remove('scale-100', 'opacity-100');
+            document.getElementById('holidayModalBox').classList.add('scale-95', 'opacity-0');
+            setTimeout(() => { document.getElementById('holidayModal').classList.add('hidden'); }, 300);
+        };
+        window.saveHolidayForm = function() {
+            const dateStr = document.getElementById('holidayModalDate').value;
+            const label = document.getElementById('holidayModalLabel').value.trim();
+            if (!label) { showToast("กรุณากรอกหมายเหตุ/เหตุผลของวันหยุด", "error"); return; }
+            if (!settings.holidays) settings.holidays = [];
+            const existing = settings.holidays.find(h => h.date === dateStr);
+            if (existing) { existing.label = label; } else { settings.holidays.push({ date: dateStr, label }); }
+            logAction('เพิ่ม/แก้ไขวันหยุด', `${dateStr.split('-').reverse().join('/')} - ${label}`, 'settings');
+            updateHolidayBar();
+            saveData('full'); showToast("บันทึกวันหยุดเรียบร้อย"); renderAdminTab(); closeHolidayModal();
+        };
+        window.deleteHoliday = function(dateStr) {
+            const holiday = getHolidayForDate(dateStr);
+            if (!holiday) return;
+            showConfirm("ลบวันหยุด", `ต้องการลบวันหยุดวันที่ ${dateStr.split('-').reverse().join('/')} (${holiday.label}) ใช่หรือไม่?`, () => {
+                settings.holidays = settings.holidays.filter(h => h.date !== dateStr);
+                logAction('ลบวันหยุด', `${dateStr.split('-').reverse().join('/')} - ${holiday.label}`, 'settings');
+                updateHolidayBar();
+                saveData('full'); showToast("ลบวันหยุดเรียบร้อย"); renderAdminTab();
+                const modal = document.getElementById('holidayModal'); if (modal && !modal.classList.contains('hidden')) closeHolidayModal();
+            });
+        };
+
+        window.saveSiteTitleSettings = function() {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้", "error"); return; }
+            settings.title = document.getElementById('setSiteTitle').value.trim() || 'ระบบเช็คชื่อนักเรียนอัจฉริยะ';
+            document.getElementById('navTitle').innerText = settings.title;
+            document.title = settings.title;
+            logAction('แก้ไขชื่อหัวเรื่องระบบ', settings.title, 'settings');
+            saveData('full'); showToast("บันทึกชื่อระบบเรียบร้อย"); renderAdminTab();
+        };
+        window.setAdminActiveTerm = function(newTerm) {
+            newTerm = String(newTerm);
+            if (newTerm === String(settings.term)) return;
+            settings.term = newTerm;
+            document.getElementById('navSubtitle').innerText = `ภาคเรียนที่ ${settings.term} / ${settings.year}`;
+            logAction('สลับภาคเรียนที่แสดงผล (จากหน้าแอดมิน)', `เทอม ${settings.term}/${settings.year}`, 'settings');
+            saveData('full'); showToast(`สลับไปเทอม ${settings.term}/${settings.year} แล้ว`); renderAdminTab();
+        };
+        window.toggleTermCount = function(checked) {
+            settings.termCount = checked ? 3 : 2;
+            if (!checked && String(settings.term) === '3') { settings.term = '1'; document.getElementById('navSubtitle').innerText = `ภาคเรียนที่ ${settings.term} / ${settings.year}`; }
+            logAction('ปรับจำนวนเทอมของระบบ', checked ? 'เปิดใช้ 3 เทอม' : 'ใช้ 2 เทอม (ปกติ)', 'settings');
+            saveData('full'); showToast(checked ? "เปิดใช้งานเทอม 3 แล้ว" : "ปิดใช้งานเทอม 3 แล้ว"); renderAdminTab();
+        };
+        window.saveYearSetting = function() {
+            settings.year = document.getElementById('setYear').value.trim() || settings.year;
+            document.getElementById('navSubtitle').innerText = `ภาคเรียนที่ ${settings.term} / ${settings.year}`;
+            logAction('แก้ไขปีการศึกษา', `ปีการศึกษา ${settings.year}`, 'settings');
+            saveData('full'); showToast("บันทึกปีการศึกษาเรียบร้อย"); renderAdminTab();
+        };
+        window.setTermStatus = function(status) {
+            if (!['open', 'not_opened', 'locked'].includes(status)) return;
+            if (!settings.termLocks) settings.termLocks = {};
+            const key = termKeyOf(settings.term, settings.year);
+            settings.termLocks[key] = status;
+            const labels = { open: 'เปิดใช้งาน', not_opened: 'ยังไม่เปิดใช้งาน', locked: 'ล็อคข้อมูล' };
+            logAction('เปลี่ยนสถานะเทอม', `เทอม ${settings.term}/${settings.year} => ${labels[status]}`, 'settings');
+            saveData('full'); showToast(`ตั้งสถานะเทอม ${settings.term}/${settings.year} เป็น "${labels[status]}" แล้ว`); renderAdminTab();
+        };
+        window.switchActiveTerm = function(newTerm) {
+            newTerm = String(newTerm);
+            if (newTerm === String(settings.term)) return;
+            settings.term = newTerm;
+            document.getElementById('navSubtitle').innerText = `ภาคเรียนที่ ${settings.term} / ${settings.year}`;
+            logAction('สลับภาคเรียนที่แสดงผล', `เทอม ${settings.term}/${settings.year}`, 'settings');
+            window.__justSwitchedTerm = true;
+            saveData('full'); showToast(`สลับไปแสดงข้อมูลเทอม ${settings.term} / ${settings.year} แล้ว`); renderDashboard();
+        };
+        window.goToNotification = function(idx) {
+            const n = window.__pendingNotifs && window.__pendingNotifs[idx]; if (n && n.action) n.action(); else window.navigate('admin', { tab: 'subjects' });
+        };
+        window.saveRoomCountsSettings = function() {
+            for(let i=1; i<=6; i++) { settings.roomCounts[`m${i}`] = parseInt(document.getElementById(`setCountM${i}`).value) || 0;
+            }
+            logAction('แก้ไขจำนวนห้องเรียน', '', 'settings');
+            saveData('full'); showToast("บันทึกจำนวนห้องเรียบร้อย"); renderAdminTab();
+        };
+        window.saveThresholdSettings = function() {
+            settings.thresholds = { late: parseInt(document.getElementById('setLateThresh').value) || 4, absent: parseInt(document.getElementById('setAbsentThresh').value) || 4 };
+            logAction('แก้ไขเกณฑ์การแจ้งเตือนติดตาม', `สาย ${settings.thresholds.late} / ขาด ${settings.thresholds.absent} ครั้ง`, 'settings');
+            saveData('full'); showToast("บันทึกเกณฑ์แจ้งเตือนเรียบร้อย"); renderAdminTab();
+        };
+        window.saveStorageLimit = function() {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้", "error"); return; }
+            const val = parseInt(document.getElementById('setStorageLimit').value);
+            if (!val || val < 1000) { showToast("กรุณากรอกตัวเลขที่มากกว่า 1,000 ตัวอักษร", "error"); return; }
+            settings.storageLimitChars = val;
+            logAction('แก้ไขขีดจำกัดพื้นที่จัดเก็บข้อมูล', `${val.toLocaleString()} ตัวอักษร`, 'settings');
+            saveData('full'); showToast("บันทึกขีดจำกัดเรียบร้อย"); renderAdminTab();
+        };
+
+        // บันทึกประกาศแจ้งเตือน (แยกจากการตั้งค่าหลัก) พร้อมช่วงเวลาที่ต้องการให้แสดง
+        window.saveAnnouncementSettings = function() {
+            const text = document.getElementById('setAnnouncement').value.trim();
+            const start = document.getElementById('setAnnouncementStart').value || '';
+            const end = document.getElementById('setAnnouncementEnd').value || '';
+            if (start && end && new Date(end) < new Date(start)) { showToast("เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่มต้น", "error"); return; }
+            settings.announcement = text; settings.announcementStart = start; settings.announcementEnd = end;
+            updateAnnouncementBar();
+            logAction('แก้ไขประกาศ', text ? `ตั้งข้อความ: "${text.substring(0,60)}"` : 'ล้างข้อความประกาศ', 'settings');
+            saveData('full'); showToast("บันทึกประกาศเรียบร้อย"); renderAdminTab();
+        };
+
+        // ลบประกาศทันที (เฉพาะแอดมิน)
+        window.clearAnnouncementNow = function() {
+            showConfirm("ลบประกาศ", "ต้องการลบข้อความประกาศนี้ทันทีใช่หรือไม่?", () => {
+                settings.announcement = ''; settings.announcementStart = ''; settings.announcementEnd = '';
+                updateAnnouncementBar();
+                logAction('ลบประกาศทันที', '', 'settings');
+                saveData('full'); showToast("ลบประกาศแล้ว"); renderAdminTab();
+            });
+        };
+
+        // อัปโหลดไอคอนเว็บไซต์ (Favicon) - เฉพาะแอดมิน ปรับขนาดภาพให้เล็กลงก่อนบันทึกเพื่อไม่ให้ข้อมูลหนักเกินไป
+        window.handleFaviconUpload = function(event) {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้", "error"); return; }
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            if (!file.type.startsWith('image/')) { showToast("กรุณาเลือกไฟล์รูปภาพเท่านั้น", "error"); return; }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const SIZE = 128;
+                    const canvas = document.createElement('canvas');
+                    canvas.width = SIZE; canvas.height = SIZE;
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, SIZE, SIZE);
+                    const scale = Math.max(SIZE / img.width, SIZE / img.height);
+                    const w = img.width * scale, h = img.height * scale;
+                    ctx.drawImage(img, (SIZE - w) / 2, (SIZE - h) / 2, w, h);
+                    const dataUrl = canvas.toDataURL('image/png', 0.9);
+                    settings.faviconDataUrl = dataUrl;
+                    applyFavicon();
+                    const preview = document.getElementById('faviconPreview'); if (preview) preview.src = dataUrl;
+                    logAction('เปลี่ยนไอคอนเว็บไซต์ (Favicon)', '', 'settings');
+                    saveData('full');
+                    showToast("บันทึกไอคอนเว็บไซต์เรียบร้อย");
+                };
+                img.onerror = () => showToast("ไม่สามารถอ่านไฟล์รูปภาพนี้ได้", "error");
+                img.src = e.target.result;
+            };
+            reader.onerror = () => showToast("เกิดข้อผิดพลาดในการอ่านไฟล์", "error");
+            reader.readAsDataURL(file);
+            event.target.value = '';
+        };
+
+        window.handleHeaderLogoUpload = function(event) {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้", "error"); return; }
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            if (!file.type.startsWith('image/')) { showToast("กรุณาเลือกไฟล์รูปภาพเท่านั้น", "error"); return; }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const SIZE = 160;
+                    const canvas = document.createElement('canvas');
+                    canvas.width = SIZE; canvas.height = SIZE;
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, SIZE, SIZE);
+                    const scale = Math.max(SIZE / img.width, SIZE / img.height);
+                    const w = img.width * scale, h = img.height * scale;
+                    ctx.drawImage(img, (SIZE - w) / 2, (SIZE - h) / 2, w, h);
+                    const dataUrl = canvas.toDataURL('image/png', 0.9);
+                    settings.logoDataUrl = dataUrl;
+                    applyHeaderLogo();
+                    logAction('เปลี่ยนโลโก้บนแถบหัวเว็บไซต์', '', 'settings');
+                    saveData('full');
+                    showToast("บันทึกโลโก้หัวเว็บไซต์เรียบร้อย");
+                    renderAdminTab();
+                };
+                img.onerror = () => showToast("ไม่สามารถอ่านไฟล์รูปภาพนี้ได้", "error");
+                img.src = e.target.result;
+            };
+            reader.onerror = () => showToast("เกิดข้อผิดพลาดในการอ่านไฟล์", "error");
+            reader.readAsDataURL(file);
+            event.target.value = '';
+        };
+
+        window.removeHeaderLogo = function() {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้", "error"); return; }
+            settings.logoDataUrl = '';
+            applyHeaderLogo();
+            logAction('ลบโลโก้บนแถบหัวเว็บไซต์', '', 'settings');
+            saveData('full');
+            showToast("ลบโลโก้แล้ว กลับไปใช้ไอคอนเริ่มต้น");
+            renderAdminTab();
+        };
+        
+        function saveAdvisors() { 
+            if (!settings.staffs) settings.staffs = {};
+            getRoomList().forEach(roomId => { 
+                settings.advisors[roomId] = [ document.getElementById(`adv1_${roomId}`).value.trim(), document.getElementById(`adv2_${roomId}`).value.trim() ]; 
+                settings.staffs[roomId] = document.getElementById(`staff_${roomId}`).value;
+            });
+            logAction('แก้ไขครูที่ปรึกษา/เจ้าหน้าที่ประจำห้อง', '', 'settings');
+            saveData('full'); showToast("บันทึกบุคลากรประจำห้องเรียบร้อย"); 
+        }
+
+        window.openTeacherModal = function() {
+            editingTeacherId = null;
+            document.getElementById('teacherModalTitle').innerText = 'เพิ่มครูใหม่';
+            document.getElementById('newTcName').value = ''; document.getElementById('newTcDept').value = departmentsList[0];
+            document.getElementById('teacherModal').classList.remove('hidden');
+            setTimeout(() => { document.getElementById('teacherModalBox').classList.remove('scale-95', 'opacity-0'); document.getElementById('teacherModalBox').classList.add('scale-100', 'opacity-100'); }, 10);
+        };
+        window.closeTeacherModal = function() {
+            document.getElementById('teacherModalBox').classList.remove('scale-100', 'opacity-100'); document.getElementById('teacherModalBox').classList.add('scale-95', 'opacity-0');
+            setTimeout(() => { document.getElementById('teacherModal').classList.add('hidden'); }, 300);
+        };
+        window.prepareEditTeacher = function(id) {
+            editingTeacherId = id;
+            const t = teachers.find(x => x.id === id); if(!t) return;
+            document.getElementById('teacherModalTitle').innerText = 'แก้ไขข้อมูลครู';
+            document.getElementById('newTcName').value = t.name; document.getElementById('newTcDept').value = t.department || 'ระบบ/อื่นๆ';
+            document.getElementById('teacherModal').classList.remove('hidden');
+            setTimeout(() => { document.getElementById('teacherModalBox').classList.remove('scale-95', 'opacity-0'); document.getElementById('teacherModalBox').classList.add('scale-100', 'opacity-100'); }, 10);
+        };
+        window.saveTeacherForm = function() {
+            const name = document.getElementById('newTcName').value.trim();
+            const dept = document.getElementById('newTcDept').value;
+            if (!name) { showToast("กรุณากรอกชื่อครู", "error"); return;
+            }
+            let logMsg = '';
+            if (editingTeacherId) {
+                const t = teachers.find(x => x.id === editingTeacherId);
+                if (t) {
+                    const oldName = t.name;
+                    if (teachers.find(x => x.name === name && x.id !== editingTeacherId)) { showToast("มีชื่อนี้แล้ว", "error"); return;
+                    }
+                    t.name = name;
+                    t.department = dept;
+                    if (oldName !== name) { subjects.forEach(s => { if (s.teacher === oldName) s.teacher = name; if (s.teacher2 === oldName) s.teacher2 = name; });
+                    }
+                    logMsg = `แก้ไขข้อมูลครู: ${oldName} -> ${name}`;
+                }
+            } else {
+                if (teachers.find(x => x.name === name)) { showToast("มีชื่อนี้แล้ว", "error");
+                return; }
+                teachers.push({ id: generateId(), name, department: dept });
+                logMsg = `เพิ่มครูใหม่: ${name}`;
+            }
+            logAction('จัดการข้อมูลครู', logMsg);
+            saveData('full'); showToast("บันทึกข้อมูลครูสำเร็จ"); renderAdminTab(); closeTeacherModal();
+        };
+        function deleteTeacher(id, subjectCount) { if (subjectCount > 0) { showToast("ไม่สามารถลบได้ มีวิชาที่สอนอยู่", "error"); return;
+        } const t = teachers.find(x => x.id === id); showConfirm("ลบ", "แน่ใจหรือไม่ที่จะลบครูท่านนี้?", () => { teachers = teachers.filter(x => x.id !== id); logAction('ลบข้อมูลครู', t ? t.name : id); saveData('full'); showToast("ลบเรียบร้อย"); renderAdminTab(); });
+        }
+        
+        window.resetAllAttendanceData = function() { showConfirm("ยืนยันล้างข้อมูลทั้งหมด", "คำเตือน: ข้อมูลการเช็คชื่อของนักเรียนทุกคนและวิชาทั้งหมดจะถูกลบอย่างถาวรและไม่สามารถกู้คืนได้ คุณแน่ใจหรือไม่?", async () => { showToast("กำลังล้างข้อมูล... (อัปเดตแบบเรียลไทม์)", "info"); document.body.style.pointerEvents = 'none'; logAction('ล้างข้อมูลการเช็คชื่อทั้งหมด', 'รีเซ็ตข้อมูลการเช็คชื่อ/ติดตามทั้งระบบ'); await saveData('reset_all'); document.body.style.pointerEvents = 'auto'; showToast("ล้างข้อมูลทั้งหมดเรียบร้อยแล้ว", "success"); renderAdminTab(); });
+        };
+
+        // ===== เก็บถาวรข้อมูลเช็คชื่อเก่า: ส่งออก Excel แล้วลบออกจากข้อมูลที่ใช้งานจริง (ลดขนาดไฟล์ระยะยาว) =====
+        window.updateArchivePreview = function() {
+            const cutoff = document.getElementById('archiveCutoffDate').value;
+            const textEl = document.getElementById('archivePreviewText');
+            if (!cutoff) { textEl.innerText = 'เลือกวันที่เพื่อดูจำนวนข้อมูลที่จะถูกเก็บถาวร'; return; }
+            const matching = attendanceData.filter(a => a.date && a.date < cutoff);
+            if (matching.length === 0) { textEl.innerText = `ไม่พบข้อมูลก่อนวันที่ ${cutoff.split('-').reverse().join('/')}`; return; }
+            textEl.innerHTML = `พบข้อมูล <b>${matching.length}</b> รายการเช็คชื่อ (${matching.length} คาบ) ก่อนวันที่ ${cutoff.split('-').reverse().join('/')} ที่จะถูกเก็บถาวร`;
+        };
+        // สร้างแถวข้อมูล Excel จากอาร์เรย์ของ attendance record (ใช้ร่วมกันทั้งตอนเก็บถาวรและตอนดูข้อมูลเก่า)
+        function buildAttendanceExcelRows(records) {
+            const rows = [["วันที่", "คาบ", "รหัสวิชา", "ชื่อวิชา", "ห้อง", "เลขที่", "ชื่อ-นามสกุล", "สถานะ"]];
+            records.forEach(a => {
+                const sub = subjects.find(s => s.id === a.subjectId);
+                const roomName = sub ? formatRoomName(sub.roomId) : '-';
+                const dateDisp = (a.date || '').split('-').reverse().join('/');
+                Object.keys(a.records || {}).forEach(stId => {
+                    const st = students.find(s => s.id === stId);
+                    rows.push([dateDisp, a.period, sub ? (sub.code || '') : '', sub ? sub.name : '(วิชาถูกลบแล้ว)', roomName, st ? st.number : '-', st ? st.name : '(ไม่พบข้อมูลนักเรียน)', a.records[stId]]);
+                });
+            });
+            return rows;
+        }
+        function downloadAttendanceExcel(records, filename) {
+            const rows = buildAttendanceExcelRows(records);
+            const ws = XLSX.utils.aoa_to_sheet(rows); ws['!cols'] = [{wch:10},{wch:6},{wch:10},{wch:22},{wch:10},{wch:8},{wch:28},{wch:14}];
+            const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Archive");
+            XLSX.writeFile(wb, filename);
+        }
+
+        window.archiveOldAttendance = function() {
+            const cutoff = document.getElementById('archiveCutoffDate').value;
+            if (!cutoff) { showToast("กรุณาเลือกวันที่ก่อน", "error"); return; }
+            const toArchive = attendanceData.filter(a => a.date && a.date < cutoff);
+            if (toArchive.length === 0) { showToast("ไม่พบข้อมูลก่อนวันที่ที่เลือก", "error"); return; }
+            showConfirm("ยืนยันการเก็บถาวร", `จะดาวน์โหลดไฟล์ Excel เก็บข้อมูลเช็คชื่อ ${toArchive.length} รายการ (ก่อนวันที่ ${cutoff.split('-').reverse().join('/')}) แล้วลบออกจากระบบที่ใช้งานอยู่ทันที คุณแน่ใจหรือไม่?`, () => {
+                downloadAttendanceExcel(toArchive, `เก็บถาวรข้อมูลเช็คชื่อ_ก่อน_${cutoff}.xlsx`);
+                attendanceData = attendanceData.filter(a => !(a.date && a.date < cutoff));
+                logAction('เก็บถาวรข้อมูลเช็คชื่อเก่า', `เก็บถาวร ${toArchive.length} รายการ (ก่อนวันที่ ${cutoff})`);
+                saveData('full');
+                showToast(`เก็บถาวร ${toArchive.length} รายการสำเร็จ ดาวน์โหลดไฟล์แล้ว`, "success");
+                renderAdminTab();
+            });
+        };
+
+        // ===== ดูข้อมูลเช็คชื่อที่เก็บถาวรแล้ว (ดึงรายชื่อไฟล์ archive จาก Google Drive ผ่าน backend) =====
+        window.loadArchiveList = async function() {
+            const listEl = document.getElementById('archiveListContainer');
+            if (!listEl) return;
+            listEl.innerHTML = `<div class="text-center text-purple-400 py-6 text-xs sm:text-sm font-bold"><i class="fas fa-spinner fa-spin"></i> กำลังโหลดรายชื่อไฟล์เก็บถาวร...</div>`;
+            try {
+                const res = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=list_archives`);
+                const data = await res.json();
+                if (data.status !== 'success' || !data.archives || data.archives.length === 0) {
+                    listEl.innerHTML = `<div class="text-center text-slate-400 py-6 text-xs sm:text-sm font-medium">ยังไม่มีไฟล์เก็บถาวรในระบบ</div>`;
+                    return;
+                }
+                const fmtSize = (b) => b < 1024 ? `${b} B` : (b < 1024*1024 ? `${(b/1024).toFixed(1)} KB` : `${(b/1024/1024).toFixed(2)} MB`);
+                listEl.innerHTML = data.archives.map(f => {
+                    const d = new Date(f.dateCreated);
+                    const dateStr = isNaN(d) ? '' : d.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                    return `<div class="flex items-center justify-between gap-2 bg-white border border-purple-200 rounded-lg px-3 py-2.5"><div class="min-w-0"><div class="font-bold text-slate-700 text-xs sm:text-sm truncate">${f.name}</div><div class="text-[10px] sm:text-xs text-slate-400 font-medium">สร้างเมื่อ ${dateStr} · ${fmtSize(f.sizeBytes)}</div></div><button onclick="window.downloadArchiveFile('${f.name}')" class="shrink-0 bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-file-excel"></i> Excel</button></div>`;
+                }).join('<div class="h-1.5"></div>');
+            } catch (err) {
+                listEl.innerHTML = `<div class="text-center text-rose-400 py-6 text-xs sm:text-sm font-bold"><i class="fas fa-exclamation-circle"></i> โหลดรายชื่อไฟล์ไม่สำเร็จ ลองใหม่อีกครั้ง</div>`;
+            }
+        };
+        window.downloadArchiveFile = async function(fileName) {
+            showToast("กำลังดึงข้อมูลเก็บถาวร กรุณารอสักครู่...", "success");
+            try {
+                const res = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=get_archive&file=${encodeURIComponent(fileName)}`);
+                const records = await res.json();
+                if (!Array.isArray(records)) { showToast("รูปแบบข้อมูลไม่ถูกต้อง", "error"); return; }
+                if (records.length === 0) { showToast("ไฟล์นี้ไม่มีข้อมูล", "error"); return; }
+                downloadAttendanceExcel(records, `${fileName.replace('.json', '')}.xlsx`);
+                showToast("ดาวน์โหลดไฟล์ Excel สำเร็จ", "success");
+            } catch (err) { showToast("ดึงข้อมูลไม่สำเร็จ ลองใหม่อีกครั้ง", "error"); }
+        };
+
+        window.renderScheduleInputs = function(existingSchedules = null) {
+            const credit = parseFloat(document.getElementById('newSubCredit').value) || 0.5; let count = credit * 2; let html = '';
+            for(let i=0; i<count; i++) { let defDay = 1, defPeriod = 0; if (existingSchedules && existingSchedules[i]) { defDay = existingSchedules[i].day;
+                defPeriod = existingSchedules[i].period; }
+                html += `<div class="bg-slate-50 p-2 rounded border border-slate-200"><div class="flex justify-between mb-1"><label class="text-[9px] sm:text-[10px] font-bold text-slate-500">วันสอน (${i+1})</label><label class="text-[9px] sm:text-[10px] font-bold text-slate-500">คาบ</label></div><div class="flex gap-1"><select id="newSubDay_${i}" class="w-full bg-white border border-slate-200 rounded px-1 py-1 text-base sm:text-xs outline-none">${daysLabel.map((d, idx) => `<option value="${idx+1}" ${defDay == idx+1 ? 'selected':''}>${d}</option>`).join('')}</select><select id="newSubPeriod_${i}" class="w-full bg-white border border-slate-200 rounded px-1 py-1 text-base sm:text-xs outline-none"><option value="0" ${defPeriod == 0 ? 'selected':''}>0 (แถว)</option>${timeSlots.filter(t => t.period > 0).map(t => `<option value="${t.period}" ${defPeriod == t.period ? 'selected':''}>${t.period}</option>`).join('')}</select></div></div>`;
+            }
+            document.getElementById('scheduleContainer').innerHTML = html;
+        }
+
+        window.openSubjectModal = function() { if (guardTermLock('เพิ่มวิชาใหม่')) return; editingSubjectId = null; document.getElementById('subjectModalTitle').innerText = 'เพิ่มวิชาใหม่';
+        const __defSubRoom = (window.adminSelectedSubjectRoom && window.adminSelectedSubjectRoom !== 'all' && getRoomList().includes(window.adminSelectedSubjectRoom)) ? window.adminSelectedSubjectRoom : (getRoomList()[0] || ''); document.getElementById('newSubRoom').value = __defSubRoom;
+        document.getElementById('newSubCode').value = ''; document.getElementById('newSubName').value = ''; if(teachers.length > 0) document.getElementById('newSubTeacher').value = teachers[0].name; document.getElementById('newSubTeacher2').value = ''; document.getElementById('newSubCredit').value = '0.5'; window.renderScheduleInputs(); document.getElementById('subjectModal').classList.remove('hidden');
+        document.getElementById('subjectTemplatePickerWrap').classList.remove('hidden'); window.populateSubjectTemplateOptions();
+        setTimeout(() => { document.getElementById('subjectModalBox').classList.remove('scale-95', 'opacity-0'); document.getElementById('subjectModalBox').classList.add('scale-100', 'opacity-100'); }, 10); };
+        window.closeSubjectModal = function() { document.getElementById('subjectModalBox').classList.remove('scale-100', 'opacity-100'); document.getElementById('subjectModalBox').classList.add('scale-95', 'opacity-0');
+        setTimeout(() => { document.getElementById('subjectModal').classList.add('hidden'); }, 300); };
+        window.prepareEditSubject = function(id) { if (guardTermLock('แก้ไขวิชา')) return; editingSubjectId = id;
+        const sub = subjects.find(s => s.id === id); if(!sub) return; document.getElementById('subjectModalTitle').innerText = 'แก้ไขวิชา'; document.getElementById('newSubRoom').value = sub.roomId; document.getElementById('newSubCode').value = sub.code || ''; document.getElementById('newSubName').value = sub.name; document.getElementById('newSubTeacher').value = sub.teacher; document.getElementById('newSubTeacher2').value = sub.teacher2 || ''; document.getElementById('newSubCredit').value = sub.credits || 0.5; window.renderScheduleInputs(sub.schedules); document.getElementById('subjectModal').classList.remove('hidden');
+        document.getElementById('subjectTemplatePickerWrap').classList.add('hidden');
+        setTimeout(() => { document.getElementById('subjectModalBox').classList.remove('scale-95', 'opacity-0'); document.getElementById('subjectModalBox').classList.add('scale-100', 'opacity-100'); }, 10); };
+        // คัดลอกข้อมูลวิชาที่เคยสร้างไว้แล้วในระดับชั้นเดียวกัน (ช่วยลดการพิมพ์ซ้ำ)
+        window.populateSubjectTemplateOptions = function() {
+            const picker = document.getElementById('subjectTemplatePicker'); if (!picker) return;
+            const roomId = document.getElementById('newSubRoom').value; const level = (roomId || '').split('_')[0];
+            const seen = new Set(); const candidates = [];
+            activeSubjects().filter(s => (s.roomId || '').split('_')[0] === level).sort((a,b) => a.name.localeCompare(b.name)).forEach(s => {
+                const key = s.name + '|' + (s.teacher || ''); if (seen.has(key)) return; seen.add(key); candidates.push(s);
+            });
+            picker.innerHTML = `<option value="">-- พิมพ์ข้อมูลใหม่เอง --</option>` + candidates.map(s => `<option value="${s.id}">${s.name}${s.teacher ? ' (ครู' + s.teacher + ')' : ''}</option>`).join('');
+        };
+        window.applySubjectTemplate = function(subId) {
+            if (!subId) return;
+            const sub = subjects.find(s => s.id === subId); if (!sub) return;
+            document.getElementById('newSubCode').value = sub.code || '';
+            document.getElementById('newSubName').value = sub.name || '';
+            if (sub.teacher) document.getElementById('newSubTeacher').value = sub.teacher;
+            document.getElementById('newSubTeacher2').value = sub.teacher2 || '';
+            document.getElementById('newSubCredit').value = sub.credits || 0.5;
+            window.renderScheduleInputs(sub.schedules);
+            showToast("คัดลอกข้อมูลวิชาแล้ว ตรวจสอบตารางเรียนก่อนบันทึก");
+        };
+        window.saveSubjectForm = function() { if (guardTermLock('บันทึกวิชา')) return; const roomId = document.getElementById('newSubRoom').value, code = document.getElementById('newSubCode').value.trim(), name = document.getElementById('newSubName').value, teacher = document.getElementById('newSubTeacher').value, teacher2 = document.getElementById('newSubTeacher2').value, credit = parseFloat(document.getElementById('newSubCredit').value) || 0.5; if (!name) { showToast("กรอกชื่อวิชา", "error"); return; } let count = credit * 2; let schedules = [];
+        for(let i=0; i<count; i++) { schedules.push({ day: parseInt(document.getElementById(`newSubDay_${i}`).value), period: parseInt(document.getElementById(`newSubPeriod_${i}`).value) });
+        } if (editingSubjectId) { const sub = subjects.find(s => s.id === editingSubjectId); if(sub) { sub.roomId = roomId; sub.code = code;
+        sub.name = name; sub.teacher = teacher; sub.teacher2 = teacher2; sub.credits = credit; sub.schedules = schedules;
+        logAction('แก้ไขข้อมูลวิชา', `${name} (${formatRoomName(roomId)})`);
+        } } else { subjects.push({ id: generateId(), roomId, name, code, teacher, teacher2, credits: credit, schedules, term: settings.term, year: settings.year, locked: false }); logAction('เพิ่มวิชาใหม่', `${name} (${formatRoomName(roomId)})`); } saveData('full'); showToast("บันทึกสำเร็จ"); renderAdminTab(); closeSubjectModal();
+        };
+        window.toggleSubjectLock = function(id) {
+            const sub = subjects.find(s => s.id === id); if (!sub) return;
+            sub.locked = !sub.locked;
+            logAction(sub.locked ? 'ล็อควิชา (ป้องกันการลบ)' : 'ปลดล็อควิชา', `${sub.name} (${formatRoomName(sub.roomId)})`);
+            saveData('full'); showToast(sub.locked ? "ล็อควิชานี้แล้ว" : "ปลดล็อควิชานี้แล้ว"); renderAdminTab();
+        };
+        window.clearRoomSubjects = function(roomId) {
+            if (!roomId || roomId === 'all') { showToast("กรุณาเลือกห้องก่อน", "error"); return; }
+            if (guardTermLock('ลบวิชา')) return;
+            const all = getRoomSubjects(roomId); const targets = all.filter(s => !s.locked); const lockedCount = all.length - targets.length;
+            if (targets.length === 0) { showToast("ไม่มีวิชาที่สามารถลบได้ (อาจถูกล็อคไว้ทั้งหมด หรือห้องนี้ยังไม่มีวิชา)", "error"); return; }
+            showConfirm("ลบวิชาทั้งหมดในห้องนี้", `จะลบวิชาที่ไม่ได้ล็อคไว้ ${targets.length} รายการ พร้อมข้อมูลการเช็คชื่อที่เกี่ยวข้อง ของห้อง ${formatRoomName(roomId)} เทอม ${settings.term}/${settings.year}${lockedCount > 0 ? ` (วิชาที่ล็อคไว้ ${lockedCount} รายการจะไม่ถูกลบ)` : ''} แน่ใจหรือไม่?`, () => {
+                const ids = new Set(targets.map(s => s.id));
+                subjects = subjects.filter(s => !ids.has(s.id));
+                attendanceData = attendanceData.filter(a => !ids.has(a.subjectId));
+                logAction('ลบวิชาทั้งหมดในห้อง', `${formatRoomName(roomId)} เทอม ${settings.term}/${settings.year} (${targets.length} วิชา)`);
+                saveData('full'); showToast("ลบวิชาทั้งหมดในห้องเรียบร้อย"); renderAdminTab();
+            });
+        };
+
+        window.downloadSubjectTemplate = function() {
+            if (!window.adminSelectedSubjectRoom || window.adminSelectedSubjectRoom === 'all') { showToast("กรุณาเลือกห้องก่อนโหลดฟอร์ม", "error"); return; }
+            const roomName = formatRoomName(window.adminSelectedSubjectRoom);
+            const ws_data = [
+                ["รหัสวิชา", "ชื่อวิชา", "ครู (หลัก)", "ครู (ร่วมสอน)", "หน่วยกิต", "ตารางเรียน (วัน-คาบ)"],
+                ["ว31101", "คณิตศาสตร์พื้นฐาน", "ครูสมใจ รักเรียน", "", "1.0", "จันทร์-1,พฤหัสบดี-3"],
+                ["", "เช็คแถวเช้า", "ครูสมใจ รักเรียน", "", "0.5", "จันทร์-0"],
+                [],
+                ["หมายเหตุ: ตารางเรียนใช้รูปแบบ วัน-คาบ คั่นด้วยจุลภาคหากมีหลายคาบ เช่น จันทร์-1,พฤหัสบดี-3"],
+                ["คาบที่ใช้ได้: 0=แถวเช้า, 1-4=คาบเช้า, 5-8=คาบบ่าย"],
+                ["ชื่อครู (หลัก) ต้องพิมพ์ตรงกับชื่อครูที่มีอยู่ในระบบเป๊ะ ไม่เช่นนั้นวิชาจะไม่ปรากฏในหน้าของครูท่านนั้น"]
+            ];
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); ws['!cols'] = [{wch: 12}, {wch: 28}, {wch: 22}, {wch: 22}, {wch: 10}, {wch: 32}];
+            const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Template");
+            XLSX.writeFile(wb, `แบบฟอร์มนำเข้ารายวิชา_${roomName}.xlsx`);
+            showToast("ดาวน์โหลดแบบฟอร์มรายวิชาสำเร็จ", "success");
+        };
+
+        window.handleImportSubjects = function(e) {
+            if (!window.adminSelectedSubjectRoom || window.adminSelectedSubjectRoom === 'all') { showToast("กรุณาเลือกห้องก่อนนำเข้า", "error"); e.target.value = ''; return; }
+            if (guardTermLock('นำเข้ารายวิชา')) { e.target.value = ''; return; }
+            const targetRoom = window.adminSelectedSubjectRoom;
+            const file = e.target.files[0];
+            if (!file) return; showToast("กำลังอ่านไฟล์..."); const reader = new FileReader();
+            reader.onload = function(evt) {
+                try {
+                    const data = new Uint8Array(evt.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'}); const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
+                    let startIndex = (jsonData.length > 0 && (String(jsonData[0][0] || '').includes("รหัสวิชา") || String(jsonData[0][1] || '').includes("ชื่อวิชา"))) ? 1 : 0;
+                    let imported = 0, skipped = 0;
+                    for (let i = startIndex; i < jsonData.length; i++) {
+                        const row = jsonData[i];
+                        if (!row || !row[1] || !String(row[1]).trim()) continue;
+                        const name = String(row[1]).trim();
+                        if (name.startsWith('หมายเหตุ') || name.startsWith('คาบที่ใช้ได้') || name.startsWith('ชื่อครู')) continue;
+                        const code = String(row[0] || '').trim();
+                        const teacher = String(row[2] || '').trim();
+                        const teacher2 = String(row[3] || '').trim();
+                        const credits = parseFloat(row[4]) || 0.5;
+                        const schedules = parseScheduleString(row[5]);
+                        if (!teacher) { skipped++; continue; }
+                        const roomActive = getRoomSubjects(targetRoom);
+                        const exists = code ? roomActive.find(s => s.code && s.code === code) : roomActive.find(s => s.name === name && s.teacher === teacher);
+                        if (exists) { exists.name = name; exists.code = code; exists.teacher = teacher; exists.teacher2 = teacher2; exists.credits = credits; if (schedules.length > 0) exists.schedules = schedules;
+                        } else { subjects.push({ id: generateId(), roomId: targetRoom, name, code, teacher, teacher2, credits, schedules, term: settings.term, year: settings.year, locked: false }); } imported++;
+                    }
+                    if (imported > 0) { saveData('full'); logAction('นำเข้ารายวิชาจาก Excel', `นำเข้า ${imported} วิชา ห้อง ${formatRoomName(targetRoom)}`);
+                        showToast(`นำเข้า ${imported} วิชา สำเร็จ!${skipped > 0 ? ' (ข้าม ' + skipped + ' แถวที่ไม่ระบุครู)' : ''}`); renderAdminTab(); } else { showToast("ไม่พบข้อมูลที่ถูกต้อง หรือไม่ได้ระบุชื่อครูในแถวใดเลย", "error");
+                    }
+                } catch (err) { showToast("เกิดข้อผิดพลาดในการอ่านไฟล์", "error");
+                } e.target.value = '';
+            }; reader.readAsArrayBuffer(file);
+        };
+
+        window.openStudentModal = function() { editingStudentId = null; document.getElementById('studentModalTitle').innerText = 'เพิ่มนักเรียนใหม่'; document.getElementById('newStuNum').value = ''; document.getElementById('newStuName').value = '';
+        document.getElementById('newStuStatus').value = 'active'; document.getElementById('studentModal').classList.remove('hidden'); setTimeout(() => { document.getElementById('studentModalBox').classList.remove('scale-95', 'opacity-0'); document.getElementById('studentModalBox').classList.add('scale-100', 'opacity-100'); }, 10); };
+        window.closeStudentModal = function() { document.getElementById('studentModalBox').classList.remove('scale-100', 'opacity-100');
+        document.getElementById('studentModalBox').classList.add('scale-95', 'opacity-0'); setTimeout(() => { document.getElementById('studentModal').classList.add('hidden'); }, 300); };
+        window.prepareEditStudent = function(id) { editingStudentId = id;
+        const st = students.find(s => s.id === id); if(!st) return; document.getElementById('studentModalTitle').innerText = 'แก้ไขข้อมูลนักเรียน'; document.getElementById('newStuNum').value = st.number;
+        document.getElementById('newStuName').value = st.name; document.getElementById('newStuStatus').value = st.status || 'active'; document.getElementById('studentModal').classList.remove('hidden'); setTimeout(() => { document.getElementById('studentModalBox').classList.remove('scale-95', 'opacity-0'); document.getElementById('studentModalBox').classList.add('scale-100', 'opacity-100'); }, 10); };
+        window.saveStudentForm = function() { const number = document.getElementById('newStuNum').value, name = document.getElementById('newStuName').value.trim(), status = document.getElementById('newStuStatus').value;
+        if (!number || !name) { showToast("กรอกข้อมูลให้ครบ", "error"); return; } if (editingStudentId) { const st = students.find(s => s.id === editingStudentId);
+        if(st) { st.number = number; st.name = name; st.status = status;
+        logAction('แก้ไขข้อมูลนักเรียน', `${name} (เลขที่ ${number}, ${formatRoomName(st.roomId)})`);
+        } } else { students.push({ id: generateId(), roomId: window.adminSelectedRoom, number, name, status }); logAction('เพิ่มนักเรียนใหม่', `${name} (เลขที่ ${number}, ${formatRoomName(window.adminSelectedRoom)})`); } saveData('full'); showToast("บันทึกสำเร็จ"); renderAdminTab(); closeStudentModal(); };
+        function deleteSubject(id) { if (guardTermLock('ลบวิชา')) return; const sub = subjects.find(s => s.id === id); if (sub && sub.locked) { showToast("วิชานี้ถูกล็อคไว้ กรุณาปลดล็อคก่อนลบ", "error"); return; } showConfirm("ลบวิชา", "ข้อมูลการเช็คชื่อทั้งหมดในวิชานี้จะถูกลบไปด้วย แน่ใจหรือไม่?", () => { subjects = subjects.filter(s => s.id !== id); attendanceData = attendanceData.filter(a => a.subjectId !== id); logAction('ลบวิชา', sub ? sub.name : id); saveData('full'); renderAdminTab(); });
+        }
+        function deleteStudent(id) { const st = students.find(s => s.id === id); showConfirm("ลบนักเรียน", "แน่ใจหรือไม่ที่จะลบนักเรียนคนนี้?", () => { students = students.filter(s => s.id !== id); logAction('ลบนักเรียน', st ? `${st.name} (${formatRoomName(st.roomId)})` : id); saveData('full'); renderAdminTab(); });
+        }
+
+        // ===== จัดการผู้ใช้งาน (เฉพาะ Super Admin) =====
+        window.openUserModal = function(id = null) {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่จัดการผู้ใช้งานได้", "error"); return; }
+            editingUserId = id;
+            const u = id ? (settings.users || []).find(x => x.id === id) : null;
+            document.getElementById('userModalTitle').innerText = id ? 'แก้ไขผู้ใช้งาน' : 'เพิ่มผู้ใช้งานใหม่';
+            document.getElementById('newUserName').value = u ? u.name : '';
+            document.getElementById('newUserUsername').value = u ? u.username : '';
+            document.getElementById('newUserPassword').value = u ? u.password : '';
+            document.getElementById('userModal').classList.remove('hidden');
+            setTimeout(() => { document.getElementById('userModalBox').classList.remove('scale-95', 'opacity-0'); document.getElementById('userModalBox').classList.add('scale-100', 'opacity-100'); }, 10);
+        };
+        window.closeUserModal = function() {
+            document.getElementById('userModalBox').classList.remove('scale-100', 'opacity-100');
+            document.getElementById('userModalBox').classList.add('scale-95', 'opacity-0');
+            setTimeout(() => { document.getElementById('userModal').classList.add('hidden'); }, 300);
+        };
+        window.saveUserForm = function() {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่จัดการผู้ใช้งานได้", "error"); return; }
+            const name = document.getElementById('newUserName').value.trim();
+            const username = document.getElementById('newUserUsername').value.trim();
+            const password = document.getElementById('newUserPassword').value;
+            if (!name || !username || !password) { showToast("กรอกข้อมูลให้ครบ", "error"); return; }
+            if (!settings.users) settings.users = [];
+            const dup = settings.users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.id !== editingUserId);
+            if (dup) { showToast("ชื่อผู้ใช้นี้มีอยู่แล้ว", "error"); return; }
+            if (editingUserId) {
+                const u = settings.users.find(x => x.id === editingUserId);
+                if (u && u.role === 'super_admin') { showToast("ไม่สามารถแก้ไข Super Admin ได้", "error"); return; }
+                if (u) { u.name = name; u.username = username; u.password = password; logAction('แก้ไขข้อมูลผู้ใช้งาน', `${name} (${username})`, 'account'); }
+            } else {
+                settings.users.push({ id: generateId(), username, password, name, role: 'admin', createdAt: new Date().toISOString() });
+                logAction('เพิ่มผู้ใช้งานใหม่', `${name} (${username}) สิทธิ์เจ้าหน้าที่`, 'account');
+            }
+            saveData('full'); showToast("บันทึกสำเร็จ"); renderAdminTab(); closeUserModal();
+        };
+        window.deleteUser = function(id) {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่จัดการผู้ใช้งานได้", "error"); return; }
+            const u = (settings.users || []).find(x => x.id === id);
+            if (!u || u.role === 'super_admin') { showToast("ไม่สามารถลบ Super Admin ได้", "error"); return; }
+            showConfirm("ลบผู้ใช้งาน", `ต้องการลบผู้ใช้ "${u.name}" ใช่หรือไม่?`, () => {
+                settings.users = settings.users.filter(x => x.id !== id);
+                logAction('ลบผู้ใช้งาน', `${u.name} (${u.username})`, 'account');
+                saveData('full'); showToast("ลบผู้ใช้งานแล้ว"); renderAdminTab();
+            });
+        };
+        
+        window.filterSubjects = function() {
+            const searchInput = document.getElementById('searchSubjectInput');
+            if (!searchInput) return;
+            const searchText = searchInput.value.toLowerCase();
+            const rows = document.querySelectorAll('#adminSubjectTableBody tr');
+            rows.forEach(row => {
+                const searchContent = row.getAttribute('data-search');
+                if (!searchContent) return;
+                row.style.display = searchContent.toLowerCase().includes(searchText) ? '' : 'none';
+            });
+        };
+
+        window.filterTeachers = function() {
+            const searchText = document.getElementById('searchTeacherInput').value.toLowerCase();
+            const cards = document.querySelectorAll('#adminTeacherGrid .teacher-card');
+            
+            cards.forEach(card => {
+                const searchContent = card.getAttribute('data-search');
+                if (searchContent) {
+                    if (searchContent.toLowerCase().includes(searchText)) {
+                        card.style.display = '';
+                    } else {
+                        card.style.display = 'none';
+                    }
+                }
+            });
+        };
+
+        window.filterAdminStudents = function() {
+            const searchText = document.getElementById('searchStudentInput').value.toLowerCase();
+            const rows = document.querySelectorAll('#adminStudentTableBody tr');
+            
+            rows.forEach(row => {
+                const searchContent = row.getAttribute('data-search');
+                if (searchContent) {
+                    if (searchContent.toLowerCase().includes(searchText)) {
+                        row.style.display = '';
+                    } else {
+                        row.style.display = 'none';
+                    }
+                }
+            });
+        };
+
+        window.handleImportStudents = function(e) {
+            const file = e.target.files[0];
+            if (!file) return; showToast("กำลังอ่านไฟล์..."); const reader = new FileReader();
+            reader.onload = function(evt) {
+                try {
+                    const data = new Uint8Array(evt.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'}); const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
+                    let startIndex = (jsonData.length > 0 && String(jsonData[0][0]).includes("เลขที่")) ? 1 : 0; let imported = 0;
+                    for(let i = startIndex; i < jsonData.length; i++) {
+                        const row = jsonData[i];
+                        if(row && row.length >= 2 && row[0] && row[1]) {
+                            const number = String(row[0]).trim(), name = String(row[1]).trim();
+                            const exists = students.find(s => s.roomId === window.adminSelectedRoom && s.number === number);
+                            if(exists) { exists.name = name;
+                            } else { students.push({ id: generateId(), roomId: window.adminSelectedRoom, number, name, status: 'active' }); } imported++;
+                        }
+                    }
+                    if (imported > 0) { saveData('full'); logAction('นำเข้ารายชื่อนักเรียนจาก Excel', `นำเข้า ${imported} คน ห้อง ${formatRoomName(window.adminSelectedRoom)}`);
+                        showToast(`นำเข้า ${imported} คน สำเร็จ!`); renderAdminTab(); } else { showToast("ไม่พบข้อมูลที่ถูกต้อง", "error");
+                    }
+                } catch (err) { showToast("เกิดข้อผิดพลาดในการอ่านไฟล์", "error");
+                } e.target.value = '';
+            }; reader.readAsArrayBuffer(file);
+        };
+
+        window.downloadStudentTemplate = function() {
+            const ws_data = [ ["เลขที่", "คำนำหน้า+ชื่อ-นามสกุล"], ["1", "ด.ช.รักเรียน เพียรศึกษา"], ["2", "ด.ญ.ใจดี มีเมตตา"] ];
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); ws['!cols'] = [{wch: 10}, {wch: 35}];
+            const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Template");
+            XLSX.writeFile(wb, "แบบฟอร์มนำเข้านักเรียน.xlsx");
+            showToast("ดาวน์โหลดแบบฟอร์มสำเร็จ", "success");
+        };
+
+        window.exportAllStudentsExcel = function(roomId) {
+            const roomName = formatRoomName(roomId), roomStudents = students.filter(s => s.roomId === roomId).sort((a,b) => parseInt(a.number) - parseInt(b.number)), roomSubjects = getRoomSubjects(roomId);
+            let ws_data = [ ["รายงานสรุปภาพรวมทั้งหมด", `ห้อง ${roomName}`], [], ["เลขที่", "คำนำหน้า+ชื่อ-นามสกุล", "สถานะ"] ]; roomSubjects.forEach(sub => ws_data[2].push(`รวม ${sub.name}`));
+            roomStudents.forEach(st => {
+                let row = [st.number, st.name, st.status === 'resigned' ? 'ออก/ย้าย' : 'เรียนอยู่'];
+                roomSubjects.forEach(sub => { let count = 0; attendanceData.filter(a => a.subjectId === sub.id).forEach(att => { if (att.records[st.id] === 'มา' || att.records[st.id] === 'ร่วมกิจกรรม' || att.records[st.id] === 'สาย') count++; }); row.push(count); });
+                ws_data.push(row);
+            });
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Summary"); XLSX.writeFile(wb, `สรุปทั้งหมด_ห้อง_${roomName}.xlsx`);
+        };
+        window.exportSubjectExcel = function(subjectId) {
+            const subject = subjects.find(s => s.id === subjectId), roomStudents = students.filter(s => s.roomId === subject.roomId).sort((a, b) => parseInt(a.number) - parseInt(b.number)), subjectAtt = attendanceData.filter(a => a.subjectId === subjectId).sort((a, b) => new Date(a.date) - new Date(b.date) || parseInt(a.period || 0) - parseInt(b.period || 0));
+            let uniqueCols = []; subjectAtt.forEach(att => { const key = `${att.date}_${att.period}`; if (!uniqueCols.find(c => c.key === key)) uniqueCols.push({ date: att.date, period: att.period, data: att.records, subTeacher: att.substituteTeacher }); });
+            let ws_data = []; let header = ["เลขที่", "ชื่อ-นามสกุล", "สถานะ"]; uniqueCols.forEach(col => header.push(`${col.date} (ค.${col.period||'-'})${col.subTeacher ? `\n[แทน: ${col.subTeacher}]` : ''}`)); header.push("รวมมาเรียน");
+            header.push("หมายเหตุ"); ws_data.push(header);
+            roomStudents.forEach(st => {
+                let row = [st.number, `${st.name}`, st.status === 'resigned' ? 'ออก/ย้าย' : 'เรียนอยู่']; let valid = 0, late = 0, absent = 0;
+                uniqueCols.forEach(col => { const status = col.data[st.id] || '-'; if(status === 'มา' || status === 'ร่วมกิจกรรม') valid++; if(status === 'สาย') late++; if(status === 'ขาด') absent++; row.push(status); }); row.push(valid); 
+                let remarks = []; if(late >= (settings.thresholds?.late||4)) remarks.push(`สาย ${late}`); if(absent >= (settings.thresholds?.absent||4)) remarks.push(`ขาด ${absent}`); row.push(remarks.length > 0 ? remarks.join(', ') + ' ครั้ง' : '');
+                ws_data.push(row);
+            });
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Attendance"); XLSX.writeFile(wb, `วิชา_${subject.name}_ห้อง_${formatRoomName(subject.roomId)}.xlsx`);
+        }
+
+        window.exportRoomMonthlyExcel = function(roomId, month) {
+            const report = window.tempRoomReport;
+            if(!report || report.roomId !== roomId) return; const roomName = formatRoomName(roomId);
+            let ws_data = [ ["รายงานห้องเรียน", `ห้อง ${roomName}`, `เดือน ${month}`], [], ["เลขที่", "ชื่อ-นามสกุล", "สถานะ", "ส.1", "ส.2", "ส.3", "ส.4", "ส.5", "มา/กิจกรรม", "สาย(แยก)", "ลาป่วย", "ลากิจ", "ขาด", "โดด"] ];
+            report.data.forEach(row => { let valid = row.monthly['มา'] + row.monthly['ร่วมกิจกรรม']; ws_data.push([ row.student.number, `${row.student.name}`, row.student.status === 'resigned' ? 'ออก/ย้าย' : 'เรียนอยู่', row.weekly[1]||0, row.weekly[2]||0, row.weekly[3]||0, row.weekly[4]||0, row.weekly[5]||0, valid||0, row.monthly['สาย']||0, row.monthly['ลาป่วย']||0, row.monthly['ลากิจ']||0, row.monthly['ขาด']||0, row.monthly['โดดเรียน']||0 ]); });
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, `Summary`); XLSX.writeFile(wb, `สรุปภาพรวมห้อง_${roomName}_${month}.xlsx`);
+        }
+        
+        window.exportRoomDailyExcel = function(roomId, date) {
+            const roomName = formatRoomName(roomId), roomStudents = students.filter(s => s.roomId === roomId).sort((a,b) => parseInt(a.number) - parseInt(b.number)), roomSubjects = getRoomSubjects(roomId);
+            const dObj = new Date(date); const dayOfWeek = dObj.getDay(); let dayIndexForSched = (dayOfWeek >= 1 && dayOfWeek <= 5) ? dayOfWeek : 1;
+            const subjectsToday = []; roomSubjects.forEach(s => { if (s.schedules) { s.schedules.forEach(sch => { if (parseInt(sch.day) === dayIndexForSched) { subjectsToday.push({ ...s, period: parseInt(sch.period) }); } }); } });
+            subjectsToday.sort((a,b) => a.period - b.period);
+            const dailyAttRecords = attendanceData.filter(a => a.date === date && subjectsToday.some(st => st.id === a.subjectId && String(st.period) === String(a.period)));
+            let ws_data = [ ["รายงานการเช็คชื่อประจำวัน", `ห้อง ${roomName}`, `ประจำวันที่ ${date}`], [], ["เลขที่", "ชื่อ-นามสกุล", "สถานะ"] ];
+            if (subjectsToday.length === 0) { ws_data[2].push("ไม่มีวิชาเรียน");
+            } else { subjectsToday.forEach(sub => ws_data[2].push(`${sub.name} (ค.${sub.period})`)); }
+            roomStudents.forEach(st => {
+                let row = [st.number, `${st.name}`, st.status === 'resigned' ? 'ออก/ย้าย' : 'เรียนอยู่'];
+                if (subjectsToday.length === 0) { row.push("-"); } else { subjectsToday.forEach(sub => { const attRecord = dailyAttRecords.find(a => a.subjectId === sub.id && String(a.period) === String(sub.period)); if (attRecord && attRecord.records[st.id]) { row.push(attRecord.records[st.id]); } else { row.push("-"); } }); 
+                }
+                ws_data.push(row);
+            });
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, `Daily`); XLSX.writeFile(wb, `สรุปรายวัน_ห้อง_${roomName}_${date}.xlsx`);
+        };
+        window.exportStudentExcel = function(studentId, month) {
+            const data = window.tempStudentReport;
+            if(!data) return;
+            let ws_data = [ ["รายงานส่วนบุคคล", `เดือน ${month}`], ["ชื่อ:", `${data.student.name}`, "เลขที่:", data.student.number, "ห้อง:", data.room], [], ["สรุปรายเดือน", "มา", "กิจกรรม", "สาย", "ป่วย", "ลากิจ", "ขาด", "โดด"], ["", data.monthly['มา'], data.monthly['ร่วมกิจกรรม'], data.monthly['สาย'], data.monthly['ลาป่วย'], data.monthly['ลากิจ'], data.monthly['ขาด'], data.monthly['โดดเรียน']], [], ["สรุปสัปดาห์", "มา", "กิจกรรม", "สาย", "ป่วย", "ลากิจ", "ขาด", "โดด"] ];
+            for(let i=1; i<=5; i++) ws_data.push([`สัปดาห์ ${i}`, data.weekly[i]['มา'], data.weekly[i]['ร่วมกิจกรรม'], data.weekly[i]['สาย'], data.weekly[i]['ลาป่วย'], data.weekly[i]['ลากิจ'], data.weekly[i]['ขาด'], data.weekly[i]['โดดเรียน']]);
+            ws_data.push([]); ws_data.push(["ประวัติรายวัน (อิงจากคาบ)"]); ws_data.push(["วันที่", "สถานะ"]);
+            data.dates.forEach(d => { ws_data.push([d, data.daily[d].status]); });
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Student"); XLSX.writeFile(wb, `รายงาน_${data.student.name}_${month}.xlsx`);
+        }
+
+        // ===== ส่งออกส่วนกราฟ/ภาพรวมเป็น Infographic แบบทั่วไป (PDF หรือรูปภาพ) ใช้ได้กับทุกส่วนที่มีกราฟ =====
+        window.exportSectionInfographicPDF = async function(elementId, filenameBase, format = 'pdf') {
+            const el = document.getElementById(elementId);
+            if (!el) { showToast("ไม่พบข้อมูลสำหรับส่งออก", "error"); return; }
+            showToast(`กำลังสร้างไฟล์ ${format === 'image' ? 'รูปภาพ' : 'PDF'} กรุณารอสักครู่...`, "success");
+            const __wasDark = document.documentElement.classList.contains('dark'); if (__wasDark) document.documentElement.classList.remove('dark');
+            await document.fonts.ready; await new Promise(resolve => setTimeout(resolve, 400));
+            try {
+                const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false });
+                if (format === 'image') {
+                    const pngData = canvas.toDataURL('image/png', 1.0);
+                    const link = document.createElement('a');
+                    link.href = pngData; link.download = `${filenameBase}.png`;
+                    document.body.appendChild(link); link.click(); link.remove();
+                } else {
+                    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                    const pdfW = 595.28; const pdfH = pdfW * (canvas.height / canvas.width);
+                    const orientation = pdfH > pdfW ? 'p' : 'l';
+                    const pdfDoc = new jspdf.jsPDF({ orientation, unit: 'pt', format: [pdfW, pdfH] });
+                    pdfDoc.addImage(imgData, 'JPEG', 0, 0, pdfW, pdfH);
+                    pdfDoc.save(`${filenameBase}.pdf`);
+                }
+                showToast(`สร้างไฟล์ ${format === 'image' ? 'รูปภาพ' : 'PDF'} สำเร็จ!`, "success");
+            } catch (err) { showToast("เกิดข้อผิดพลาดในการสร้างไฟล์ Infographic", "error"); }
+            if (__wasDark) document.documentElement.classList.add('dark');
+        };
+
+        window.downloadStudentPDF = async function(studentId, month) {
+            const pdfType = document.getElementById('studentPdfType').value;
+            const data = window.tempStudentReport; if (!data || data.student.id !== studentId) return;
+            showToast("กำลังประมวลผล PDF กรุณารอสักครู่...", "success");
+            const __wasDark = document.documentElement.classList.contains('dark'); if (__wasDark) document.documentElement.classList.remove('dark');
+            const advData = settings.advisors && settings.advisors[data.student.roomId] ? settings.advisors[data.student.roomId] : [];
+            const adv1 = advData[0] || '                                                   ';
+            const adv2 = advData[1] || null;
+            const staffName = settings.staffs && settings.staffs[data.student.roomId] ? settings.staffs[data.student.roomId] : '';
+            const pdfDoc = new jspdf.jsPDF('p', 'pt', 'a4');
+            let htmlContainer = `<div id="pdf-student-container" class="a4-export-container font-sans text-slate-800"><div id="pdf-student-page" class="a4-page flex flex-col justify-between bg-white"><div><div class="text-center mb-6 border-b-2 border-slate-400 pb-4"><h1 class="text-3xl font-black mb-2">รายงานสรุปเวลาเรียนส่วนบุคคล</h1><h2 class="text-xl font-bold bg-blue-100 px-4 py-1.5 rounded-full inline-block border border-blue-300">ประจำเดือน: ${month.split('-')[1]}/${parseInt(month.split('-')[0])+543} | รูปแบบ: ${pdfType === 'daily' ? 'รายวัน' : (pdfType === 'weekly' ? 'รายสัปดาห์' : 'รายเดือน')}</h2></div><div class="flex justify-between items-center mb-6 text-base font-bold bg-slate-50 p-4 rounded-xl border border-slate-300"><div><span class="text-slate-500">ชื่อ-นามสกุล:</span> ${data.student.name}</div><div><span class="text-slate-500">เลขที่:</span> ${data.student.number}</div><div><span class="text-slate-500">ห้อง:</span> ${data.room}</div></div>`;
+            if (pdfType === 'monthly') {
+                htmlContainer += `<table class="w-full text-center border-collapse border border-slate-500 text-base mb-6"><thead class="bg-slate-100"><tr><th class="border border-slate-500 p-3" colspan="2">สรุปสถิติประจำเดือน</th></tr></thead><tbody class="divide-y divide-slate-400 font-bold"><tr><td class="border border-slate-500 p-3 w-1/2 text-right pr-6">มาเรียน</td><td class="border border-slate-500 p-3 w-1/2 text-left pl-6 text-emerald-600">${data.monthly['มา']} ครั้ง</td></tr><tr><td class="border border-slate-500 p-3 text-right pr-6">ร่วมกิจกรรม</td><td class="border border-slate-500 p-3 text-left pl-6 text-cyan-600">${data.monthly['ร่วมกิจกรรม']} ครั้ง</td></tr><tr><td class="border border-slate-500 p-3 text-right pr-6">สาย</td><td class="border border-slate-500 p-3 text-left pl-6 text-amber-600">${data.monthly['สาย']} ครั้ง</td></tr><tr><td class="border border-slate-500 p-3 text-right pr-6">ลาป่วย</td><td class="border border-slate-500 p-3 text-left pl-6 text-blue-600">${data.monthly['ลาป่วย']} ครั้ง</td></tr><tr><td class="border border-slate-500 p-3 text-right pr-6">ลากิจ</td><td class="border border-slate-500 p-3 text-left pl-6 text-indigo-600">${data.monthly['ลากิจ']} ครั้ง</td></tr><tr><td class="border border-slate-500 p-3 text-right pr-6">ขาดเรียน</td><td class="border border-slate-500 p-3 text-left pl-6 text-rose-600">${data.monthly['ขาด']} ครั้ง</td></tr><tr><td class="border border-slate-500 p-3 text-right pr-6">โดดเรียน</td><td class="border border-slate-500 p-3 text-left pl-6 text-purple-600">${data.monthly['โดดเรียน']} ครั้ง</td></tr></tbody></table>`;
+            } else if (pdfType === 'weekly') {
+                htmlContainer += `<table class="w-full text-center border-collapse border border-slate-500 text-[14px] mb-6"><thead class="bg-slate-100"><tr><th class="border border-slate-500 p-2">สัปดาห์ที่</th><th class="border border-slate-500 p-2 text-emerald-700">มา</th><th class="border border-slate-500 p-2 text-cyan-700">กิจกรรม</th><th class="border border-slate-500 p-2 text-amber-700">สาย</th><th class="border border-slate-500 p-2 text-blue-700">ลาป่วย</th><th class="border border-slate-500 p-2 text-indigo-700">ลากิจ</th><th class="border border-slate-500 p-2 text-rose-700">ขาด</th><th class="border border-slate-500 p-2 text-purple-700">โดด</th></tr></thead><tbody class="divide-y divide-slate-400 font-bold">${[1,2,3,4,5].map(w => `<tr><td class="border border-slate-500 p-2 bg-slate-50">สัปดาห์ ${w}</td><td class="border border-slate-500 p-2 text-emerald-600">${data.weekly[w]['มา']}</td><td class="border border-slate-500 p-2 text-cyan-600">${data.weekly[w]['ร่วมกิจกรรม']}</td><td class="border border-slate-500 p-2 text-amber-600">${data.weekly[w]['สาย']}</td><td class="border border-slate-500 p-2 text-blue-600">${data.weekly[w]['ลาป่วย']}</td><td class="border border-slate-500 p-2 text-indigo-600">${data.weekly[w]['ลากิจ']}</td><td class="border border-slate-500 p-2 text-rose-600">${data.weekly[w]['ขาด']}</td><td class="border border-slate-500 p-2 text-purple-600">${data.weekly[w]['โดดเรียน']}</td></tr>`).join('')}</tbody></table>`;
+            } else if (pdfType === 'daily') {
+                htmlContainer += `<table class="w-full text-center border-collapse border border-slate-500 text-[13px] mb-6"><thead class="bg-slate-100"><tr><th class="border border-slate-500 p-2 w-1/2">วันที่</th><th class="border border-slate-500 p-2 w-1/2">สถานะการมาเรียน</th></tr></thead><tbody class="divide-y divide-slate-400 font-bold">${data.dates.map(d => { const stat = data.daily[d].status; let cl = ''; if(stat==='มา'||stat==='ร่วมกิจกรรม') cl='text-emerald-600'; else if(stat==='สาย') cl='text-amber-600'; else cl='text-rose-600'; return `<tr><td class="border border-slate-500 p-2">${d.split('-').reverse().join('/')}</td><td class="border border-slate-500 p-2 ${cl}">${stat}</td></tr>`; }).join('')}${data.dates.length === 0 ? `<tr><td class="border border-slate-500 p-4 text-slate-400" colspan="2">ไม่มีข้อมูลในเดือนนี้</td></tr>` : ''}</tbody></table>`;
+            }
+
+            htmlContainer += `</div><div class="mt-auto pt-6 flex justify-around px-4 text-center text-sm font-bold pb-8"><div><p class="mb-8">ลงชื่อ                                                   </p><p>( ${adv1} )</p><p class="text-slate-500 mt-1">ครูที่ปรึกษา</p></div><div><p class="mb-8">ลงชื่อ                                                   </p><p>( ${staffName || '                                                   '} )</p><p class="text-slate-500 mt-1">เจ้าหน้าที่ / ฝ่ายวิชาการ</p></div></div></div></div>`;
+            document.body.insertAdjacentHTML('beforeend', htmlContainer);
+
+            await document.fonts.ready; await new Promise(resolve => setTimeout(resolve, 1500));
+
+            try {
+                const el = document.getElementById(`pdf-student-page`);
+                const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false });
+                const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                pdfDoc.addImage(imgData, 'JPEG', 0, 0, 595.28, 841.89);
+                pdfDoc.save(`StudentReport_${data.student.name}_${month}_${pdfType}.pdf`); showToast("สร้างไฟล์ PDF สำเร็จ!", "success");
+            } catch (err) { showToast("เกิดข้อผิดพลาดในการสร้าง PDF", "error");
+            }
+            document.getElementById('pdf-student-container').remove();
+            if (__wasDark) document.documentElement.classList.add('dark');
+        };
+        window.downloadInfographicPDF = async function(subjectId) {
+            showToast("กำลังประมวลผล PDF กรุณารอสักครู่...", "success");
+            const __wasDark = document.documentElement.classList.contains('dark'); if (__wasDark) document.documentElement.classList.remove('dark');
+            const subject = subjects.find(s => s.id === subjectId); const roomStudents = students.filter(s => s.roomId === subject.roomId).sort((a,b) => parseInt(a.number) - parseInt(b.number));
+            const subjectAtt = attendanceData.filter(a => a.subjectId === subjectId);
+            
+            let uniqueCols = [];
+            subjectAtt.forEach(att => { const key = `${att.date}_${att.period}`; if (!uniqueCols.find(c => c.key === key)) uniqueCols.push({ key, data: att.records, subTeacher: att.substituteTeacher }); });
+            const totalClasses = uniqueCols.length;
+            const staffName = settings.staffs && settings.staffs[subject.roomId] ? settings.staffs[subject.roomId] : '';
+            let subNotes = uniqueCols.filter(c => c.subTeacher).map(c => `วันที่ ${c.key.split('_')[0].split('-').reverse().join('/')} คาบ ${c.key.split('_')[1]} (แทนโดย: ${c.subTeacher})`);
+            let subNotesHtml = '';
+            if (subNotes.length > 0) { subNotesHtml = `<div class="mb-4 text-[10px] font-bold text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-200"><span class="text-amber-800 underline mr-1">หมายเหตุการสอนแทน:</span> ${subNotes.join(', ')}</div>`;
+            }
+
+            const STUDENTS_PER_PAGE = 30;
+            const pagesCount = Math.ceil(roomStudents.length / STUDENTS_PER_PAGE) || 1;
+            const pdfDoc = new jspdf.jsPDF('p', 'pt', 'a4');
+            let htmlContainer = `<div id="pdf-export-container" class="a4-export-container font-sans text-slate-800">`;
+            for (let page = 0; page < pagesCount; page++) {
+                const studentsChunk = roomStudents.slice(page * STUDENTS_PER_PAGE, (page + 1) * STUDENTS_PER_PAGE);
+                let studentTable = `<table class="w-full text-center border-collapse border border-slate-500 text-[13px] mb-6" style="table-layout: fixed; width: 100%;"><thead class="bg-slate-100"><tr><th class="border border-slate-500 p-2" style="width: 8%;">เลขที่</th><th class="border border-slate-500 p-2 text-left" style="width: 32%;">ชื่อ-นามสกุล</th><th class="border border-slate-500 p-2 text-emerald-700" style="width: 15%;">มา/กิจกรรม</th><th class="border border-slate-500 p-2 text-amber-700" style="width: 15%;">สาย</th><th class="border border-slate-500 p-2 text-blue-700" style="width: 15%;">ลา</th><th class="border border-slate-500 p-2 text-rose-700" style="width: 15%;">ขาด/โดด</th></tr></thead><tbody class="divide-y divide-slate-400">`;
+                studentsChunk.forEach(st => {
+                    let valid = 0, late = 0, leave = 0, absent = 0; 
+                    uniqueCols.forEach(col => { const s = col.data[st.id]; if(s === 'มา' || s === 'ร่วมกิจกรรม') valid++; else if(s === 'สาย') late++; else if(s === 'ลาป่วย' || s === 'ลากิจ') leave++; else if(s === 'ขาด' || s === 'โดดเรียน') absent++; });
+                    const isRes = st.status === 'resigned'; const calcPct = (val) => totalClasses > 0 ? Math.round((val/totalClasses)*100) : 0;
+                    const validPct = calcPct(valid), latePct = calcPct(late), leavePct = calcPct(leave), absentPct = calcPct(absent);
+                    studentTable += `<tr class="${isRes ? 'bg-slate-50' : 'bg-white'}"><td class="border border-slate-500 p-1.5 font-bold text-slate-600">${st.number}</td><td class="border border-slate-500 p-1.5 font-bold text-left">${st.name} ${isRes?'(ออก/ย้าย)':''}</td><td class="border border-slate-500 p-1.5 font-black text-emerald-600">${valid} <span class="text-[10px] text-emerald-700/70">(${validPct}%)</span></td><td class="border border-slate-500 p-1.5 font-black text-amber-600">${late} <span class="text-[10px] text-amber-700/70">(${latePct}%)</span></td><td class="border border-slate-500 p-1.5 font-black text-blue-600">${leave} <span class="text-[10px] text-blue-700/70">(${leavePct}%)</span></td><td class="border border-slate-500 p-1.5 font-black text-rose-600">${absent} <span class="text-[10px] text-rose-700/70">(${absentPct}%)</span></td></tr>`;
+                });
+                studentTable += '</tbody></table>';
+                htmlContainer += `<div id="pdf-page-${page}" class="a4-page flex flex-col justify-between bg-white"><div><div class="text-center mb-6 border-b-2 border-slate-400 pb-4"><h1 class="text-3xl font-black mb-2">สรุปเวลาเรียนรายบุคคล (หน้า ${page+1}/${pagesCount})</h1><h2 class="text-xl font-bold bg-indigo-100 px-4 py-1.5 rounded-full inline-block border border-indigo-200">วิชา: ${subject.name} | ห้อง: ${formatRoomName(subject.roomId)}</h2></div><div class="flex justify-around mb-4 text-sm font-bold bg-slate-50 p-4 rounded-xl border border-slate-300"><div><span class="text-slate-500">ครูผู้สอน:</span> ${subject.teacher || '-'}${subject.teacher2 ? ' / ' + subject.teacher2 : ''}</div><div><span class="text-slate-500">คาบที่สอนแล้ว:</span> ${totalClasses} คาบ</div></div>${subNotesHtml}${studentTable}</div>${page === pagesCount - 1 ? `<div class="mt-auto pt-8 flex justify-between px-10 text-center text-sm font-bold pb-10"><div><p class="mb-10">ลงชื่อ                                                   </p><p>( ${subject.teacher || '                                                   '} )</p><p class="text-slate-500 mt-1">ครูผู้สอน / ผู้รับผิดชอบ</p></div><div><p class="mb-10">ลงชื่อ                                                   </p><p>( ${staffName || '                                                   '} )</p><p class="text-slate-500 mt-1">เจ้าหน้าที่ / ฝ่ายวิชาการ</p></div></div>` : ''}</div>`;
+            }
+            htmlContainer += `</div>`; document.body.insertAdjacentHTML('beforeend', htmlContainer);
+            await document.fonts.ready;
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            try {
+                for (let page = 0; page < pagesCount; page++) {
+                    const el = document.getElementById(`pdf-page-${page}`);
+                    const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false }); const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                    if (page > 0) pdfDoc.addPage(); pdfDoc.addImage(imgData, 'JPEG', 0, 0, 595.28, 841.89);
+                }
+                pdfDoc.save(`Report_${subject.name}_${formatRoomName(subject.roomId)}.pdf`);
+                showToast("สร้างไฟล์ PDF สำเร็จ!", "success");
+            } catch (err) { showToast("เกิดข้อผิดพลาดในการสร้าง PDF", "error"); } document.getElementById('pdf-export-container').remove();
+            if (__wasDark) document.documentElement.classList.add('dark');
+        }
+
+        window.downloadRoomInfographicPDF = async function(roomId, month) {
+            showToast("กำลังประมวลผล PDF กรุณารอสักครู่...", "success");
+            const __wasDark = document.documentElement.classList.contains('dark'); if (__wasDark) document.documentElement.classList.remove('dark');
+            const report = window.tempRoomReport; if(!report || report.roomId !== roomId) return; const roomName = formatRoomName(roomId);
+            const monthNames = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+            const displayMonthYear = `${monthNames[parseInt(month.split('-')[1])-1]} ${parseInt(month.split('-')[0])+543}`;
+            const advData = settings.advisors && settings.advisors[roomId] ? settings.advisors[roomId] : []; let advisorText = Array.isArray(advData) ? advData.filter(a => a.trim()).join(' และ ') : "ยังไม่ระบุ";
+            const staffName = settings.staffs && settings.staffs[roomId] ? settings.staffs[roomId] : '';
+            const STUDENTS_PER_PAGE = 30; const pagesCount = Math.ceil(report.data.length / STUDENTS_PER_PAGE) || 1;
+            const pdfDoc = new jspdf.jsPDF('p', 'pt', 'a4');
+            let htmlContainer = `<div id="pdf-room-container" class="a4-export-container font-sans text-slate-800">`;
+            for (let page = 0; page < pagesCount; page++) {
+                const dataChunk = report.data.slice(page * STUDENTS_PER_PAGE, (page + 1) * STUDENTS_PER_PAGE);
+                let tableHTML = `<table class="w-full text-center border-collapse text-[12px] bg-white border border-slate-500" style="table-layout: fixed; width: 100%;"><thead class="bg-slate-100 text-slate-700"><tr><th class="p-2 border border-slate-500" style="width: 8%;">เลขที่</th><th class="p-2 border border-slate-500 text-left" style="width: 32%;">ชื่อ-นามสกุล</th><th class="p-2 border border-slate-500" style="width: 6%;">ส.1</th><th class="p-2 border border-slate-500" style="width: 6%;">ส.2</th><th class="p-2 border border-slate-500" style="width: 6%;">ส.3</th><th class="p-2 border border-slate-500" style="width: 6%;">ส.4</th><th class="p-2 border border-slate-500" style="width: 6%;">ส.5</th><th class="p-2 border border-slate-500 bg-emerald-50 text-emerald-800" style="width: 6%;">มา</th><th class="p-2 border border-slate-500 bg-blue-50 text-blue-800" style="width: 6%;">ลา</th><th class="p-2 border border-slate-500 bg-rose-50 text-rose-800" style="width: 6%;">ขาด</th><th class="p-2 border border-slate-500 text-indigo-700" style="width: 12%;">การติดตาม</th></tr></thead><tbody class="divide-y divide-slate-400">`;
+                dataChunk.forEach((row) => {
+                    const isRes = row.student.status === 'resigned'; let bgRow = isRes ? 'bg-slate-100 text-slate-500 opacity-80' : 'bg-white';
+                    let valid = row.monthly['มา'] + row.monthly['ร่วมกิจกรรม'], leave = row.monthly['ลากิจ'] + row.monthly['ลาป่วย'], absent = row.monthly['ขาด'] + row.monthly['โดดเรียน'];
+                    
+                    let fwText = '-'; let fwCls = '';
+                    let lateLimit = settings.thresholds?.late || 4; let absLimit = settings.thresholds?.absent || 4;
+                    let lateCount = row.monthly['สาย'] || 0; let absentCount = row.monthly['ขาด'] || 0;
+                   
+                    if (lateCount >= lateLimit || absentCount >= absLimit) {
+                        const isFollowedUp = followUps.find(f => f.studentId === row.student.id && f.month === month);
+                        if (isFollowedUp) { fwText = 'ติดตามแล้ว'; fwCls = 'text-emerald-700 bg-emerald-50 font-bold'; }
+                        else { fwText = 'ต้องติดตาม'; fwCls = 'text-rose-700 bg-rose-50 font-bold'; }
+                    }
+
+                    tableHTML += `<tr class="${bgRow}"><td class="p-1.5 border border-slate-500 font-bold">${row.student.number}</td><td class="p-1.5 border border-slate-500 text-left font-bold">${row.student.name} ${isRes?'(ออก)':''}</td><td class="p-1.5 border border-slate-500">${row.weekly[1]||'-'}</td><td class="p-1.5 border border-slate-500">${row.weekly[2]||'-'}</td><td class="p-1.5 border border-slate-500">${row.weekly[3]||'-'}</td><td class="p-1.5 border border-slate-500">${row.weekly[4]||'-'}</td><td class="p-1.5 border border-slate-500">${row.weekly[5]||'-'}</td><td class="p-1.5 border border-slate-500 font-black text-emerald-700 bg-emerald-50/50">${valid||'-'}</td><td class="p-1.5 border border-slate-500 font-black text-blue-700 bg-blue-50/50">${leave||'-'}</td><td class="p-1.5 border border-slate-500 font-black text-rose-700 bg-rose-50/50">${absent||'-'}</td><td class="p-1.5 border border-slate-500 ${fwCls} text-[10px]">${fwText}</td></tr>`;
+                });
+                tableHTML += '</tbody></table>';
+                htmlContainer += `<div id="pdf-room-page-${page}" class="a4-page flex flex-col justify-between bg-white"><div><div class="text-center mb-6 border-b-2 border-slate-400 pb-4"><h1 class="text-3xl font-black mb-2">รายงานภาพรวมห้องเรียน (หน้า ${page+1}/${pagesCount})</h1><h2 class="text-xl font-bold bg-emerald-100 px-4 py-1.5 rounded-full inline-block border border-emerald-300">ห้อง: ${roomName} | ประจำเดือน: ${displayMonthYear}</h2></div><div class="mb-4 text-sm font-bold bg-slate-50 p-3 rounded-lg border border-slate-300 text-center"><span class="text-slate-500">ครูที่ปรึกษา:</span> ${advisorText}</div>${tableHTML}</div>${page === pagesCount - 1 ? `<div class="mt-auto pt-6 flex justify-around px-4 text-center text-sm font-bold pb-8"><div><p class="mb-8">ลงชื่อ                                                   </p><p>( ${advData[0] || '                                                   '} )</p><p class="text-slate-500 mt-1">ครูที่ปรึกษาคนที่ 1</p></div>${advData[1] ? `<div><p class="mb-8">ลงชื่อ                                                   </p><p>( ${advData[1]} )</p><p class="text-slate-500 mt-1">ครูที่ปรึกษาคนที่ 2</p></div>` : ''}<div><p class="mb-8">ลงชื่อ                                                   </p><p>( ${staffName || '                                                   '} )</p><p class="text-slate-500 mt-1">เจ้าหน้าที่ / นายทะเบียน</p></div></div>` : ''}</div>`;
+            }
+            htmlContainer += `</div>`; document.body.insertAdjacentHTML('beforeend', htmlContainer);
+            await document.fonts.ready;
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            try {
+                for (let page = 0; page < pagesCount; page++) {
+                    const el = document.getElementById(`pdf-room-page-${page}`);
+                    const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false }); const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                    if (page > 0) pdfDoc.addPage(); pdfDoc.addImage(imgData, 'JPEG', 0, 0, 595.28, 841.89);
+                }
+                pdfDoc.save(`RoomSummary_${roomName}_${month}.pdf`);
+                showToast("สร้างไฟล์ PDF สำเร็จ!", "success");
+            } catch (err) { showToast("เกิดข้อผิดพลาดในการสร้าง PDF", "error"); } document.getElementById('pdf-room-container').remove();
+            if (__wasDark) document.documentElement.classList.add('dark');
+        }
+
+        window.downloadRoomDailyPDF = async function(roomId, date) {
+            showToast("กำลังประมวลผล PDF กรุณารอสักครู่...", "success");
+            const __wasDark = document.documentElement.classList.contains('dark'); if (__wasDark) document.documentElement.classList.remove('dark');
+            const roomName = formatRoomName(roomId), roomStudents = students.filter(s => s.roomId === roomId).sort((a,b) => parseInt(a.number) - parseInt(b.number)), roomSubjects = getRoomSubjects(roomId);
+            const advData = settings.advisors && settings.advisors[roomId] ? settings.advisors[roomId] : []; let advisorText = Array.isArray(advData) ? advData.filter(a => a.trim()).join(' และ ') : "ยังไม่ระบุ";
+            const staffName = settings.staffs && settings.staffs[roomId] ? settings.staffs[roomId] : '';
+            const dObj = new Date(date); const dayOfWeek = dObj.getDay(); let dayIndexForSched = (dayOfWeek >= 1 && dayOfWeek <= 5) ? dayOfWeek : 1;
+            const subjectsToday = []; roomSubjects.forEach(s => { if (s.schedules) { s.schedules.forEach(sch => { if (parseInt(sch.day) === dayIndexForSched) { subjectsToday.push({ ...s, period: parseInt(sch.period) }); } }); } });
+            subjectsToday.sort((a,b) => a.period - b.period);
+            const dailyAttRecords = attendanceData.filter(a => a.date === date && subjectsToday.some(st => st.id === a.subjectId && String(st.period) === String(a.period)));
+            const STUDENTS_PER_PAGE = 30; const pagesCount = Math.ceil(roomStudents.length / STUDENTS_PER_PAGE) || 1;
+            const pdfDoc = new jspdf.jsPDF('p', 'pt', 'a4');
+            let htmlContainer = `<div id="pdf-daily-room-container" class="a4-export-container font-sans text-slate-800">`;
+            const thaiMonths = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."]; const displayDateStr = `${dObj.getDate()} ${thaiMonths[dObj.getMonth()]} ${dObj.getFullYear() + 543}`;
+            for (let page = 0; page < pagesCount; page++) {
+                const dataChunk = roomStudents.slice(page * STUDENTS_PER_PAGE, (page + 1) * STUDENTS_PER_PAGE);
+                let tableHTML = `<table class="w-full text-center border-collapse text-[12px] bg-white border border-slate-500" style="table-layout: fixed; width: 100%;"><thead class="bg-slate-100 text-slate-700"><tr><th class="p-2 border border-slate-500" style="width: 10%;">เลขที่</th><th class="p-2 border border-slate-500 text-left" style="width: 35%;">ชื่อ-นามสกุล</th>`;
+                if (subjectsToday.length === 0) { tableHTML += `<th class="p-2 border border-slate-500 w-auto">ไม่มีวิชาเรียน</th>`;
+                } else { const subColWidth = 55 / subjectsToday.length; subjectsToday.forEach(sub => { tableHTML += `<th class="p-2 border border-slate-500" style="width: ${subColWidth}%;"><div class="leading-tight" title="${sub.name}">${sub.name}</div><div class="text-[9px] mt-1 text-slate-500">คาบ ${sub.period}</div></th>`; });
+                }
+                tableHTML += `</tr></thead><tbody class="divide-y divide-slate-400">`;
+                dataChunk.forEach((st) => {
+                    const isRes = st.status === 'resigned'; let bgRow = isRes ? 'bg-slate-100 text-slate-500 opacity-80' : 'bg-white';
+                    tableHTML += `<tr class="${bgRow}"><td class="p-1.5 border border-slate-500 font-bold">${st.number}</td><td class="p-1.5 border border-slate-500 text-left font-bold">${st.name} ${isRes?'(ออก/ย้าย)':''}</td>`;
+                    if (subjectsToday.length === 0) { tableHTML += `<td class="p-1.5 border border-slate-500">-</td>`; } else { subjectsToday.forEach(sub => { const attRecord = dailyAttRecords.find(a => a.subjectId === sub.id && String(a.period) === String(sub.period)); let statusStr = '-', statusCls = ''; if (attRecord && attRecord.records[st.id]) { statusStr = attRecord.records[st.id]; if(statusStr === 'มา' || statusStr === 'ร่วมกิจกรรม') statusCls = 'text-emerald-700 font-bold'; else if(statusStr === 'สาย') statusCls = 'text-amber-600 font-bold'; else statusCls = 'text-rose-600 font-bold';
+                    } tableHTML += `<td class="p-1.5 border border-slate-500 ${statusCls} whitespace-nowrap">${statusStr}</td>`; });
+                    }
+                    tableHTML += `</tr>`;
+                });
+                tableHTML += '</tbody></table>';
+                htmlContainer += `<div id="pdf-daily-room-page-${page}" class="a4-page flex flex-col justify-between bg-white"><div><div class="text-center mb-6 border-b-2 border-slate-400 pb-4"><h1 class="text-3xl font-black mb-2">รายงานการเช็คชื่อรายวัน (หน้า ${page+1}/${pagesCount})</h1><h2 class="text-xl font-bold bg-indigo-100 px-4 py-1.5 rounded-full inline-block border border-indigo-300">ห้อง: ${roomName} | ประจำวันที่: ${displayDateStr}</h2></div><div class="mb-4 text-sm font-bold bg-slate-50 p-3 rounded-lg border border-slate-300 text-center"><span class="text-slate-500">ครูที่ปรึกษา:</span> ${advisorText}</div>${tableHTML}</div>${page === pagesCount - 1 ? `<div class="mt-auto pt-6 flex justify-around px-4 text-center text-sm font-bold pb-8"><div><p class="mb-8">ลงชื่อ                                                   </p><p>( ${advData[0] || '                                                   '} )</p><p class="text-slate-500 mt-1">ครูที่ปรึกษาคนที่ 1</p></div>${advData[1] ? `<div><p class="mb-8">ลงชื่อ                                                   </p><p>( ${advData[1]} )</p><p class="text-slate-500 mt-1">ครูที่ปรึกษาคนที่ 2</p></div>` : ''}<div><p class="mb-8">ลงชื่อ                                                   </p><p>( ${staffName || '                                                   '} )</p><p class="text-slate-500 mt-1">เจ้าหน้าที่ / นายทะเบียน</p></div></div>` : ''}</div>`;
+            }
+            htmlContainer += `</div>`; document.body.insertAdjacentHTML('beforeend', htmlContainer);
+            await document.fonts.ready;
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            try {
+                for (let page = 0; page < pagesCount; page++) {
+                    const el = document.getElementById(`pdf-daily-room-page-${page}`);
+                    const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false }); const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                    if (page > 0) pdfDoc.addPage(); pdfDoc.addImage(imgData, 'JPEG', 0, 0, 595.28, 841.89);
+                }
+                pdfDoc.save(`DailySummary_${roomName}_${date}.pdf`);
+                showToast("สร้างไฟล์ PDF สำเร็จ!", "success");
+            } catch (err) { showToast("เกิดข้อผิดพลาดในการสร้าง PDF", "error"); } document.getElementById('pdf-daily-room-container').remove();
+            if (__wasDark) document.documentElement.classList.add('dark');
+        }
+    
