@@ -166,10 +166,18 @@
     </nav>
 
 
-    <div id="announcementBar" class="hidden bg-gradient-to-r from-amber-50 to-orange-50 border-b-2 border-amber-300 sticky top-16 sm:top-20 z-30 shadow-sm">
-        <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2 sm:py-3 flex items-start sm:items-center gap-2 sm:gap-3">
-            <div class="w-6 h-6 sm:w-8 sm:h-8 bg-amber-400 text-white rounded-full flex items-center justify-center text-[10px] sm:text-sm shrink-0 shadow-sm"><i class="fas fa-bullhorn"></i></div>
-            <span id="announcementText" class="flex-1 min-w-0 text-amber-900 text-[11px] sm:text-sm font-bold leading-snug break-words"></span>
+    <div class="sticky top-16 sm:top-20 z-30">
+        <div id="holidayBar" class="hidden bg-gradient-to-r from-rose-50 to-red-50 border-b-2 border-rose-300 shadow-sm">
+            <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2 sm:py-3 flex items-start sm:items-center gap-2 sm:gap-3">
+                <div class="w-6 h-6 sm:w-8 sm:h-8 bg-rose-500 text-white rounded-full flex items-center justify-center text-[10px] sm:text-sm shrink-0 shadow-sm"><i class="fas fa-calendar-times"></i></div>
+                <span id="holidayBarText" class="flex-1 min-w-0 text-rose-800 text-[11px] sm:text-sm font-bold leading-snug break-words"></span>
+            </div>
+        </div>
+        <div id="announcementBar" class="hidden bg-gradient-to-r from-amber-50 to-orange-50 border-b-2 border-amber-300 shadow-sm">
+            <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2 sm:py-3 flex items-start sm:items-center gap-2 sm:gap-3">
+                <div class="w-6 h-6 sm:w-8 sm:h-8 bg-amber-400 text-white rounded-full flex items-center justify-center text-[10px] sm:text-sm shrink-0 shadow-sm"><i class="fas fa-bullhorn"></i></div>
+                <span id="announcementText" class="flex-1 min-w-0 text-amber-900 text-[11px] sm:text-sm font-bold leading-snug break-words"></span>
+            </div>
         </div>
     </div>
 
@@ -212,7 +220,7 @@
         let isAdmin = false, isDbInitialized = false, currentAdminTab = 'settings', currentRoomId = null, currentSubjectId = null;
         let editingTeacherId = null, editingSubjectId = null, editingStudentId = null, editingUserId = null;
         // Data models
-        let settings = { title: "ระบบเช็คชื่อนักเรียนอัจฉริยะ", faviconDataUrl: "", logoDataUrl: "", announcement: "", announcementStart: "", announcementEnd: "", term: "1", year: "2567", roomCounts: { m1: 4, m2: 4, m3: 4, m4: 3, m5: 3, m6: 3 }, advisors: {}, staffs: {}, thresholds: { late: 4, absent: 4 }, storageLimitChars: 8000000, users: [{ id: 'super_admin_root', username: 'BNKAdmin', password: '042499078', name: 'ผู้ดูแลระบบหลัก', role: 'super_admin', createdAt: new Date().toISOString() }] };
+        let settings = { title: "ระบบเช็คชื่อนักเรียนอัจฉริยะ", faviconDataUrl: "", logoDataUrl: "", announcement: "", announcementStart: "", announcementEnd: "", term: "1", year: "2567", roomCounts: { m1: 4, m2: 4, m3: 4, m4: 3, m5: 3, m6: 3 }, advisors: {}, staffs: {}, thresholds: { late: 4, absent: 4 }, storageLimitChars: 8000000, holidays: [], users: [{ id: 'super_admin_root', username: 'BNKAdmin', password: '042499078', name: 'ผู้ดูแลระบบหลัก', role: 'super_admin', createdAt: new Date().toISOString() }] };
         let teachers = [], subjects = [], students = [], attendanceData = [], followUps = [], logs = [];
         let currentUser = null;
         const statuses = {
@@ -457,6 +465,7 @@
                     }
                     // แก้ไขค่าเริ่มต้นเดิมที่อ้างอิงผิด (Google Sheets cell) ให้ตรงกับความจริง (Drive file ผ่าน DriveApp.createFile ซึ่งจำกัดที่ 10MB)
                     if (!settings.storageLimitChars || settings.storageLimitChars === 50000) settings.storageLimitChars = 8000000;
+                    if (!settings.holidays) settings.holidays = [];
                     teachers = data.teachers || [];
                     subjects = data.subjects || []; students = data.students || []; attendanceData = data.attendanceData || []; followUps = data.followUps || []; logs = data.logs || [];
                     subjects = subjects.map(s => { if (s.day !== undefined && s.period !== undefined && !s.schedules) { s.credits = 0.5; s.schedules = [{ day: s.day, period: s.period }]; delete s.day; delete s.period; } return s; });
@@ -469,8 +478,11 @@
                 applyFavicon();
                 applyHeaderLogo();
                 updateAnnouncementBar();
+                updateHolidayBar();
                 setInterval(updateAnnouncementBar, 60000);
+                setInterval(updateHolidayBar, 60000);
                 applyDarkModePreference();
+                initInactivityTracking();
                 // ตั้งค่าจุดเริ่มต้นของ history ให้เป็นหน้า dashboard เพื่อให้ปุ่ม Back ทำงานถูกต้องตั้งแต่แรก
                 try { history.replaceState({ view: 'dashboard' }, '', location.pathname + location.search); } catch (e) {}
                 showToast("พร้อมใช้งาน!", "success"); renderDashboard(); startRealtimeSync();
@@ -607,6 +619,23 @@
             else { bar.classList.add('hidden'); textEl.innerText = ''; }
         }
 
+        // ===== ระบบวันหยุด =====
+        function getHolidayForDate(dateStr) {
+            return (settings.holidays || []).find(h => h.date === dateStr) || null;
+        }
+        function todayDateStr() {
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        }
+        function updateHolidayBar() {
+            const bar = document.getElementById('holidayBar');
+            const textEl = document.getElementById('holidayBarText');
+            if (!bar || !textEl) return;
+            const todayHoliday = getHolidayForDate(todayDateStr());
+            if (todayHoliday) { textEl.innerText = `วันนี้เป็นวันหยุด: ${todayHoliday.label}`; bar.classList.remove('hidden'); }
+            else { bar.classList.add('hidden'); textEl.innerText = ''; }
+        }
+
         function showToast(message, type = 'success') {
             const container = document.getElementById('toastContainer');
             const toast = document.createElement('div');
@@ -676,6 +705,29 @@
                 isAdmin = false; currentUser = null;
                 document.getElementById('btnAdminLogin').classList.remove('hidden'); document.getElementById('btnAdminPanel').classList.add('hidden'); document.getElementById('btnAdminLogout').classList.add('hidden'); updateCurrentUserBadge(); showToast("ออกจากระบบแล้ว"); navigate('dashboard');
             });
+        }
+
+        // ===== ออกจากระบบอัตโนมัติเมื่อไม่มีการใช้งานเกิน 30 นาที =====
+        let lastActivityTime = Date.now();
+        const INACTIVITY_LIMIT_MS = 30 * 60 * 1000;
+        function initInactivityTracking() {
+            ['click', 'keydown', 'touchstart', 'mousemove', 'scroll'].forEach(evt => {
+                window.addEventListener(evt, () => { lastActivityTime = Date.now(); }, { passive: true });
+            });
+            setInterval(() => {
+                if (isAdmin && (Date.now() - lastActivityTime > INACTIVITY_LIMIT_MS)) {
+                    autoLogoutDueToInactivity();
+                }
+            }, 60000);
+        }
+        function autoLogoutDueToInactivity() {
+            if (!isAdmin) return;
+            const uname = currentUser ? currentUser.username : '';
+            if (currentUser) { logAction('ออกจากระบบอัตโนมัติ (หมดเวลา)', `ไม่มีการใช้งานเกิน 30 นาที บัญชี ${uname}`, 'account'); saveData('full'); }
+            isAdmin = false; currentUser = null;
+            document.getElementById('btnAdminLogin').classList.remove('hidden'); document.getElementById('btnAdminPanel').classList.add('hidden'); document.getElementById('btnAdminLogout').classList.add('hidden'); updateCurrentUserBadge();
+            showToast("ออกจากระบบอัตโนมัติ เนื่องจากไม่มีการใช้งานเกิน 30 นาที", "error");
+            navigate('dashboard');
         }
 
         function renderDashboard() {
@@ -854,7 +906,9 @@
             teachers.forEach(t => { if(t.name !== subject.teacher && t.name !== subject.teacher2) tcOptions += `<option value="${t.name}">${t.name}</option>`; });
             const backAction = fromTeacherDash ? `window.navigate('teacher_dash', {teacherName: '${subject.teacher}'})` : `window.navigate('classroom', {roomId: '${subject.roomId}'})`;
 
-            let html = `<div class="mb-4 sm:mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4 sm:gap-6 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="relative z-10 w-full"><div class="flex flex-wrap items-center gap-2 mb-2 sm:mb-3"><span class="bg-indigo-100 text-indigo-700 font-bold px-2 py-1 rounded text-[10px] sm:text-sm">ห้อง ${formatRoomName(subject.roomId)}</span></div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2"><i class="fas fa-clipboard-check text-indigo-500"></i> ${subject.name}</h2><p class="text-slate-500 mt-1 text-[11px] sm:text-base font-medium flex items-center gap-1.5"><i class="fas fa-chalkboard-teacher"></i> ครู: <span class="text-slate-700">${subject.teacher || '-'}${subject.teacher2 ? ' / ' + subject.teacher2 : ''}</span></p></div><div class="flex flex-col gap-3 relative z-10 w-full md:w-auto mt-2 md:mt-0"><div class="flex flex-row gap-2 w-full"><input type="date" id="attDate" value="${today}" onchange="window.updatePeriodDropdown()" class="flex-1 bg-slate-50 border border-slate-200 text-slate-800 px-3 py-2 sm:py-3 rounded-xl shadow-inner focus:ring-2 focus:ring-indigo-500 text-base sm:text-sm font-bold outline-none"><select id="attPeriod" class="w-24 sm:w-32 bg-slate-50 border border-slate-200 text-slate-800 px-2 py-2 sm:py-3 rounded-xl shadow-inner focus:ring-2 focus:ring-indigo-500 text-base sm:text-sm font-bold outline-none"></select></div><label class="flex items-center gap-2 cursor-pointer bg-amber-50 p-2 sm:p-3 rounded-xl border border-amber-200 w-full"><input type="checkbox" id="isSubstitute" onchange="document.getElementById('substituteTeacher').classList.toggle('hidden', !this.checked)" class="w-4 h-4 text-amber-600 rounded"><span class="font-bold text-amber-800 text-[10px] sm:text-sm">มีการสอนแทน (ระบุชื่อผู้เช็คแทน)</span></label><select id="substituteTeacher" class="hidden w-full bg-white border border-amber-300 text-slate-800 px-3 py-2 rounded-xl shadow-inner focus:ring-2 focus:ring-amber-500 text-base sm:text-sm font-bold outline-none">${tcOptions}</select><button onclick="${backAction}" class="w-full bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2 sm:py-3 rounded-xl shadow-sm transition-all font-bold text-sm">ย้อนกลับ</button></div></div>`;
+            let html = `<div class="mb-4 sm:mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4 sm:gap-6 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="relative z-10 w-full"><div class="flex flex-wrap items-center gap-2 mb-2 sm:mb-3"><span class="bg-indigo-100 text-indigo-700 font-bold px-2 py-1 rounded text-[10px] sm:text-sm">ห้อง ${formatRoomName(subject.roomId)}</span></div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2"><i class="fas fa-clipboard-check text-indigo-500"></i> ${subject.name}</h2><p class="text-slate-500 mt-1 text-[11px] sm:text-base font-medium flex items-center gap-1.5"><i class="fas fa-chalkboard-teacher"></i> ครู: <span class="text-slate-700">${subject.teacher || '-'}${subject.teacher2 ? ' / ' + subject.teacher2 : ''}</span></p></div><div class="flex flex-col gap-3 relative z-10 w-full md:w-auto mt-2 md:mt-0"><div class="flex flex-row gap-2 w-full"><input type="date" id="attDate" value="${today}" onchange="window.updatePeriodDropdown(); window.updateAttendanceHolidayNote();" class="flex-1 bg-slate-50 border border-slate-200 text-slate-800 px-3 py-2 sm:py-3 rounded-xl shadow-inner focus:ring-2 focus:ring-indigo-500 text-base sm:text-sm font-bold outline-none"><select id="attPeriod" class="w-24 sm:w-32 bg-slate-50 border border-slate-200 text-slate-800 px-2 py-2 sm:py-3 rounded-xl shadow-inner focus:ring-2 focus:ring-indigo-500 text-base sm:text-sm font-bold outline-none"></select></div><label class="flex items-center gap-2 cursor-pointer bg-amber-50 p-2 sm:p-3 rounded-xl border border-amber-200 w-full"><input type="checkbox" id="isSubstitute" onchange="document.getElementById('substituteTeacher').classList.toggle('hidden', !this.checked)" class="w-4 h-4 text-amber-600 rounded"><span class="font-bold text-amber-800 text-[10px] sm:text-sm">มีการสอนแทน (ระบุชื่อผู้เช็คแทน)</span></label><select id="substituteTeacher" class="hidden w-full bg-white border border-amber-300 text-slate-800 px-3 py-2 rounded-xl shadow-inner focus:ring-2 focus:ring-amber-500 text-base sm:text-sm font-bold outline-none">${tcOptions}</select><button onclick="${backAction}" class="w-full bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2 sm:py-3 rounded-xl shadow-sm transition-all font-bold text-sm">ย้อนกลับ</button></div></div>`;
+            
+            html += `<div id="attHolidayNote" class="hidden mb-4 sm:mb-6 bg-rose-50 border-2 border-rose-300 rounded-2xl p-3 sm:p-4 flex items-center gap-3"><div class="w-9 h-9 sm:w-11 sm:h-11 bg-rose-500 text-white rounded-full flex items-center justify-center text-sm sm:text-lg shrink-0"><i class="fas fa-calendar-times"></i></div><span id="attHolidayNoteText" class="text-rose-700 font-bold text-xs sm:text-sm"></span></div>`;
             
             html += `<div class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 overflow-hidden mb-10"><div class="bg-slate-50 border-b border-slate-200 p-2.5 sm:p-4 flex flex-wrap gap-1.5 justify-center">${Object.entries(statuses).map(([name, style]) => `<div class="flex items-center gap-1 px-1.5 sm:px-3 py-1 bg-white border border-slate-200 rounded-lg shadow-sm text-[9px] sm:text-xs font-bold text-slate-600"><div class="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-${style.activeBg.replace('bg-','')}"></div> ${name}</div>`).join('')}</div><div class="block lg:hidden divide-y divide-slate-100">`;
             if (roomStudents.length === 0) { html += `<div class="p-10 text-center text-slate-400 font-medium">ไม่มีรายชื่อนักเรียน</div>`;
@@ -897,7 +951,16 @@
                     document.querySelectorAll('input[type="radio"]').forEach(r => r.checked = false);
                 }
             };
+            window.updateAttendanceHolidayNote = function() {
+                const dateVal = document.getElementById('attDate').value;
+                const noteEl = document.getElementById('attHolidayNote'), textEl = document.getElementById('attHolidayNoteText');
+                if (!noteEl || !textEl) return;
+                const holiday = getHolidayForDate(dateVal);
+                if (holiday) { textEl.innerText = `วันที่เลือกเป็นวันหยุด: ${holiday.label} (ยังสามารถเช็คชื่อได้ตามปกติหากมีการเรียนการสอน)`; noteEl.classList.remove('hidden'); }
+                else { noteEl.classList.add('hidden'); }
+            };
             window.updatePeriodDropdown();
+            window.updateAttendanceHolidayNote();
             document.getElementById('attPeriod').addEventListener('change', (e) => { loadExistingAttendance(subjectId, document.getElementById('attDate').value, e.target.value); });
         }
         
@@ -1129,7 +1192,7 @@
 
         function renderAdmin() {
             const isSuperAdmin = currentUser && currentUser.role === 'super_admin';
-            let html = `<div class="mb-4 sm:mb-8 flex flex-col md:flex-row md:items-center justify-between gap-3"><div><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2"><i class="fas fa-tools text-indigo-500"></i> จัดการระบบ</h2>${currentUser ? `<p class="text-xs sm:text-sm text-slate-500 font-bold mt-1">เข้าสู่ระบบในชื่อ: ${currentUser.name} <span class="ml-1 ${currentUser.role === 'super_admin' ? 'bg-purple-100 text-purple-700 border-purple-200' : 'bg-indigo-100 text-indigo-700 border-indigo-200'} border px-2 py-0.5 rounded-full text-[10px] font-black">${currentUser.role === 'super_admin' ? 'Super Admin' : 'เจ้าหน้าที่'}</span></p>` : ''}</div></div><div class="flex overflow-x-auto gap-1.5 mb-4 sm:mb-8 bg-slate-200/50 p-1.5 rounded-xl w-full scrollbar-hide shadow-inner"><button onclick="window.navigate('admin', {tab: 'settings'})" class="${currentAdminTab === 'settings' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 flex-1 justify-center"><i class="fas fa-cog"></i> ตั้งค่า</button><button onclick="window.navigate('admin', {tab: 'data_status'})" class="${currentAdminTab === 'data_status' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 flex-1 justify-center"><i class="fas fa-database"></i> สถานะข้อมูล</button><button onclick="window.navigate('admin', {tab: 'teachers'})" class="${currentAdminTab === 'teachers' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 flex-1 justify-center"><i class="fas fa-chalkboard-teacher"></i> ครู</button><button onclick="window.navigate('admin', {tab: 'subjects'})" class="${currentAdminTab === 'subjects' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 flex-1 justify-center"><i class="fas fa-book"></i> วิชา</button><button onclick="window.navigate('admin', {tab: 'students'})" class="${currentAdminTab === 'students' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 flex-1 justify-center"><i class="fas fa-users"></i> นักเรียน</button>${isSuperAdmin ? `<button onclick="window.navigate('admin', {tab: 'users'})" class="${currentAdminTab === 'users' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 flex-1 justify-center"><i class="fas fa-user-cog"></i> ผู้ใช้งาน</button>` : ''}<button onclick="window.navigate('admin', {tab: 'logs'})" class="${currentAdminTab === 'logs' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 flex-1 justify-center"><i class="fas fa-history"></i> Log</button></div><div id="adminContent" class="bg-white rounded-2xl sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-8 w-full"></div>`;
+            let html = `<div class="mb-4 sm:mb-8 flex flex-col md:flex-row md:items-center justify-between gap-3"><div><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2"><i class="fas fa-tools text-indigo-500"></i> จัดการระบบ</h2>${currentUser ? `<p class="text-xs sm:text-sm text-slate-500 font-bold mt-1">เข้าสู่ระบบในชื่อ: ${currentUser.name} <span class="ml-1 ${currentUser.role === 'super_admin' ? 'bg-purple-100 text-purple-700 border-purple-200' : 'bg-indigo-100 text-indigo-700 border-indigo-200'} border px-2 py-0.5 rounded-full text-[10px] font-black">${currentUser.role === 'super_admin' ? 'Super Admin' : 'เจ้าหน้าที่'}</span></p>` : ''}</div></div><div class="flex overflow-x-auto gap-1.5 mb-4 sm:mb-8 bg-slate-200/50 p-1.5 rounded-xl w-full scrollbar-hide shadow-inner snap-x snap-mandatory"><button onclick="window.navigate('admin', {tab: 'settings'})" class="${currentAdminTab === 'settings' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0 snap-start"><i class="fas fa-cog"></i> ตั้งค่า</button><button onclick="window.navigate('admin', {tab: 'data_status'})" class="${currentAdminTab === 'data_status' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-database"></i> สถานะข้อมูล</button><button onclick="window.navigate('admin', {tab: 'teachers'})" class="${currentAdminTab === 'teachers' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-chalkboard-teacher"></i> ครู</button><button onclick="window.navigate('admin', {tab: 'subjects'})" class="${currentAdminTab === 'subjects' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-book"></i> วิชา</button><button onclick="window.navigate('admin', {tab: 'students'})" class="${currentAdminTab === 'students' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-users"></i> นักเรียน</button>${isSuperAdmin ? `<button onclick="window.navigate('admin', {tab: 'users'})" class="${currentAdminTab === 'users' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-user-cog"></i> ผู้ใช้งาน</button>` : ''}<button onclick="window.navigate('admin', {tab: 'holidays'})" class="${currentAdminTab === 'holidays' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-calendar-times"></i> วันหยุด</button><button onclick="window.navigate('admin', {tab: 'logs'})" class="${currentAdminTab === 'logs' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-history"></i> Log</button></div><div id="adminContent" class="bg-white rounded-2xl sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-8 w-full"></div>`;
             document.getElementById('mainContent').innerHTML = html; renderAdminTab();
         }
 
@@ -1280,6 +1343,41 @@
                 html += `</div>`;
                 content.innerHTML = html;
             }
+            else if (currentAdminTab === 'holidays') {
+                if (window.holidayCalYear === undefined) { const now = new Date(); window.holidayCalYear = now.getFullYear(); window.holidayCalMonth = now.getMonth(); }
+                const year = window.holidayCalYear, month = window.holidayCalMonth;
+                const monthNamesFull = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+                const dayNamesShort = ['อา','จ','อ','พ','พฤ','ศ','ส'];
+                const firstDay = new Date(year, month, 1);
+                const startWeekday = firstDay.getDay();
+                const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-2 flex items-center gap-2"><i class="fas fa-calendar-times text-rose-500"></i> จัดการวันหยุด / วันสอบ</h3><p class="text-[10px] sm:text-xs text-slate-500 font-medium mb-4"><i class="fas fa-info-circle"></i> คลิกวันที่ในปฏิทินเพื่อเพิ่ม/แก้ไข/ลบวันหยุด ระบบจะแสดงหมายเหตุในหน้าเช็คชื่อทุกรายวิชาของวันนั้น และขึ้นประกาศบนหน้าเว็บอัตโนมัติในวันนั้นด้วย (ใช้ได้ทั้งวันหยุดราชการและวันสอบ)</p>`;
+
+                html += `<div id="holidayModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-3 transition-opacity"><div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-md transform scale-95 opacity-0 transition-all duration-300" id="holidayModalBox"><div class="p-4 sm:p-6"><div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-extrabold text-lg" id="holidayModalTitle">เพิ่มวันหยุด</h4><button onclick="window.closeHolidayModal()" class="text-slate-400 text-xl hover:text-rose-500 transition-colors"><i class="fas fa-times"></i></button></div><div class="space-y-3 mb-4"><div><label class="block text-xs font-bold mb-1">วันที่</label><input type="text" id="holidayModalDate" disabled class="w-full bg-slate-100 text-slate-500 border border-slate-200 rounded px-3 py-2 text-sm font-bold outline-none"></div><div><label class="block text-xs font-bold mb-1">หมายเหตุ / เหตุผล</label><input type="text" id="holidayModalLabel" class="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-rose-400" placeholder="เช่น วันหยุดราชการ, วันสอบปลายภาค"></div></div><div class="flex justify-between items-center gap-2"><button id="holidayModalDeleteBtn" onclick="window.deleteHoliday(document.getElementById('holidayModalDate').value)" class="hidden bg-rose-50 hover:bg-rose-100 text-rose-600 px-3 py-1.5 rounded font-bold text-xs sm:text-sm transition-colors"><i class="fas fa-trash"></i> ลบวันหยุดนี้</button><div class="flex gap-2 ml-auto"><button onclick="window.closeHolidayModal()" class="bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded font-bold text-sm transition-colors">ยกเลิก</button><button onclick="window.saveHolidayForm()" class="bg-rose-600 hover:bg-rose-700 text-white px-4 py-1.5 rounded font-bold text-sm shadow-sm transition-colors"><i class="fas fa-save"></i> บันทึก</button></div></div></div></div></div>`;
+
+                html += `<div class="flex items-center justify-between mb-4 bg-slate-50 rounded-xl border border-slate-100 p-2 sm:p-3"><button onclick="window.changeHolidayMonth(-1)" class="w-9 h-9 sm:w-10 sm:h-10 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg flex items-center justify-center text-slate-600 shadow-sm transition-colors"><i class="fas fa-chevron-left"></i></button><span class="font-extrabold text-sm sm:text-lg text-slate-800">${monthNamesFull[month]} ${year + 543}</span><button onclick="window.changeHolidayMonth(1)" class="w-9 h-9 sm:w-10 sm:h-10 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg flex items-center justify-center text-slate-600 shadow-sm transition-colors"><i class="fas fa-chevron-right"></i></button></div>`;
+
+                html += `<div class="grid grid-cols-7 gap-1 sm:gap-1.5 mb-8">`;
+                dayNamesShort.forEach(d => { html += `<div class="text-center text-[9px] sm:text-xs font-black text-slate-400 py-1">${d}</div>`; });
+                for (let i = 0; i < startWeekday; i++) html += `<div></div>`;
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                    const holiday = getHolidayForDate(dateStr);
+                    const isToday = dateStr === todayDateStr();
+                    html += `<button onclick="window.openHolidayModal('${dateStr}')" class="aspect-square rounded-lg sm:rounded-xl border p-1 sm:p-1.5 flex flex-col items-center justify-start transition-all hover:shadow-md ${holiday ? 'bg-rose-50 border-rose-300' : 'bg-white border-slate-200 hover:border-indigo-300'} ${isToday ? 'ring-2 ring-indigo-400' : ''}"><span class="text-[10px] sm:text-sm font-black ${holiday ? 'text-rose-600' : 'text-slate-700'}">${day}</span>${holiday ? `<span class="text-[7px] sm:text-[9px] font-bold text-rose-500 leading-tight text-center hidden sm:block overflow-hidden" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${holiday.label}</span><i class="fas fa-circle text-rose-400 text-[5px] sm:hidden mt-0.5"></i>` : ''}</button>`;
+                }
+                html += `</div>`;
+
+                const allHolidays = (settings.holidays || []).slice().sort((a, b) => a.date.localeCompare(b.date));
+                html += `<h4 class="font-extrabold text-sm sm:text-lg text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-list text-rose-500"></i> รายการวันหยุดทั้งหมด (${allHolidays.length})</h4>`;
+                if (allHolidays.length === 0) {
+                    html += `<div class="text-center text-slate-400 py-8 text-xs sm:text-sm font-medium bg-slate-50 rounded-xl border border-slate-100">ยังไม่มีการตั้งวันหยุด</div>`;
+                } else {
+                    html += `<div class="space-y-1.5 max-h-80 overflow-y-auto pr-1">${allHolidays.map(h => `<div class="flex items-center justify-between gap-2 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2"><div class="min-w-0"><span class="font-black text-rose-700 text-xs sm:text-sm">${h.date.split('-').reverse().join('/')}</span><span class="text-rose-600 text-xs sm:text-sm font-bold ml-2">${h.label}</span></div><button onclick="window.deleteHoliday('${h.date}')" class="shrink-0 text-rose-500 hover:text-rose-700 p-1.5"><i class="fas fa-trash"></i></button></div>`).join('')}</div>`;
+                }
+                content.innerHTML = html;
+            }
             else if (currentAdminTab === 'logs') {
                 if (!window.logFilterCategory) window.logFilterCategory = 'all';
                 if (!window.logFilterUser) window.logFilterUser = 'all';
@@ -1290,8 +1388,10 @@
                     account: { label: 'บัญชีผู้ใช้', icon: 'fa-user-shield', color: 'purple' },
                 };
                 const uniqueUsers = [...new Set(logs.map(l => l.name))].sort((a,b) => a.localeCompare(b));
-                let html = `<div class="flex justify-between items-center mb-4 flex-wrap gap-2"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-history text-indigo-500"></i> ประวัติการแก้ไข (Log)</h3></div>`;
+                const isSuperAdminLogs = currentUser && currentUser.role === 'super_admin';
+                let html = `<div class="flex justify-between items-center mb-4 flex-wrap gap-2"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-history text-indigo-500"></i> ประวัติการแก้ไข (Log)</h3>${isSuperAdminLogs && logs.length > 0 ? `<button onclick="window.clearAllLogs()" class="bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-600 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-trash-alt"></i> ล้างประวัติ Log ทั้งหมด</button>` : ''}</div>`;
                 html += `<div class="flex flex-wrap gap-1.5 mb-3">${Object.entries(catMeta).map(([key, m]) => `<button onclick="window.filterLogCategory('${key}')" class="px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-bold border transition-colors flex items-center gap-1.5 ${window.logFilterCategory === key ? `bg-${m.color}-600 text-white border-${m.color}-600` : `bg-white text-slate-600 border-slate-200 hover:bg-slate-50`}"><i class="fas ${m.icon}"></i> ${m.label}</button>`).join('')}</div>`;
+                if (window.logFilterCategory === 'account') { html += `<div class="mb-3 flex items-start gap-2 bg-purple-50 border border-purple-200 text-purple-700 rounded-lg px-3 py-2.5"><i class="fas fa-info-circle mt-0.5"></i><span class="text-[10px] sm:text-xs font-bold leading-relaxed">ระบบจะออกจากระบบให้อัตโนมัติหากไม่มีการใช้งานเกิน 30 นาที (เพื่อความปลอดภัยของบัญชี) เหตุการณ์นี้จะถูกบันทึกเป็น "ออกจากระบบอัตโนมัติ (หมดเวลา)" ในหมวดนี้เช่นกัน</span></div>`; }
                 html += `<div class="mb-4 flex items-center gap-2 flex-wrap"><label class="text-[10px] sm:text-xs font-bold text-slate-500 flex items-center gap-1.5"><i class="fas fa-user"></i> กรองเฉพาะบัญชี:</label><select onchange="window.filterLogUser(this.value)" class="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[10px] sm:text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-400"><option value="all" ${window.logFilterUser === 'all' ? 'selected' : ''}>ทุกบัญชี</option>${uniqueUsers.map(u => `<option value="${u}" ${window.logFilterUser === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>`;
                 let filteredLogs = (window.logFilterCategory === 'all') ? logs.slice() : logs.filter(l => (l.category || 'data') === window.logFilterCategory);
                 if (window.logFilterUser !== 'all') filteredLogs = filteredLogs.filter(l => l.name === window.logFilterUser);
@@ -1314,6 +1414,59 @@
         }
         window.filterLogCategory = function(cat) { window.logFilterCategory = cat; renderAdminTab(); };
         window.filterLogUser = function(name) { window.logFilterUser = name; renderAdminTab(); };
+        window.clearAllLogs = function() {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่ล้างประวัติ Log ได้", "error"); return; }
+            showConfirm("ล้างประวัติ Log ทั้งหมด", "ประวัติการแก้ไขทั้งหมดที่บันทึกไว้จะถูกลบอย่างถาวรและไม่สามารถกู้คืนได้ คุณแน่ใจหรือไม่?", () => {
+                logs = [];
+                logAction('ล้างประวัติ Log ทั้งหมด', '', 'account');
+                saveData('full'); showToast("ล้างประวัติ Log เรียบร้อยแล้ว"); renderAdminTab();
+            });
+        };
+
+        // ===== จัดการวันหยุด/วันสอบ =====
+        window.changeHolidayMonth = function(delta) {
+            if (window.holidayCalYear === undefined) { const now = new Date(); window.holidayCalYear = now.getFullYear(); window.holidayCalMonth = now.getMonth(); }
+            window.holidayCalMonth += delta;
+            if (window.holidayCalMonth > 11) { window.holidayCalMonth = 0; window.holidayCalYear++; }
+            if (window.holidayCalMonth < 0) { window.holidayCalMonth = 11; window.holidayCalYear--; }
+            renderAdminTab();
+        };
+        window.openHolidayModal = function(dateStr) {
+            const holiday = getHolidayForDate(dateStr);
+            document.getElementById('holidayModalTitle').innerText = holiday ? 'แก้ไขวันหยุด' : 'เพิ่มวันหยุด';
+            document.getElementById('holidayModalDate').value = dateStr;
+            document.getElementById('holidayModalLabel').value = holiday ? holiday.label : '';
+            document.getElementById('holidayModalDeleteBtn').classList.toggle('hidden', !holiday);
+            document.getElementById('holidayModal').classList.remove('hidden');
+            setTimeout(() => { document.getElementById('holidayModalBox').classList.remove('scale-95', 'opacity-0'); document.getElementById('holidayModalBox').classList.add('scale-100', 'opacity-100'); }, 10);
+        };
+        window.closeHolidayModal = function() {
+            document.getElementById('holidayModalBox').classList.remove('scale-100', 'opacity-100');
+            document.getElementById('holidayModalBox').classList.add('scale-95', 'opacity-0');
+            setTimeout(() => { document.getElementById('holidayModal').classList.add('hidden'); }, 300);
+        };
+        window.saveHolidayForm = function() {
+            const dateStr = document.getElementById('holidayModalDate').value;
+            const label = document.getElementById('holidayModalLabel').value.trim();
+            if (!label) { showToast("กรุณากรอกหมายเหตุ/เหตุผลของวันหยุด", "error"); return; }
+            if (!settings.holidays) settings.holidays = [];
+            const existing = settings.holidays.find(h => h.date === dateStr);
+            if (existing) { existing.label = label; } else { settings.holidays.push({ date: dateStr, label }); }
+            logAction('เพิ่ม/แก้ไขวันหยุด', `${dateStr.split('-').reverse().join('/')} - ${label}`, 'settings');
+            updateHolidayBar();
+            saveData('full'); showToast("บันทึกวันหยุดเรียบร้อย"); renderAdminTab(); closeHolidayModal();
+        };
+        window.deleteHoliday = function(dateStr) {
+            const holiday = getHolidayForDate(dateStr);
+            if (!holiday) return;
+            showConfirm("ลบวันหยุด", `ต้องการลบวันหยุดวันที่ ${dateStr.split('-').reverse().join('/')} (${holiday.label}) ใช่หรือไม่?`, () => {
+                settings.holidays = settings.holidays.filter(h => h.date !== dateStr);
+                logAction('ลบวันหยุด', `${dateStr.split('-').reverse().join('/')} - ${holiday.label}`, 'settings');
+                updateHolidayBar();
+                saveData('full'); showToast("ลบวันหยุดเรียบร้อย"); renderAdminTab();
+                const modal = document.getElementById('holidayModal'); if (modal && !modal.classList.contains('hidden')) closeHolidayModal();
+            });
+        };
 
         window.saveSiteTitleSettings = function() {
             if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้", "error"); return; }
