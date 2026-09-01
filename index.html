@@ -1261,17 +1261,21 @@
             }
             else if (currentAdminTab === 'logs') {
                 if (!window.logFilterCategory) window.logFilterCategory = 'all';
+                if (!window.logFilterUser) window.logFilterUser = 'all';
                 const catMeta = {
                     all: { label: 'ทั้งหมด', icon: 'fa-list', color: 'slate' },
                     settings: { label: 'ปรับตั้งค่าระบบ', icon: 'fa-cog', color: 'indigo' },
                     data: { label: 'ลงข้อมูลต่างๆ', icon: 'fa-database', color: 'emerald' },
                     account: { label: 'บัญชีผู้ใช้', icon: 'fa-user-shield', color: 'purple' },
                 };
+                const uniqueUsers = [...new Set(logs.map(l => l.name))].sort((a,b) => a.localeCompare(b));
                 let html = `<div class="flex justify-between items-center mb-4 flex-wrap gap-2"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-history text-indigo-500"></i> ประวัติการแก้ไข (Log)</h3></div>`;
-                html += `<div class="flex flex-wrap gap-1.5 mb-4">${Object.entries(catMeta).map(([key, m]) => `<button onclick="window.filterLogCategory('${key}')" class="px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-bold border transition-colors flex items-center gap-1.5 ${window.logFilterCategory === key ? `bg-${m.color}-600 text-white border-${m.color}-600` : `bg-white text-slate-600 border-slate-200 hover:bg-slate-50`}"><i class="fas ${m.icon}"></i> ${m.label}</button>`).join('')}</div>`;
-                const filteredLogs = (window.logFilterCategory === 'all') ? logs.slice() : logs.filter(l => (l.category || 'data') === window.logFilterCategory);
+                html += `<div class="flex flex-wrap gap-1.5 mb-3">${Object.entries(catMeta).map(([key, m]) => `<button onclick="window.filterLogCategory('${key}')" class="px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-bold border transition-colors flex items-center gap-1.5 ${window.logFilterCategory === key ? `bg-${m.color}-600 text-white border-${m.color}-600` : `bg-white text-slate-600 border-slate-200 hover:bg-slate-50`}"><i class="fas ${m.icon}"></i> ${m.label}</button>`).join('')}</div>`;
+                html += `<div class="mb-4 flex items-center gap-2 flex-wrap"><label class="text-[10px] sm:text-xs font-bold text-slate-500 flex items-center gap-1.5"><i class="fas fa-user"></i> กรองเฉพาะบัญชี:</label><select onchange="window.filterLogUser(this.value)" class="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[10px] sm:text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-400"><option value="all" ${window.logFilterUser === 'all' ? 'selected' : ''}>ทุกบัญชี</option>${uniqueUsers.map(u => `<option value="${u}" ${window.logFilterUser === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>`;
+                let filteredLogs = (window.logFilterCategory === 'all') ? logs.slice() : logs.filter(l => (l.category || 'data') === window.logFilterCategory);
+                if (window.logFilterUser !== 'all') filteredLogs = filteredLogs.filter(l => l.name === window.logFilterUser);
                 const sortedLogs = filteredLogs.slice().reverse().slice(0, 200);
-                html += `<div class="mb-3"><span class="text-[10px] sm:text-xs text-slate-400 font-bold">แสดงล่าสุด ${sortedLogs.length} จาก ${filteredLogs.length} รายการ${window.logFilterCategory !== 'all' ? ` (หมวด: ${catMeta[window.logFilterCategory].label})` : ''}</span></div>`;
+                html += `<div class="mb-3"><span class="text-[10px] sm:text-xs text-slate-400 font-bold">แสดงล่าสุด ${sortedLogs.length} จาก ${filteredLogs.length} รายการ${window.logFilterCategory !== 'all' ? ` (หมวด: ${catMeta[window.logFilterCategory].label})` : ''}${window.logFilterUser !== 'all' ? ` (บัญชี: ${window.logFilterUser})` : ''}</span></div>`;
                 if (sortedLogs.length === 0) {
                     html += `<div class="text-center text-slate-400 py-16 font-medium"><i class="fas fa-inbox text-3xl mb-3"></i><br>ยังไม่มีประวัติในหมวดนี้</div>`;
                 } else {
@@ -1288,6 +1292,7 @@
             }
         }
         window.filterLogCategory = function(cat) { window.logFilterCategory = cat; renderAdminTab(); };
+        window.filterLogUser = function(name) { window.logFilterUser = name; renderAdminTab(); };
 
         window.saveSiteTitleSettings = function() {
             if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้", "error"); return; }
