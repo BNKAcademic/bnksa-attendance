@@ -1175,6 +1175,9 @@
                 const oldestDate = attendanceData.reduce((min, a) => (a.date && (!min || a.date < min)) ? a.date : min, null);
                 html += `<div class="mb-8 bg-purple-50/60 p-4 sm:p-6 rounded-2xl border border-purple-200"><h3 class="text-base sm:text-lg font-extrabold text-purple-800 mb-2 flex items-center gap-2"><i class="fas fa-archive text-purple-500"></i> เก็บถาวรข้อมูลเช็คชื่อเก่า (เก็บด่วน/นอกรอบ)</h3><p class="text-[10px] sm:text-xs text-purple-600 font-medium mb-3">ระบบหลังบ้านมีนโยบายเก็บถาวรข้อมูลเช็คชื่อที่เก่ากว่า 2 ปีให้อัตโนมัติอยู่แล้วทุกครั้งที่บันทึกข้อมูล เครื่องมือนี้ไว้ใช้เผื่อต้องการเก็บถาวรข้อมูลเร็วกว่ากำหนด หรือกำหนดวันที่เอง เช่น ก่อนขึ้นเทอมใหม่${oldestDate ? ` (ข้อมูลเก่าสุดที่มีอยู่: ${oldestDate.split('-').reverse().join('/')})` : ''}</p><div class="flex flex-wrap items-end gap-2"><div class="flex-1 min-w-[160px]"><label class="block text-[10px] sm:text-xs font-bold text-purple-700 mb-1">เก็บถาวรข้อมูลที่บันทึกก่อนวันที่</label><input type="date" id="archiveCutoffDate" onchange="window.updateArchivePreview()" class="w-full bg-white border border-purple-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-purple-400 outline-none"></div><button onclick="window.archiveOldAttendance()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-file-download"></i> ส่งออก + เก็บถาวร</button></div><p id="archivePreviewText" class="text-[10px] sm:text-xs text-purple-500 font-bold mt-2">เลือกวันที่เพื่อดูจำนวนข้อมูลที่จะถูกเก็บถาวร</p></div>`;
 
+                // ===== 1.6 ดูข้อมูลเช็คชื่อที่เก็บถาวรแล้ว =====
+                html += `<div class="mb-8 bg-purple-50/60 p-4 sm:p-6 rounded-2xl border border-purple-200"><div class="flex flex-wrap items-center justify-between gap-2 mb-2"><h3 class="text-base sm:text-lg font-extrabold text-purple-800 flex items-center gap-2"><i class="fas fa-box-open text-purple-500"></i> ดูข้อมูลเช็คชื่อที่เก็บถาวรแล้ว</h3><button onclick="window.loadArchiveList()" class="bg-white border border-purple-300 hover:bg-purple-100 text-purple-700 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-sync-alt"></i> โหลดรายชื่อไฟล์</button></div><p class="text-[10px] sm:text-xs text-purple-600 font-medium mb-3">รายชื่อไฟล์ข้อมูลเช็คชื่อเก่าที่เคยถูกเก็บถาวรไว้ทั้งหมด (ทั้งแบบอัตโนมัติทุก 2 ปี และแบบเก็บด่วนด้านบน) กดปุ่ม "โหลดรายชื่อไฟล์" เพื่อเริ่มดู แล้วเลือกไฟล์ที่ต้องการดาวน์โหลดเป็น Excel เพื่อดูรายละเอียด</p><div id="archiveListContainer" class="space-y-0"><div class="text-center text-slate-400 py-4 text-xs sm:text-sm font-medium">กดปุ่ม "โหลดรายชื่อไฟล์" ด้านบนเพื่อเริ่มต้น</div></div></div>`;
+
                 // ===== 2. สถานะการลงข้อมูลนักเรียนรายห้อง =====
                 const roomList = getRoomList();
                 const roomsWithNone = roomList.filter(r => students.filter(s => s.roomId === r).length === 0);
@@ -1492,31 +1495,74 @@
             if (matching.length === 0) { textEl.innerText = `ไม่พบข้อมูลก่อนวันที่ ${cutoff.split('-').reverse().join('/')}`; return; }
             textEl.innerHTML = `พบข้อมูล <b>${matching.length}</b> รายการเช็คชื่อ (${matching.length} คาบ) ก่อนวันที่ ${cutoff.split('-').reverse().join('/')} ที่จะถูกเก็บถาวร`;
         };
+        // สร้างแถวข้อมูล Excel จากอาร์เรย์ของ attendance record (ใช้ร่วมกันทั้งตอนเก็บถาวรและตอนดูข้อมูลเก่า)
+        function buildAttendanceExcelRows(records) {
+            const rows = [["วันที่", "คาบ", "รหัสวิชา", "ชื่อวิชา", "ห้อง", "เลขที่", "ชื่อ-นามสกุล", "สถานะ"]];
+            records.forEach(a => {
+                const sub = subjects.find(s => s.id === a.subjectId);
+                const roomName = sub ? formatRoomName(sub.roomId) : '-';
+                const dateDisp = (a.date || '').split('-').reverse().join('/');
+                Object.keys(a.records || {}).forEach(stId => {
+                    const st = students.find(s => s.id === stId);
+                    rows.push([dateDisp, a.period, sub ? (sub.code || '') : '', sub ? sub.name : '(วิชาถูกลบแล้ว)', roomName, st ? st.number : '-', st ? st.name : '(ไม่พบข้อมูลนักเรียน)', a.records[stId]]);
+                });
+            });
+            return rows;
+        }
+        function downloadAttendanceExcel(records, filename) {
+            const rows = buildAttendanceExcelRows(records);
+            const ws = XLSX.utils.aoa_to_sheet(rows); ws['!cols'] = [{wch:10},{wch:6},{wch:10},{wch:22},{wch:10},{wch:8},{wch:28},{wch:14}];
+            const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Archive");
+            XLSX.writeFile(wb, filename);
+        }
+
         window.archiveOldAttendance = function() {
             const cutoff = document.getElementById('archiveCutoffDate').value;
             if (!cutoff) { showToast("กรุณาเลือกวันที่ก่อน", "error"); return; }
             const toArchive = attendanceData.filter(a => a.date && a.date < cutoff);
             if (toArchive.length === 0) { showToast("ไม่พบข้อมูลก่อนวันที่ที่เลือก", "error"); return; }
             showConfirm("ยืนยันการเก็บถาวร", `จะดาวน์โหลดไฟล์ Excel เก็บข้อมูลเช็คชื่อ ${toArchive.length} รายการ (ก่อนวันที่ ${cutoff.split('-').reverse().join('/')}) แล้วลบออกจากระบบที่ใช้งานอยู่ทันที คุณแน่ใจหรือไม่?`, () => {
-                const rows = [["วันที่", "คาบ", "รหัสวิชา", "ชื่อวิชา", "ห้อง", "เลขที่", "ชื่อ-นามสกุล", "สถานะ"]];
-                toArchive.forEach(a => {
-                    const sub = subjects.find(s => s.id === a.subjectId);
-                    const roomName = sub ? formatRoomName(sub.roomId) : '-';
-                    const dateDisp = a.date.split('-').reverse().join('/');
-                    Object.keys(a.records || {}).forEach(stId => {
-                        const st = students.find(s => s.id === stId);
-                        rows.push([dateDisp, a.period, sub ? (sub.code || '') : '', sub ? sub.name : '(วิชาถูกลบแล้ว)', roomName, st ? st.number : '-', st ? st.name : '(ไม่พบข้อมูลนักเรียน)', a.records[stId]]);
-                    });
-                });
-                const ws = XLSX.utils.aoa_to_sheet(rows); ws['!cols'] = [{wch:10},{wch:6},{wch:10},{wch:22},{wch:10},{wch:8},{wch:28},{wch:14}];
-                const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Archive");
-                XLSX.writeFile(wb, `เก็บถาวรข้อมูลเช็คชื่อ_ก่อน_${cutoff}.xlsx`);
+                downloadAttendanceExcel(toArchive, `เก็บถาวรข้อมูลเช็คชื่อ_ก่อน_${cutoff}.xlsx`);
                 attendanceData = attendanceData.filter(a => !(a.date && a.date < cutoff));
                 logAction('เก็บถาวรข้อมูลเช็คชื่อเก่า', `เก็บถาวร ${toArchive.length} รายการ (ก่อนวันที่ ${cutoff})`);
                 saveData('full');
                 showToast(`เก็บถาวร ${toArchive.length} รายการสำเร็จ ดาวน์โหลดไฟล์แล้ว`, "success");
                 renderAdminTab();
             });
+        };
+
+        // ===== ดูข้อมูลเช็คชื่อที่เก็บถาวรแล้ว (ดึงรายชื่อไฟล์ archive จาก Google Drive ผ่าน backend) =====
+        window.loadArchiveList = async function() {
+            const listEl = document.getElementById('archiveListContainer');
+            if (!listEl) return;
+            listEl.innerHTML = `<div class="text-center text-purple-400 py-6 text-xs sm:text-sm font-bold"><i class="fas fa-spinner fa-spin"></i> กำลังโหลดรายชื่อไฟล์เก็บถาวร...</div>`;
+            try {
+                const res = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=list_archives`);
+                const data = await res.json();
+                if (data.status !== 'success' || !data.archives || data.archives.length === 0) {
+                    listEl.innerHTML = `<div class="text-center text-slate-400 py-6 text-xs sm:text-sm font-medium">ยังไม่มีไฟล์เก็บถาวรในระบบ</div>`;
+                    return;
+                }
+                const fmtSize = (b) => b < 1024 ? `${b} B` : (b < 1024*1024 ? `${(b/1024).toFixed(1)} KB` : `${(b/1024/1024).toFixed(2)} MB`);
+                listEl.innerHTML = data.archives.map(f => {
+                    const d = new Date(f.dateCreated);
+                    const dateStr = isNaN(d) ? '' : d.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                    return `<div class="flex items-center justify-between gap-2 bg-white border border-purple-200 rounded-lg px-3 py-2.5"><div class="min-w-0"><div class="font-bold text-slate-700 text-xs sm:text-sm truncate">${f.name}</div><div class="text-[10px] sm:text-xs text-slate-400 font-medium">สร้างเมื่อ ${dateStr} · ${fmtSize(f.sizeBytes)}</div></div><button onclick="window.downloadArchiveFile('${f.name}')" class="shrink-0 bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-file-excel"></i> Excel</button></div>`;
+                }).join('<div class="h-1.5"></div>');
+            } catch (err) {
+                listEl.innerHTML = `<div class="text-center text-rose-400 py-6 text-xs sm:text-sm font-bold"><i class="fas fa-exclamation-circle"></i> โหลดรายชื่อไฟล์ไม่สำเร็จ ลองใหม่อีกครั้ง</div>`;
+            }
+        };
+        window.downloadArchiveFile = async function(fileName) {
+            showToast("กำลังดึงข้อมูลเก็บถาวร กรุณารอสักครู่...", "success");
+            try {
+                const res = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=get_archive&file=${encodeURIComponent(fileName)}`);
+                const records = await res.json();
+                if (!Array.isArray(records)) { showToast("รูปแบบข้อมูลไม่ถูกต้อง", "error"); return; }
+                if (records.length === 0) { showToast("ไฟล์นี้ไม่มีข้อมูล", "error"); return; }
+                downloadAttendanceExcel(records, `${fileName.replace('.json', '')}.xlsx`);
+                showToast("ดาวน์โหลดไฟล์ Excel สำเร็จ", "success");
+            } catch (err) { showToast("ดึงข้อมูลไม่สำเร็จ ลองใหม่อีกครั้ง", "error"); }
         };
 
         window.renderScheduleInputs = function(existingSchedules = null) {
