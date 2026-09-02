@@ -898,6 +898,8 @@
 
             html += `<div id="schoolInfographicSection">`;
 
+            html += `<div class="bg-white border border-slate-200 rounded-2xl p-4 sm:p-6 mb-4 sm:mb-6 text-center">${pdfLogoHtml()}${pdfDocMeta()}<h2 class="text-lg sm:text-2xl font-extrabold text-slate-800">ภาพรวมทั้งโรงเรียน ประจำเดือน${displayMonthYear}</h2></div>`;
+
             html += `<div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-4 mb-4 sm:mb-8">
                 <div class="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 text-center shadow-sm"><div class="w-9 h-9 sm:w-11 sm:h-11 bg-slate-100 text-slate-700 rounded-full flex items-center justify-center mx-auto mb-2 text-sm sm:text-base"><i class="fas fa-users"></i></div><div class="text-2xl sm:text-4xl font-black text-slate-800">${students.length}</div><div class="text-[10px] sm:text-xs font-bold text-slate-500 mt-1">นักเรียนทั้งหมด</div></div>
                 <div class="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 text-center shadow-sm"><div class="w-9 h-9 sm:w-11 sm:h-11 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-2 text-sm sm:text-base"><i class="fas fa-user-check"></i></div><div class="text-2xl sm:text-4xl font-black text-emerald-600">${activeStudents.length}</div><div class="text-[10px] sm:text-xs font-bold text-slate-500 mt-1">กำลังเรียนอยู่</div></div>
