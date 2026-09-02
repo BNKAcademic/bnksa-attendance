@@ -137,25 +137,28 @@
         function getTermStatus(term, year) {
             const v = settings.termLocks && settings.termLocks[termKeyOf(term, year)];
             if (v === true) return 'locked'; // ข้อมูลเก่า (boolean) แปลงเป็นสถานะล็อค
-            if (v === 'open' || v === 'not_opened' || v === 'locked') return v;
+            if (v === 'open' || v === 'not_opened' || v === 'locked' || v === 'maintenance') return v;
             return 'open';
         }
         function publicTermStatus() { return getTermStatus(settings.term, settings.year); } // สถานะของเทอมที่บังคับแสดงผลหน้าแรกสำหรับผู้ใช้ทั่วไป
         function adminTermStatus() { return getTermStatus(adminTerm(), adminYear()); } // สถานะของเทอมที่แอดมินกำลังจัดการอยู่ในหน้าแอดมิน
         function currentTermStatus() { return publicTermStatus(); } // ใช้ที่หน้าแรกเท่านั้น (คงชื่อเดิมไว้เพื่อความเข้ากันได้)
         function currentTermLocked() { return publicTermStatus() === 'locked'; }
-        // ล็อคเฉพาะสถานะ "locked" (เก็บถาวร) เท่านั้นที่ห้ามแก้ไขข้อมูลวิชา ส่วน "not_opened" แอดมินยังจัดเตรียมวิชาล่วงหน้าได้ - อ้างอิงจากเทอมที่แอดมินกำลังจัดการอยู่
+        // ล็อคเฉพาะสถานะ "locked" (เก็บถาวร) เท่านั้นที่ห้ามแก้ไขข้อมูลวิชา ส่วน "not_opened"/"maintenance" แอดมินยังแก้ไขข้อมูลได้ตามปกติ (ล็อคแค่การเช็คชื่อ) - อ้างอิงจากเทอมที่แอดมินกำลังจัดการอยู่
         function guardTermLock(actionLabel) { if (adminTermStatus() === 'locked') { showToast(`เทอม ${adminTerm()}/${adminYear()} ถูกล็อคข้อมูลไว้ (เก็บถาวร) ไม่สามารถ${actionLabel || 'แก้ไขข้อมูล'}ได้`, "error"); return true; } return false; }
         // การเช็คชื่ออนุญาตเฉพาะเมื่อเทอมนั้น "เปิดใช้งาน" (open) เท่านั้น
         function guardAttendanceLock(term, year) {
             const status = getTermStatus(term, year);
             if (status === 'open') return false;
-            const msg = status === 'not_opened' ? `เทอม ${term}/${year} ยังไม่เปิดใช้งาน ไม่สามารถเช็คชื่อได้` : `เทอม ${term}/${year} ถูกล็อคข้อมูลไว้แล้ว ไม่สามารถเช็คชื่อได้ (ดูข้อมูลย้อนหลังได้)`;
+            const msg = status === 'not_opened' ? `เทอม ${term}/${year} ยังไม่เปิดใช้งาน ไม่สามารถเช็คชื่อได้`
+                : status === 'maintenance' ? `เทอม ${term}/${year} ปิดปรับปรุงชั่วคราว ไม่สามารถเช็คชื่อได้ในขณะนี้ (ข้อมูลอื่นยังดูได้ตามปกติ)`
+                : `เทอม ${term}/${year} ถูกล็อคข้อมูลไว้แล้ว ไม่สามารถเช็คชื่อได้ (ดูข้อมูลย้อนหลังได้)`;
             showToast(msg, "error"); return true;
         }
         function termStatusCardConfig(status) {
             if (status === 'open') return { wrap: 'bg-emerald-50 border-emerald-300', dot: 'bg-emerald-500 animate-pulse', icon: 'fa-wifi', iconCls: 'text-emerald-600', text: 'ระบบเปิดให้ใช้งานสำหรับเทอมนี้', textCls: 'text-emerald-800' };
             if (status === 'not_opened') return { wrap: 'bg-slate-100 border-slate-300', dot: 'bg-slate-400', icon: 'fa-power-off', iconCls: 'text-slate-500', text: 'ระบบยังไม่เปิดให้ใช้งานสำหรับเทอมนี้', textCls: 'text-slate-600' };
+            if (status === 'maintenance') return { wrap: 'bg-amber-50 border-amber-300', dot: 'bg-amber-500 animate-pulse', icon: 'fa-tools', iconCls: 'text-amber-600', text: 'ปิดปรับปรุงชั่วคราว - ดูข้อมูลได้ตามปกติ แต่เช็คชื่อไม่ได้ในขณะนี้', textCls: 'text-amber-800' };
             return { wrap: 'bg-blue-50 border-blue-300', dot: 'bg-blue-400', icon: 'fa-box-archive', iconCls: 'text-blue-600', text: 'ระบบปิดให้ใช้งานสำหรับเทอมนี้แล้ว แต่สามารถดูข้อมูลได้', textCls: 'text-blue-800' };
         }
         // วิชาที่ยังไม่มี term/year (ข้อมูลเก่า) ให้ถือว่าอยู่ในเทอม/ปีที่ระบุเสมอ (ป้องกันข้อมูลหาย)
@@ -389,6 +392,7 @@
                                 }
                                 if (data.settings.termLocks && JSON.stringify(data.settings.termLocks) !== JSON.stringify(settings.termLocks || {})) {
                                     settings.termLocks = data.settings.termLocks;
+                                    applyServerStatusBadge();
                                 }
                                 if (data.settings.termCount !== undefined && data.settings.termCount !== settings.termCount) {
                                     settings.termCount = data.settings.termCount;
@@ -400,6 +404,7 @@
                                     settings.term = data.settings.term; settings.year = data.settings.year;
                                     document.getElementById('navSubtitle').innerText = `ปีการศึกษา ${settings.year}`;
                                     window.__justSwitchedTerm = true; // แสดงเอฟเฟคเตือนตอนเทอมที่แสดงผลถูกเปลี่ยนจากแอดมิน
+                                    applyServerStatusBadge();
                                     const st = history.state;
                                     if (st && (st.view === 'dashboard' || st.view === 'classroom' || st.view === 'teacher_dash')) { try { safeRenderState(st); } catch (e) {} }
                                 }
@@ -688,7 +693,9 @@
             const dot = document.getElementById('serverStatusDot');
             const text = document.getElementById('serverStatusText');
             if (!badge || !dot || !text) return;
-            const online = settings.serverOnline !== false;
+            const manualOnline = settings.serverOnline !== false;
+            const termMaintenance = publicTermStatus() === 'maintenance';
+            const online = manualOnline && !termMaintenance;
             badge.classList.remove('hidden'); badge.classList.add('inline-flex');
             if (online) {
                 badge.className = 'inline-flex items-center gap-1 text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full border bg-emerald-50 border-emerald-200 text-emerald-700';
@@ -697,7 +704,7 @@
             } else {
                 badge.className = 'inline-flex items-center gap-1 text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full border bg-rose-50 border-rose-200 text-rose-600';
                 dot.className = 'w-1.5 h-1.5 rounded-full bg-rose-500';
-                text.innerText = 'ปิดปรับปรุง';
+                text.innerText = (!manualOnline) ? 'ปิดปรับปรุง' : 'ปิดปรับปรุงชั่วคราว (เทอมนี้)';
             }
         }
         window.toggleServerOnline = function() {
@@ -1336,9 +1343,10 @@
             else if (currentAdminTab === 'term_settings') {
                 let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-sliders-h text-indigo-500"></i> ข้อมูลภาคเรียน</h3><div class="mb-4 bg-indigo-50/70 p-3 sm:p-4 rounded-xl border border-indigo-200"><label class="block text-[10px] sm:text-xs font-bold text-indigo-700 mb-1.5"><i class="fas fa-broadcast-tower"></i> เทอมที่บังคับแสดงผลหน้าแรก (สำหรับผู้ใช้ทั่วไปที่ยังไม่ได้ล็อกอิน)</label><p class="text-[9px] sm:text-[11px] text-indigo-500 font-medium mb-3">ผู้ใช้ทั่วไปจะถูกบังคับให้เห็นเฉพาะเทอมนี้เสมอเมื่อเข้าเว็บ และไม่สามารถสลับเองได้ - เลือกแล้วต้องกด "บันทึก" ด้านล่างจึงจะมีผลจริง</p><div class="flex items-center gap-1.5 flex-wrap mb-3">${(() => { const pendingTerm = (window.__pendingPublicTerm !== undefined && window.__pendingPublicTerm !== null) ? String(window.__pendingPublicTerm) : String(settings.term); return Array.from({length: settings.termCount || 2}, (_, i) => i + 1).map(tn => { const isSel = pendingTerm === String(tn); const isSaved = String(settings.term) === String(tn); return `<button onclick="window.selectPendingPublicTerm('${tn}')" class="${isSel ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-indigo-200 text-indigo-600 hover:bg-indigo-100'} px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all flex items-center gap-1.5">${isSel ? '<i class="fas fa-check-circle"></i>' : ''} เทอม ${tn}${isSaved ? ' <span class="text-[8px] sm:text-[9px] font-normal opacity-75">(ปัจจุบัน)</span>' : ''}</button>`; }).join(''); })()}</div><div class="flex justify-end"><button onclick="window.savePublicTermSetting()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกเทอมที่แสดงผลหน้าแรก</button></div></div><div class="mb-3 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100"><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-2">จำนวนเทอมของระบบ (ต่อปีการศึกษา)</label><div class="flex items-center gap-1.5 flex-wrap mb-3">${[1,2,3].map(n => { const pendingN = (window.__pendingTermCount !== undefined && window.__pendingTermCount !== null) ? Number(window.__pendingTermCount) : Number(settings.termCount || 2); const isSel = pendingN === n; const isSaved = Number(settings.termCount || 2) === n; return `<button onclick="window.selectPendingTermCount(${n})" class="${isSel ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'} px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all flex items-center gap-1.5">${isSel ? '<i class="fas fa-check-circle"></i>' : ''} ${n} เทอม${isSaved ? ' <span class="text-[8px] sm:text-[9px] font-normal opacity-75">(ปัจจุบัน)</span>' : ''}</button>`; }).join('')}</div><div class="flex justify-end"><button onclick="window.saveTermCountSetting()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกจำนวนเทอม</button></div></div><div class="mb-3 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100"><div class="flex items-center justify-between mb-2"><label class="block text-[10px] sm:text-xs font-bold text-slate-700">ปีการศึกษา</label><button onclick="window.openAddYearPrompt()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-plus"></i> เพิ่มปี</button></div><p class="text-[9px] sm:text-[11px] text-slate-400 font-medium mb-3">เลือกปีที่ต้องการแสดงผลแล้วกด "บันทึก" ด้านล่างจึงจะมีผลจริง ปีที่ถูกจัดเก็บแล้ว (เก็บถาวร) จะถูกล็อคไว้ ต้องให้ Super Admin ปลดล็อคก่อนจึงจะเลือกใช้งานได้อีกครั้ง</p><div class="space-y-2 mb-3">${sortedAcademicYears().map(y => { const st = y.status === 'archived' ? 'archived' : 'active'; const pendingYear = (window.__pendingYear !== undefined && window.__pendingYear !== null) ? String(window.__pendingYear) : String(settings.year); const isSel = pendingYear === String(y.year); const isSaved = String(settings.year) === String(y.year); const isSuperAdminYr = currentUser && currentUser.role === 'super_admin'; return `<div class="flex items-center justify-between gap-2 bg-white border ${st === 'archived' ? 'border-blue-200' : 'border-slate-200'} rounded-lg px-3 py-2"><button onclick="window.selectPendingYear('${y.year}')" ${st === 'archived' ? 'disabled' : ''} class="flex-1 text-left flex items-center gap-2 ${st === 'archived' ? 'cursor-not-allowed opacity-70' : ''}">${isSel ? '<i class="fas fa-check-circle text-indigo-600"></i>' : (st === 'archived' ? '<i class="fas fa-lock text-blue-400"></i>' : '<i class="far fa-circle text-slate-300"></i>')}<span class="font-bold text-sm ${isSel ? 'text-indigo-700' : 'text-slate-600'}">ปีการศึกษา ${y.year}</span>${isSaved ? '<span class="text-[8px] sm:text-[9px] font-normal text-slate-400">(กำลังแสดงผลอยู่)</span>' : ''}${st === 'archived' ? '<span class="bg-blue-50 text-blue-600 border border-blue-200 text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded">ถูกจัดเก็บแล้ว</span>' : '<span class="bg-emerald-50 text-emerald-600 border border-emerald-200 text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded">พร้อมใช้งาน</span>'}</button><div class="shrink-0 flex items-center gap-1.5">${st === 'archived' ? (isSuperAdminYr ? `<button onclick="window.unlockAcademicYear('${y.year}')" title="ปลดล็อคปีนี้ (เฉพาะ Super Admin)" class="bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-colors"><i class="fas fa-lock-open"></i> ปลดล็อค</button>` : '') : `<button onclick="window.archiveAcademicYear('${y.year}')" title="จัดเก็บปีนี้ (เก็บถาวร)" class="bg-white hover:bg-rose-50 text-rose-500 border border-rose-200 px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-colors"><i class="fas fa-archive"></i> จัดเก็บ</button>`}<button onclick="window.deleteAcademicYear('${y.year}')" title="ลบปีการศึกษานี้ (เผื่อสร้างผิดพลาด)" class="bg-white hover:bg-rose-50 text-rose-400 border border-slate-200 hover:border-rose-200 px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-colors"><i class="fas fa-trash-alt"></i></button></div></div>`; }).join('')}</div><div class="flex justify-end"><button onclick="window.saveYearSetting()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5 shrink-0"><i class="fas fa-save"></i> บันทึกปีการศึกษาที่แสดงผล</button></div></div><h3 class="text-base sm:text-lg font-extrabold text-slate-800 mb-1.5 flex items-center gap-2"><i class="fas fa-toggle-on text-indigo-500"></i> สถานะการใช้งานแต่ละเทอม</h3><p class="text-[9px] sm:text-[11px] text-slate-400 font-medium mb-3">เลือกสถานะแล้วต้องกด "บันทึก" ของเทอมนั้นๆ จึงจะมีผลจริง</p>${Array.from({length: settings.termCount || 2}, (_, i) => i + 1).map(tn => { const pendingMap = window.__pendingTermStatusByTerm || {}; const pendingStatus = pendingMap[tn] || getTermStatus(tn, settings.year); const isPublicNow = Number(settings.term) === tn; const opts = [
     { key: 'open', label: 'เปิดใช้งาน', desc: 'ลงข้อมูล/เช็คชื่อได้ปกติ', icon: 'fa-wifi', activeCls: 'bg-emerald-600 text-white border-emerald-600', idleCls: 'bg-white border-slate-200 text-emerald-600 hover:bg-emerald-50' },
+    { key: 'maintenance', label: 'ปิดปรับปรุงชั่วคราว', desc: 'ดูข้อมูลได้ปกติ แต่เช็คชื่อไม่ได้ชั่วคราว', icon: 'fa-tools', activeCls: 'bg-amber-500 text-white border-amber-500', idleCls: 'bg-white border-slate-200 text-amber-600 hover:bg-amber-50' },
     { key: 'not_opened', label: 'ยังไม่เปิดใช้งาน', desc: 'ผู้ใช้ทั่วไปสลับมาเทอมนี้ไม่ได้', icon: 'fa-power-off', activeCls: 'bg-slate-500 text-white border-slate-500', idleCls: 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100' },
     { key: 'locked', label: 'ล็อคข้อมูล', desc: 'ปิดใช้งานแล้ว แต่ดูข้อมูลย้อนหลังได้', icon: 'fa-box-archive', activeCls: 'bg-blue-600 text-white border-blue-600', idleCls: 'bg-white border-slate-200 text-blue-600 hover:bg-blue-50' }
-]; return `<div class="mb-4 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100"><h4 class="text-sm sm:text-base font-extrabold text-slate-700 mb-2 flex items-center gap-2">เทอม ${tn}/${settings.year}${isPublicNow ? ' <span class="bg-indigo-100 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black"><i class="fas fa-broadcast-tower"></i> กำลังแสดงผลหน้าแรก</span>' : ''}</h4><div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">${opts.map(opt => `<button onclick="window.selectPendingTermStatusFor(${tn}, '${opt.key}')" class="${pendingStatus === opt.key ? opt.activeCls : opt.idleCls} border-2 rounded-xl px-3 py-2.5 sm:py-3 font-bold text-xs sm:text-sm transition-all flex flex-col items-center gap-1 text-center"><i class="fas ${opt.icon} text-base sm:text-lg"></i><span>${opt.label}</span><span class="text-[9px] sm:text-[10px] font-medium opacity-80">${opt.desc}</span></button>`).join('')}</div><div class="flex justify-end"><button onclick="window.saveTermStatusSettingFor(${tn})" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกสถานะเทอม ${tn}</button></div></div>`; }).join('')}<div class="space-y-1.5 text-[10px] sm:text-[11px] text-slate-500 font-medium bg-white/70 rounded-lg p-3 border border-slate-200 mb-3"><p><span class="font-bold text-emerald-600"><i class="fas fa-wifi"></i> เปิดใช้งาน:</span> ผู้ใช้ทั่วไปสลับมาดู/ใช้งานเทอมนี้ได้ตามปกติที่หน้าแรก ครูเช็คชื่อได้ และแอดมินลงข้อมูลวิชาได้ตามปกติ</p><p><span class="font-bold text-slate-600"><i class="fas fa-power-off"></i> ยังไม่เปิดใช้งาน:</span> ปุ่มเลือกเทอมนี้ที่หน้าแรกจะถูกล็อคไว้สำหรับผู้ใช้ทั่วไป มีเพียงแอดมินเท่านั้นที่เข้าถึงและจัดเตรียมรายวิชาล่วงหน้าได้ แต่ครูยังเช็คชื่อไม่ได้จนกว่าจะเปลี่ยนเป็น "เปิดใช้งาน"</p><p><span class="font-bold text-blue-600"><i class="fas fa-box-archive"></i> ล็อคข้อมูล:</span> ใช้เมื่อจบเทอมแล้ว ทุกคนยังดูรายงาน/ประวัติย้อนหลังของเทอมนี้ได้ตามปกติ แต่ไม่สามารถเพิ่ม/แก้ไขวิชาหรือเช็คชื่อเพิ่มเติมได้อีก</p></div>`;
+]; return `<div class="mb-4 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100"><h4 class="text-sm sm:text-base font-extrabold text-slate-700 mb-2 flex items-center gap-2">เทอม ${tn}/${settings.year}${isPublicNow ? ' <span class="bg-indigo-100 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black"><i class="fas fa-broadcast-tower"></i> กำลังแสดงผลหน้าแรก</span>' : ''}</h4><div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">${opts.map(opt => `<button onclick="window.selectPendingTermStatusFor(${tn}, '${opt.key}')" class="${pendingStatus === opt.key ? opt.activeCls : opt.idleCls} border-2 rounded-xl px-3 py-2.5 sm:py-3 font-bold text-xs sm:text-sm transition-all flex flex-col items-center gap-1 text-center"><i class="fas ${opt.icon} text-base sm:text-lg"></i><span>${opt.label}</span><span class="text-[9px] sm:text-[10px] font-medium opacity-80">${opt.desc}</span></button>`).join('')}</div><div class="flex justify-end"><button onclick="window.saveTermStatusSettingFor(${tn})" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกสถานะเทอม ${tn}</button></div></div>`; }).join('')}<div class="space-y-1.5 text-[10px] sm:text-[11px] text-slate-500 font-medium bg-white/70 rounded-lg p-3 border border-slate-200 mb-3"><p><span class="font-bold text-emerald-600"><i class="fas fa-wifi"></i> เปิดใช้งาน:</span> ผู้ใช้ทั่วไปสลับมาดู/ใช้งานเทอมนี้ได้ตามปกติที่หน้าแรก ครูเช็คชื่อได้ และแอดมินลงข้อมูลวิชาได้ตามปกติ</p><p><span class="font-bold text-amber-600"><i class="fas fa-tools"></i> ปิดปรับปรุงชั่วคราว:</span> ทุกคนยังเข้าดูข้อมูล/รายงานของเทอมนี้ได้ตามปกติ แอดมินยังแก้ไขวิชา/นักเรียนได้ตามปกติ แต่ครูจะเช็คชื่อไม่ได้ชั่วคราวจนกว่าจะเปลี่ยนกลับเป็น "เปิดใช้งาน" เหมาะสำหรับตอนต้องหยุดรับข้อมูลชั่วคราว เช่น กำลังตรวจสอบ/แก้ไขข้อมูลครั้งใหญ่</p><p><span class="font-bold text-slate-600"><i class="fas fa-power-off"></i> ยังไม่เปิดใช้งาน:</span> ปุ่มเลือกเทอมนี้ที่หน้าแรกจะถูกล็อคไว้สำหรับผู้ใช้ทั่วไป มีเพียงแอดมินเท่านั้นที่เข้าถึงและจัดเตรียมรายวิชาล่วงหน้าได้ แต่ครูยังเช็คชื่อไม่ได้จนกว่าจะเปลี่ยนเป็น "เปิดใช้งาน"</p><p><span class="font-bold text-blue-600"><i class="fas fa-box-archive"></i> ล็อคข้อมูล:</span> ใช้เมื่อจบเทอมแล้ว ทุกคนยังดูรายงาน/ประวัติย้อนหลังของเทอมนี้ได้ตามปกติ แต่ไม่สามารถเพิ่ม/แก้ไขวิชาหรือเช็คชื่อเพิ่มเติมได้อีก</p></div>`;
                 content.innerHTML = html;
             }
             else if (currentAdminTab === 'advisors') {
@@ -1548,6 +1556,7 @@ content.innerHTML = html;
                 if(!window.adminSelectedRoom && roomList.length > 0) window.adminSelectedRoom = roomList[0];
                 let html = `<div class="mb-4 bg-purple-50/60 p-3 sm:p-4 rounded-xl border border-purple-200"><h4 class="font-extrabold text-purple-800 text-sm sm:text-base mb-1.5 flex items-center gap-2"><i class="fas fa-graduation-cap"></i> เลื่อนชั้นนักเรียนไปปีการศึกษาใหม่</h4><p class="text-[9px] sm:text-[11px] text-purple-600 font-medium mb-3">คัดลอกรายชื่อนักเรียนที่ยังเรียนอยู่จากปีการศึกษาต้นทาง ไปเป็นรายชื่อของชั้นถัดไปในปีการศึกษาปลายทางให้อัตโนมัติ (ม.3 และ ม.6 ถือว่าจบการศึกษาแล้ว จะไม่ถูกเลื่อนชั้นต่อ / นักเรียนที่ออก-ย้ายแล้วจะไม่ถูกเลื่อนชั้นไปด้วย) หลังเลื่อนชั้นแล้ว ต้องเพิ่มรายชื่อนักเรียน ม.1 และ ม.4 ใหม่เองด้วย เนื่องจากเป็นชั้นรับเข้าใหม่ ไม่มีรุ่นพี่เลื่อนชั้นขึ้นมา ไม่กระทบรายชื่อเดิมของปีต้นทาง สามารถแก้ไขรายชื่อในปีปลายทางเพิ่มเติมได้ตามปกติหลังเลื่อนชั้นแล้ว</p><div class="flex flex-wrap items-end gap-2"><div class="min-w-[150px]"><label class="block text-[10px] sm:text-xs font-bold text-purple-700 mb-1">จากปีการศึกษา</label><select id="promoteFromYear" class="w-full bg-white border border-purple-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-purple-400 outline-none">${sortedAcademicYears().map(y => `<option value="${y.year}" ${String(y.year) === String(settings.year) ? 'selected' : ''}>ปีการศึกษา ${y.year}</option>`).join('')}</select></div><div class="min-w-[150px]"><label class="block text-[10px] sm:text-xs font-bold text-purple-700 mb-1">ไปยังปีการศึกษา</label><select id="promoteToYear" class="w-full bg-white border border-purple-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-purple-400 outline-none">${sortedAcademicYears().map(y => `<option value="${y.year}" ${String(y.year) !== String(settings.year) ? 'selected' : ''} ${y.status === 'archived' ? 'disabled' : ''}>ปีการศึกษา ${y.year}${y.status === 'archived' ? ' (ถูกจัดเก็บแล้ว)' : ''}</option>`).join('')}</select></div><button onclick="window.promoteStudents()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-arrow-up"></i> เลื่อนชั้น</button></div>${settings.academicYears && settings.academicYears.length < 2 ? `<p class="text-[9px] sm:text-[11px] text-purple-500 font-bold mt-2"><i class="fas fa-info-circle"></i> ต้องมีปีการศึกษาอย่างน้อย 2 ปีในระบบก่อนจึงจะเลื่อนชั้นได้ (ไปเพิ่มปีที่แท็บ "ตั้งค่าภาคเรียน")</p>` : ''}</div>`;
                 html += `<div class="flex flex-col lg:flex-row justify-between lg:items-center mb-3 gap-2"><select id="adminRoomSelect" onchange="window.adminSelectedRoom = this.value; window.renderAdminTab();" class="bg-white border-2 border-slate-200 rounded-lg px-3 py-1.5 font-bold text-sm w-full lg:w-auto outline-none focus:border-indigo-400 shadow-sm">${roomList.map(r => `<option value="${r}" ${window.adminSelectedRoom === r ? 'selected' : ''}>ห้อง ${formatRoomName(r)}</option>`).join('')}</select><div class="flex flex-wrap gap-1.5"><button onclick="window.openStudentModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-plus"></i> เพิ่ม 1 คน</button><button onclick="window.downloadStudentTemplate()" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-download"></i> โหลดฟอร์ม</button><label class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm cursor-pointer flex-1 sm:flex-none text-center shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-import"></i> นำเข้า Excel<input type="file" accept=".xlsx, .xls" class="hidden" onchange="window.handleImportStudents(event)"></label><button onclick="window.exportAllStudentsExcel('${window.adminSelectedRoom}')" class="bg-teal-600 hover:bg-teal-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-download"></i> โหลดสรุป</button></div></div>`;
+                html += `<div class="mb-4 bg-indigo-50/60 p-3 sm:p-4 rounded-xl border border-indigo-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2"><div><h4 class="font-extrabold text-indigo-800 text-xs sm:text-sm flex items-center gap-1.5"><i class="fas fa-layer-group"></i> นำเข้ารายชื่อนักเรียนทุกห้องพร้อมกัน</h4><p class="text-[9px] sm:text-[11px] text-indigo-500 font-medium mt-0.5">ไฟล์เดียวใส่ได้หลายห้อง มีคอลัมน์ระบุห้องเรียนในตัวเอง เหมาะสำหรับตอนเริ่มต้นภาคเรียนที่ต้องลงรายชื่อทีเดียวหลายห้อง</p></div><div class="flex flex-wrap gap-1.5"><button onclick="window.downloadStudentTemplateAllRooms()" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-download"></i> โหลดฟอร์ม (ทุกห้อง)</button><label class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm cursor-pointer text-center shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-import"></i> นำเข้าทุกห้อง<input type="file" accept=".xlsx, .xls" class="hidden" onchange="window.handleImportStudentsAllRooms(event)"></label></div></div>`;
                 const roomStudentsForCount = getRoomStudents(window.adminSelectedRoom, adminYear());
                 const activeCountSm = roomStudentsForCount.filter(s => s.status !== 'resigned').length;
                 const resignedCountSm = roomStudentsForCount.filter(s => s.status === 'resigned').length;
@@ -1730,6 +1739,7 @@ content.innerHTML = html;
             document.getElementById('navSubtitle').innerText = `ปีการศึกษา ${settings.year}`;
             logAction('เปลี่ยนเทอมที่แสดงผลหน้าแรก', `บังคับแสดงเทอม ${settings.term}/${settings.year} สำหรับผู้ใช้ทั่วไป`, 'settings');
             saveData('full'); showToast(`บันทึกเทอมที่แสดงผลหน้าแรกเป็นเทอม ${settings.term} แล้ว`); renderAdminTab();
+            applyServerStatusBadge();
         };
         // เลือกจำนวนเทอมของระบบ (ยังไม่บันทึกจริง - แค่เลือกไว้ก่อน ต้องกด "บันทึก" ถึงจะมีผล)
         window.selectPendingTermCount = function(n) {
@@ -1787,6 +1797,7 @@ content.innerHTML = html;
             if (ok) { showToast(`บันทึกปีการศึกษาที่แสดงผลเป็น ${settings.year} แล้ว`); }
             else { settings.year = previousYear; document.getElementById('navSubtitle').innerText = `ปีการศึกษา ${settings.year}`; showToast(`บันทึกไม่สำเร็จ ยกเลิกการเปลี่ยนแปลงและกลับไปใช้ปีการศึกษา ${previousYear} ตามเดิม กรุณาลองใหม่อีกครั้ง`, "error"); }
             renderAdminTab();
+            applyServerStatusBadge();
         };
         window.archiveAcademicYear = function(year) {
             year = String(year);
@@ -1835,7 +1846,7 @@ content.innerHTML = html;
         };
         // เลือกสถานะของเทอมใดเทอมหนึ่งโดยเฉพาะ (ยังไม่บันทึกจริง - แค่เลือกไว้ก่อน ต้องกด "บันทึก" ถึงจะมีผล)
         window.selectPendingTermStatusFor = function(term, status) {
-            if (!['open', 'not_opened', 'locked'].includes(status)) return;
+            if (!['open', 'not_opened', 'locked', 'maintenance'].includes(status)) return;
             window.__pendingTermStatusByTerm = window.__pendingTermStatusByTerm || {};
             window.__pendingTermStatusByTerm[term] = status;
             renderAdminTab();
@@ -1844,15 +1855,16 @@ content.innerHTML = html;
             window.__pendingTermStatusByTerm = window.__pendingTermStatusByTerm || {};
             const current = getTermStatus(term, settings.year);
             const status = window.__pendingTermStatusByTerm[term] || current;
-            if (!['open', 'not_opened', 'locked'].includes(status)) return;
+            if (!['open', 'not_opened', 'locked', 'maintenance'].includes(status)) return;
             if (status === current && !window.__pendingTermStatusByTerm[term]) { showToast("สถานะเทอมนี้เป็นค่านี้อยู่แล้ว"); return; }
             if (!settings.termLocks) settings.termLocks = {};
             const key = termKeyOf(term, settings.year);
             settings.termLocks[key] = status;
             delete window.__pendingTermStatusByTerm[term];
-            const labels = { open: 'เปิดใช้งาน', not_opened: 'ยังไม่เปิดใช้งาน', locked: 'ล็อคข้อมูล' };
+            const labels = { open: 'เปิดใช้งาน', not_opened: 'ยังไม่เปิดใช้งาน', locked: 'ล็อคข้อมูล', maintenance: 'ปิดปรับปรุงชั่วคราว' };
             logAction('เปลี่ยนสถานะเทอม', `เทอม ${term}/${settings.year} => ${labels[status]}`, 'settings');
             saveData('full'); showToast(`ตั้งสถานะเทอม ${term}/${settings.year} เป็น "${labels[status]}" แล้ว`); renderAdminTab();
+            applyServerStatusBadge();
         };
         window.goToNotification = function(idx) {
             const n = window.__pendingNotifs && window.__pendingNotifs[idx]; if (n && n.action) n.action(); else window.navigate('admin', { tab: 'subjects' });
@@ -2242,15 +2254,15 @@ content.innerHTML = html;
             if (!window.adminSelectedSubjectRoom || window.adminSelectedSubjectRoom === 'all') { showToast("กรุณาเลือกห้องก่อนโหลดฟอร์ม", "error"); return; }
             const roomName = formatRoomName(window.adminSelectedSubjectRoom);
             const ws_data = [
-                ["รหัสวิชา", "ชื่อวิชา", "ครู (หลัก)", "ครู (ร่วมสอน)", "หน่วยกิต", "ตารางเรียน (วัน-คาบ)"],
-                ["ว31101", "คณิตศาสตร์พื้นฐาน", "ครูสมใจ รักเรียน", "", "1.0", "จันทร์-1,พฤหัสบดี-3"],
-                ["", "เช็คแถวเช้า", "ครูสมใจ รักเรียน", "", "0.5", "จันทร์-0"],
+                ["รหัสวิชา", "ชื่อวิชา"],
+                ["ว31101", "คณิตศาสตร์พื้นฐาน"],
+                ["", "เช็คแถวเช้า"],
                 [],
-                ["หมายเหตุ: ตารางเรียนใช้รูปแบบ วัน-คาบ คั่นด้วยจุลภาคหากมีหลายคาบ เช่น จันทร์-1,พฤหัสบดี-3"],
-                ["คาบที่ใช้ได้: 0=แถวเช้า, 1-4=คาบเช้า, 5-8=คาบบ่าย"],
-                ["ชื่อครู (หลัก) ต้องพิมพ์ตรงกับชื่อครูที่มีอยู่ในระบบเป๊ะ ไม่เช่นนั้นวิชาจะไม่ปรากฏในหน้าของครูท่านนั้น"]
+                ["หมายเหตุ: นำเข้าได้เฉพาะ รหัสวิชา และ ชื่อวิชา เท่านั้น (รหัสวิชาจะเว้นว่างไว้ก็ได้)"],
+                ["ส่วนที่เหลือ (ครูผู้สอน / หน่วยกิต / ตารางเรียน) เจ้าหน้าที่ต้องเข้ามาแก้ไขเพิ่มเติมเองทีหลังในหน้าเว็บ"],
+                ["วิชาที่นำเข้าใหม่จะยังไม่มีตารางเรียน จะไม่นับรวมในการเช็คสถานะ \"ตารางเต็ม\" จนกว่าจะแก้ไขตารางให้ครบ"]
             ];
-            const ws = XLSX.utils.aoa_to_sheet(ws_data); ws['!cols'] = [{wch: 12}, {wch: 28}, {wch: 22}, {wch: 22}, {wch: 10}, {wch: 32}];
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); ws['!cols'] = [{wch: 12}, {wch: 32}];
             const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Template");
             XLSX.writeFile(wb, `แบบฟอร์มนำเข้ารายวิชา_${roomName}.xlsx`);
             showToast("ดาวน์โหลดแบบฟอร์มรายวิชาสำเร็จ", "success");
@@ -2267,26 +2279,21 @@ content.innerHTML = html;
                     const data = new Uint8Array(evt.target.result);
                     const workbook = XLSX.read(data, {type: 'array'}); const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
                     let startIndex = (jsonData.length > 0 && (String(jsonData[0][0] || '').includes("รหัสวิชา") || String(jsonData[0][1] || '').includes("ชื่อวิชา"))) ? 1 : 0;
-                    let imported = 0, skipped = 0;
+                    let imported = 0;
                     await refreshBeforeEdit(['subjects']); // ดึงข้อมูลล่าสุดก่อนนำเข้า กันชนกับแอดมินคนอื่น
                     for (let i = startIndex; i < jsonData.length; i++) {
                         const row = jsonData[i];
                         if (!row || !row[1] || !String(row[1]).trim()) continue;
                         const name = String(row[1]).trim();
-                        if (name.startsWith('หมายเหตุ') || name.startsWith('คาบที่ใช้ได้') || name.startsWith('ชื่อครู')) continue;
+                        if (name.startsWith('หมายเหตุ') || name.startsWith('ส่วนที่เหลือ') || name.startsWith('วิชาที่นำเข้าใหม่')) continue;
                         const code = String(row[0] || '').trim();
-                        const teacher = String(row[2] || '').trim();
-                        const teacher2 = String(row[3] || '').trim();
-                        const credits = parseFloat(row[4]) || 0.5;
-                        const schedules = parseScheduleString(row[5]);
-                        if (!teacher) { skipped++; continue; }
                         const roomActive = getRoomSubjects(targetRoom, adminTerm(), adminYear());
-                        const exists = code ? roomActive.find(s => s.code && s.code === code) : roomActive.find(s => s.name === name && s.teacher === teacher);
-                        if (exists) { exists.name = name; exists.code = code; exists.teacher = teacher; exists.teacher2 = teacher2; exists.credits = credits; if (schedules.length > 0) exists.schedules = schedules;
-                        } else { subjects.push({ id: generateId(), roomId: targetRoom, name, code, teacher, teacher2, credits, schedules, term: adminTerm(), year: adminYear(), locked: false }); } imported++;
+                        const exists = code ? roomActive.find(s => s.code && s.code === code) : roomActive.find(s => s.name === name && !s.teacher);
+                        if (exists) { exists.name = name; exists.code = code;
+                        } else { subjects.push({ id: generateId(), roomId: targetRoom, name, code, teacher: '', teacher2: '', credits: 0.5, schedules: [], term: adminTerm(), year: adminYear(), locked: false }); } imported++;
                     }
-                    if (imported > 0) { await saveData('full'); logAction('นำเข้ารายวิชาจาก Excel', `นำเข้า ${imported} วิชา ห้อง ${formatRoomName(targetRoom)}`);
-                        showToast(`นำเข้า ${imported} วิชา สำเร็จ!${skipped > 0 ? ' (ข้าม ' + skipped + ' แถวที่ไม่ระบุครู)' : ''}`); renderAdminTab(); } else { showToast("ไม่พบข้อมูลที่ถูกต้อง หรือไม่ได้ระบุชื่อครูในแถวใดเลย", "error");
+                    if (imported > 0) { await saveData('full'); logAction('นำเข้ารายวิชาจาก Excel (เฉพาะชื่อ+รหัส)', `นำเข้า ${imported} วิชา ห้อง ${formatRoomName(targetRoom)} - รอเจ้าหน้าที่เพิ่มครู/ตารางเรียน`);
+                        showToast(`นำเข้า ${imported} วิชา สำเร็จ! กรุณาเข้าไปเพิ่มครูผู้สอนและตารางเรียนให้ครบต่อไป`); renderAdminTab(); } else { showToast("ไม่พบข้อมูลที่ถูกต้องในไฟล์ (ต้องมีอย่างน้อยคอลัมน์ชื่อวิชา)", "error");
                     }
                 } catch (err) { showToast("เกิดข้อผิดพลาดในการอ่านไฟล์", "error");
                 } e.target.value = '';
@@ -2498,6 +2505,57 @@ content.innerHTML = html;
             const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Template");
             XLSX.writeFile(wb, "แบบฟอร์มนำเข้านักเรียน.xlsx");
             showToast("ดาวน์โหลดแบบฟอร์มสำเร็จ", "success");
+        };
+
+        // แปลงป้ายห้อง เช่น "ม.1/1" กลับเป็น roomId เช่น "m1_1" (รองรับช่องว่างและรูปแบบเขียนต่างกันเล็กน้อย)
+        function parseRoomLabel_(label) {
+            if (!label) return null;
+            const m = String(label).trim().match(/ม\.?\s*(\d+)\s*\/\s*(\d+)/);
+            if (!m) return null;
+            const roomId = `m${m[1]}_${m[2]}`;
+            return getRoomList().includes(roomId) ? roomId : null;
+        }
+
+        window.downloadStudentTemplateAllRooms = function() {
+            const sampleRooms = getRoomList().slice(0, 2);
+            const ws_data = [ ["ห้อง", "เลขที่", "คำนำหน้า+ชื่อ-นามสกุล"] ];
+            if (sampleRooms[0]) ws_data.push([formatRoomName(sampleRooms[0]), "1", "ด.ช.รักเรียน เพียรศึกษา"], [formatRoomName(sampleRooms[0]), "2", "ด.ญ.ใจดี มีเมตตา"]);
+            if (sampleRooms[1]) ws_data.push([formatRoomName(sampleRooms[1]), "1", "ด.ช.ขยัน ตั้งใจดี"]);
+            ws_data.push([], ["หมายเหตุ: คอลัมน์ \"ห้อง\" ต้องเป็นรูปแบบ ม.X/Y เช่น ม.1/1, ม.4/2 ให้ตรงกับห้องที่มีอยู่ในระบบ"], ["สามารถใส่นักเรียนได้หลายห้องในไฟล์เดียว โดยเรียงแถวสลับห้องกันได้ตามสะดวก"]);
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); ws['!cols'] = [{wch: 12}, {wch: 10}, {wch: 35}];
+            const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Template");
+            XLSX.writeFile(wb, "แบบฟอร์มนำเข้านักเรียนทุกห้อง.xlsx");
+            showToast("ดาวน์โหลดแบบฟอร์ม (ทุกห้อง) สำเร็จ", "success");
+        };
+
+        window.handleImportStudentsAllRooms = function(e) {
+            const file = e.target.files[0];
+            if (!file) return; showToast("กำลังอ่านไฟล์..."); const reader = new FileReader();
+            reader.onload = async function(evt) {
+                try {
+                    const data = new Uint8Array(evt.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'}); const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
+                    let startIndex = (jsonData.length > 0 && String(jsonData[0][0] || '').includes("ห้อง")) ? 1 : 0;
+                    let imported = 0, skippedRoom = 0;
+                    const roomsTouched = new Set();
+                    await refreshBeforeEdit(['students']);
+                    for (let i = startIndex; i < jsonData.length; i++) {
+                        const row = jsonData[i];
+                        if (!row || row.length < 3 || !row[0] || !row[1] || !row[2]) continue;
+                        if (String(row[0]).trim().startsWith('หมายเหตุ') || String(row[0]).trim().startsWith('สามารถ')) continue;
+                        const roomId = parseRoomLabel_(row[0]);
+                        if (!roomId) { skippedRoom++; continue; }
+                        const number = String(row[1]).trim(), name = String(row[2]).trim();
+                        const exists = students.find(s => s.roomId === roomId && s.number === number);
+                        if (exists) { exists.name = name; } else { students.push({ id: generateId(), roomId, number, name, status: 'active' }); }
+                        roomsTouched.add(roomId); imported++;
+                    }
+                    if (imported > 0) { await saveData('full'); logAction('นำเข้ารายชื่อนักเรียนทุกห้องจาก Excel', `นำเข้า ${imported} คน ใน ${roomsTouched.size} ห้อง`);
+                        showToast(`นำเข้า ${imported} คน ใน ${roomsTouched.size} ห้อง สำเร็จ!${skippedRoom > 0 ? ' (ข้าม ' + skippedRoom + ' แถวที่ระบุห้องไม่ถูกต้อง)' : ''}`); renderAdminTab();
+                    } else { showToast("ไม่พบข้อมูลที่ถูกต้อง หรือชื่อห้องในไฟล์ไม่ตรงกับห้องในระบบ", "error"); }
+                } catch (err) { showToast("เกิดข้อผิดพลาดในการอ่านไฟล์", "error");
+                } e.target.value = '';
+            }; reader.readAsArrayBuffer(file);
         };
 
         window.exportAllStudentsExcel = function(roomId) {
