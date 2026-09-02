@@ -351,7 +351,7 @@
                                 }
                                 if (data.settings.term !== undefined && (data.settings.term !== settings.term || data.settings.year !== settings.year)) {
                                     settings.term = data.settings.term; settings.year = data.settings.year;
-                                    document.getElementById('navSubtitle').innerText = `ภาคเรียนที่ ${settings.term} / ${settings.year}`;
+                                    document.getElementById('navSubtitle').innerText = `ปีการศึกษา ${settings.year}`;
                                     window.__justSwitchedTerm = true; // แสดงเอฟเฟคเตือนตอนเทอมที่แสดงผลถูกเปลี่ยนจากแอดมิน
                                     const st = history.state;
                                     if (st && (st.view === 'dashboard' || st.view === 'classroom' || st.view === 'teacher_dash')) { try { safeRenderState(st); } catch (e) {} }
@@ -398,7 +398,7 @@
                 isDbInitialized = true;
                 document.getElementById('navTitle').innerText = settings.title;
                 document.title = settings.title;
-                document.getElementById('navSubtitle').innerText = `ภาคเรียนที่ ${settings.term} / ${settings.year}`;
+                document.getElementById('navSubtitle').innerText = `ปีการศึกษา ${settings.year}`;
                 applyFavicon();
                 applyHeaderLogo();
                 updateAnnouncementBar();
@@ -766,7 +766,7 @@
                 let count = settings.roomCounts[`m${i}`] || 0; if (count === 0) continue;
                 let levelGradient = levelColors[i].gradient;
                 let iconColor = levelColors[i].icon;
-                html += `<div class="bg-white rounded-3xl sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-8 relative overflow-hidden group/level"><div class="absolute top-0 left-0 w-1.5 sm:w-2.5 h-full bg-gradient-to-b ${levelGradient}"></div><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800 mb-4 sm:mb-8 flex items-center gap-2 sm:gap-3 pl-3 sm:pl-4"><i class="fas fa-layer-group ${iconColor}"></i> มัธยมศึกษาปีที่ ${i}</h3><div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-5 pl-3 sm:pl-4">`;
+                html += `<div class="bg-white rounded-3xl sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-8 relative overflow-hidden group/level"><div class="absolute top-0 left-0 w-1.5 sm:w-2.5 h-full bg-gradient-to-b ${levelGradient}"></div><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800 mb-4 sm:mb-8 flex items-center gap-2 sm:gap-3 pl-3 sm:pl-4"><i class="fas fa-layer-group ${iconColor}"></i> มัธยมศึกษาปีที่ ${i} <span class="text-xs sm:text-base font-bold text-slate-400">(ภาคเรียนที่ ${viewTerm()} / ${settings.year})</span></h3><div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-5 pl-3 sm:pl-4">`;
                 for (let j = 1; j <= count; j++) { html += `<button onclick="window.navigate('classroom', {roomId: 'm${i}_${j}'})" class="bg-slate-50 hover:bg-white border border-slate-200 hover:border-indigo-300 rounded-xl sm:rounded-2xl p-3 sm:p-5 transition-all hover:-translate-y-1 hover:shadow-lg hover:shadow-indigo-100 text-left flex flex-col justify-between min-h-[80px] sm:min-h-[120px] group"><span class="text-xl sm:text-3xl font-black text-slate-700 group-hover:text-indigo-600 transition-colors">ม.${i}/${j}</span><span class="text-[10px] sm:text-sm text-slate-500 font-bold mt-2 sm:mt-3 flex items-center justify-between">เข้าสู่ห้องเรียน <i class="fas fa-arrow-right text-indigo-400 opacity-0 group-hover:opacity-100 transform -translate-x-3 group-hover:translate-x-0 transition-all duration-300"></i></span></button>`;
                 }
                 html += `</div></div>`;
@@ -1595,7 +1595,7 @@
             settings.term = newTerm;
             window.__pendingPublicTerm = null;
             window.__justSwitchedTerm = true;
-            document.getElementById('navSubtitle').innerText = `ภาคเรียนที่ ${settings.term} / ${settings.year}`;
+            document.getElementById('navSubtitle').innerText = `ปีการศึกษา ${settings.year}`;
             logAction('เปลี่ยนเทอมที่แสดงผลหน้าแรก', `บังคับแสดงเทอม ${settings.term}/${settings.year} สำหรับผู้ใช้ทั่วไป`, 'settings');
             saveData('full'); showToast(`บันทึกเทอมที่แสดงผลหน้าแรกเป็นเทอม ${settings.term} แล้ว`); renderAdminTab();
         };
@@ -1613,14 +1613,14 @@
             settings.termCount = n;
             window.__pendingTermCount = null;
             // ถ้าเทอมที่แสดงผลหน้าแรก หรือเทอมที่แอดมินกำลังจัดการอยู่ เกินจำนวนเทอมใหม่ ให้ปรับกลับมาที่เทอม 1
-            if (Number(settings.term) > n) { settings.term = '1'; document.getElementById('navSubtitle').innerText = `ภาคเรียนที่ ${settings.term} / ${settings.year}`; }
+            if (Number(settings.term) > n) { settings.term = '1'; document.getElementById('navSubtitle').innerText = `ปีการศึกษา ${settings.year}`; }
             if (adminWorkingTerm && Number(adminWorkingTerm) > n) { adminWorkingTerm = null; }
             logAction('ปรับจำนวนเทอมของระบบ', `ตั้งจำนวนเทอมเป็น ${n} เทอม`, 'settings');
             saveData('full'); showToast(`ตั้งจำนวนเทอมเป็น ${n} เทอมแล้ว`); renderAdminTab();
         };
         window.saveYearSetting = function() {
             settings.year = document.getElementById('setYear').value.trim() || settings.year;
-            document.getElementById('navSubtitle').innerText = `ภาคเรียนที่ ${settings.term} / ${settings.year}`;
+            document.getElementById('navSubtitle').innerText = `ปีการศึกษา ${settings.year}`;
             logAction('แก้ไขปีการศึกษา', `ปีการศึกษา ${settings.year}`, 'settings');
             saveData('full'); showToast("บันทึกปีการศึกษาเรียบร้อย"); renderAdminTab();
         };
