@@ -117,8 +117,9 @@
         // เทอมที่แอดมินกำลังจัดการข้อมูลอยู่ในหน้าแอดมิน — เก็บไว้เฉพาะ session/เครื่องของแอดมินคนนั้น
         // ไม่ถูกบันทึกลงเซิร์ฟเวอร์ และไม่กระทบสิ่งที่ผู้ใช้ทั่วไปเห็นที่หน้าแรก ทำให้แอดมินหลายคนจัดการคนละเทอมพร้อมกันได้อย่างอิสระ
         let adminWorkingTerm = null;
+        let adminWorkingYear = null;
         function adminTerm() { return adminWorkingTerm || settings.term; }
-        function adminYear() { return settings.year; } // ปีการศึกษาใช้ค่าเดียวกับระบบเสมอ (สลับอิสระได้เฉพาะเทอม)
+        function adminYear() { return adminWorkingYear || settings.year; } // ปีที่แอดมินกำลังจัดการอยู่ - แยกอิสระจากปีที่แสดงผลหน้าแรก (settings.year) เพื่อให้เตรียมข้อมูลปีใหม่ล่วงหน้าได้โดยไม่กระทบผู้ใช้ทั่วไป
         // ===== ทะเบียนปีการศึกษา (settings.academicYears) — แต่ละปีมีสถานะ 'active' (พร้อมใช้งาน) หรือ 'archived' (ถูกจัดเก็บแล้ว/ล็อค) =====
         function getYearStatus(year) {
             if (!settings.academicYears) return 'active';
@@ -496,22 +497,25 @@
         // ===== บันทึกข้อมูลแบบ Real-time รองรับการบันทึกพร้อมกันจากหลายอุปกรณ์ =====
         // การเช็คชื่อ/ติดตามนักเรียน/ล้างข้อมูล จะส่งเฉพาะ "รายการที่เปลี่ยนแปลง" ไปให้ฝั่งเซิร์ฟเวอร์ผสานเข้ากับข้อมูลล่าสุดเองแบบอะตอมมิก
         // (ล็อกการเขียนไว้ฝั่ง Apps Script ด้วย LockService กันข้อมูลชนกันเวลาเช็คชื่อพร้อมกันหลายห้อง/หลายวิชา)
+        // คืนค่า true/false บอกว่าบันทึกสำเร็จจริงหรือไม่ (เดิมไม่คืนค่าอะไรเลย ทำให้ถ้าบันทึกล้มเหลว (เช่น เน็ตหลุด/เซิร์ฟเวอร์ error) หน้าเว็บจะไม่รู้ตัวและไม่แจ้งเตือนผู้ใช้เลย
+        // เข้าใจผิดว่าบันทึกสำเร็จ พอโหลดหน้าใหม่ค่าที่เพิ่งเปลี่ยน (เช่น ปีการศึกษา) จะหายไปเพราะไม่เคยถูกบันทึกจริงบนเซิร์ฟเวอร์)
         async function saveData(action = 'full', payload = null) {
             try {
-                if (GOOGLE_APP_SCRIPT_URL === "YOUR_WEB_APP_URL_HERE") return;
+                if (GOOGLE_APP_SCRIPT_URL === "YOUR_WEB_APP_URL_HERE") return false;
+                let res;
                 if (action === 'attendance' && payload) {
                     const idx = attendanceData.findIndex(a => a.subjectId === payload.subjectId && a.date === payload.date && String(a.period) === String(payload.period));
                     if (idx >= 0) attendanceData[idx] = payload; else attendanceData.push(payload);
-                    await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'upsert_attendance', record: payload }) });
+                    res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'upsert_attendance', record: payload }) });
                 } else if (action === 'followup' && payload) {
                     followUps.push(payload);
-                    await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'upsert_followup', record: payload }) });
+                    res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'upsert_followup', record: payload }) });
                 } else if (action === 'reset_subject' && payload) {
                     attendanceData = attendanceData.filter(a => a.subjectId !== payload);
-                    await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_subject_attendance', subjectId: payload }) });
+                    res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_subject_attendance', subjectId: payload }) });
                 } else if (action === 'reset_all') {
                     attendanceData = []; followUps = [];
-                    await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_all_attendance' }) });
+                    res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_all_attendance' }) });
                 } else {
                     // 'full' - ใช้สำหรับตั้งค่า/ครู/วิชา/นักเรียน/ผู้ใช้งาน ฯลฯ ยังคง fetch ข้อมูลล่าสุดมาผสาน attendanceData/followUps/logs ก่อนเขียนทับเสมอ กันไม่ให้ไปทับข้อมูลที่ถูกเช็คชื่อพร้อมกันจากอุปกรณ์อื่น
                     let dataToSave = { settings, teachers, subjects, students, attendanceData, followUps, logs };
@@ -522,9 +526,13 @@
                         dataToSave.followUps = latestData.followUps || followUps; followUps = dataToSave.followUps;
                         dataToSave.logs = mergeLogsArrays(latestData.logs, logs); logs = dataToSave.logs;
                     }
-                    await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(dataToSave) });
+                    res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(dataToSave) });
                 }
-            } catch (e) { console.error("Save Error", e); }
+                if (!res || !res.ok) { showToast("บันทึกข้อมูลไม่สำเร็จ (เชื่อมต่อเซิร์ฟเวอร์ไม่ได้) กรุณาลองใหม่อีกครั้ง อย่าเพิ่งรีเฟรชหน้าเว็บ", "error"); return false; }
+                let resultJson = null; try { resultJson = await res.json(); } catch (e2) {}
+                if (resultJson && resultJson.status === 'error') { showToast(`บันทึกข้อมูลไม่สำเร็จ: ${resultJson.message || 'เกิดข้อผิดพลาดที่เซิร์ฟเวอร์'}`, "error"); return false; }
+                return true;
+            } catch (e) { console.error("Save Error", e); showToast("บันทึกข้อมูลไม่สำเร็จ (เชื่อมต่อเซิร์ฟเวอร์ไม่ได้) กรุณาลองใหม่อีกครั้ง อย่าเพิ่งรีเฟรชหน้าเว็บ", "error"); return false; }
         }
 
         // บันทึก Log การแก้ไขของผู้ใช้แต่ละคน (เก็บย้อนหลังสูงสุด 500 รายการล่าสุด)
@@ -1269,7 +1277,7 @@
             const isSuperAdmin = currentUser && currentUser.role === 'super_admin';
             window.__pendingNotifs = computePendingNotifications();
             let notifHtml = window.__pendingNotifs.length > 0 ? `<div class="mb-4 sm:mb-6 bg-amber-50 border-2 border-amber-300 rounded-2xl p-3 sm:p-5"><h3 class="text-xs sm:text-base font-extrabold text-amber-800 mb-2 flex items-center gap-2"><i class="fas fa-bell"></i> แถบแจ้งเตือนที่รอการแก้ไข (${window.__pendingNotifs.length})</h3><div class="flex flex-wrap gap-1.5">${window.__pendingNotifs.map((n, idx) => `<button onclick="window.goToNotification(${idx})" class="bg-white border border-amber-200 hover:bg-amber-100/60 text-slate-700 text-[10px] sm:text-xs font-bold px-2.5 py-1.5 rounded-lg transition-colors">${n.text}</button>`).join('')}</div></div>` : '';
-            let html = notifHtml + `<div class="mb-4 sm:mb-8 flex flex-col md:flex-row md:items-center justify-between gap-3"><div><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2"><i class="fas fa-tools text-indigo-500"></i> จัดการระบบ</h2>${currentUser ? `<p class="text-xs sm:text-sm text-slate-500 font-bold mt-1">เข้าสู่ระบบในชื่อ: ${currentUser.name} <span class="ml-1 ${currentUser.role === 'super_admin' ? 'bg-purple-100 text-purple-700 border-purple-200' : 'bg-indigo-100 text-indigo-700 border-indigo-200'} border px-2 py-0.5 rounded-full text-[10px] font-black">${currentUser.role === 'super_admin' ? 'Super Admin' : 'เจ้าหน้าที่'}</span></p>` : ''}</div></div><div class="mb-4 sm:mb-6 bg-indigo-50 border border-indigo-200 rounded-2xl px-3 sm:px-5 py-2.5 sm:py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2"><div class="flex items-center gap-2 text-indigo-700 font-bold text-xs sm:text-sm"><i class="fas fa-user-edit"></i> คุณกำลังจัดการข้อมูลเทอม ${adminTerm()}/${adminYear()} <span class="text-[9px] sm:text-[11px] font-medium text-indigo-500">(เฉพาะหน้าจอของคุณเอง ไม่กระทบสิ่งที่ผู้ใช้ทั่วไปเห็นที่หน้าแรก)</span></div><div class="flex items-center gap-1.5 bg-white p-1 rounded-lg border border-indigo-200 w-max">${Array.from({length: settings.termCount === 3 ? 3 : 2}, (_, i) => i + 1).map(tn => `<button onclick="window.setAdminWorkingTerm('${tn}')" class="${String(adminTerm()) === String(tn) ? 'bg-indigo-600 text-white shadow-sm' : 'text-indigo-600 hover:bg-indigo-50'} px-2.5 sm:px-3 py-1 rounded-md font-bold text-[10px] sm:text-xs transition-all">เทอม ${tn}</button>`).join('')}</div></div><div class="mb-4 sm:mb-6"><p class="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-wider mb-1.5 pl-1"><i class="fas fa-sliders-h"></i> ตั้งค่าระบบ (ใช้ร่วมกันทุกเทอม/ทุกปี)</p><div class="flex flex-wrap gap-1.5 bg-slate-200/50 p-1.5 rounded-xl w-full shadow-inner"><button onclick="window.navigate('admin', {tab: 'settings'})" class="${currentAdminTab === 'settings' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-cog"></i> ตั้งค่าทั่วไป</button><button onclick="window.navigate('admin', {tab: 'term_settings'})" class="${currentAdminTab === 'term_settings' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-calendar-alt"></i> ตั้งค่าภาคเรียน</button><button onclick="window.navigate('admin', {tab: 'data_health'})" class="${currentAdminTab === 'data_health' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-hdd"></i> สถานะข้อมูลระบบ</button><button onclick="window.navigate('admin', {tab: 'holidays'})" class="${currentAdminTab === 'holidays' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-calendar-times"></i> วันหยุดและประกาศ</button><button onclick="window.navigate('admin', {tab: 'logs'})" class="${currentAdminTab === 'logs' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-history"></i> Log</button></div></div><div class="mb-4 sm:mb-8"><p class="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-wider mb-1.5 pl-1"><i class="fas fa-layer-group"></i> ข้อมูลรายเทอม/รายปี (เทอม ${adminTerm()}/${adminYear()})</p><div class="flex flex-wrap gap-1.5 bg-slate-200/50 p-1.5 rounded-xl w-full shadow-inner"><button onclick="window.navigate('admin', {tab: 'data_status'})" class="${currentAdminTab === 'data_status' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-database"></i> ความพร้อมของข้อมูล</button><button onclick="window.navigate('admin', {tab: 'teachers'})" class="${currentAdminTab === 'teachers' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-chalkboard-teacher"></i> ครู</button><button onclick="window.navigate('admin', {tab: 'advisors'})" class="${currentAdminTab === 'advisors' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-id-badge"></i> ครูที่ปรึกษา</button><button onclick="window.navigate('admin', {tab: 'subjects'})" class="${currentAdminTab === 'subjects' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-book"></i> วิชา</button><button onclick="window.navigate('admin', {tab: 'students'})" class="${currentAdminTab === 'students' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-users"></i> นักเรียน</button>${isSuperAdmin ? `<button onclick="window.navigate('admin', {tab: 'users'})" class="${currentAdminTab === 'users' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-user-cog"></i> ผู้ใช้งาน</button>` : ''}</div></div><div id="adminContent" class="bg-white rounded-2xl sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-8 w-full"></div>`;
+            let html = notifHtml + `<div class="mb-4 sm:mb-8 flex flex-col md:flex-row md:items-center justify-between gap-3"><div><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2"><i class="fas fa-tools text-indigo-500"></i> จัดการระบบ</h2>${currentUser ? `<p class="text-xs sm:text-sm text-slate-500 font-bold mt-1">เข้าสู่ระบบในชื่อ: ${currentUser.name} <span class="ml-1 ${currentUser.role === 'super_admin' ? 'bg-purple-100 text-purple-700 border-purple-200' : 'bg-indigo-100 text-indigo-700 border-indigo-200'} border px-2 py-0.5 rounded-full text-[10px] font-black">${currentUser.role === 'super_admin' ? 'Super Admin' : 'เจ้าหน้าที่'}</span></p>` : ''}</div></div><div class="mb-4 sm:mb-6 bg-indigo-50 border border-indigo-200 rounded-2xl px-3 sm:px-5 py-2.5 sm:py-3 flex flex-col gap-2.5"><div class="flex items-center gap-2 text-indigo-700 font-bold text-xs sm:text-sm"><i class="fas fa-user-edit"></i> คุณกำลังจัดการข้อมูลเทอม ${adminTerm()}/${adminYear()} <span class="text-[9px] sm:text-[11px] font-medium text-indigo-500">(เฉพาะหน้าจอของคุณเอง ไม่กระทบสิ่งที่ผู้ใช้ทั่วไปเห็นที่หน้าแรกซึ่งยังเป็นเทอม ${settings.term}/${settings.year})</span></div><div class="flex flex-wrap items-center gap-2"><div class="flex items-center gap-1.5 bg-white p-1 rounded-lg border border-indigo-200 w-max"><span class="text-[9px] sm:text-[10px] font-black text-indigo-400 pl-1.5 pr-0.5 uppercase">เทอม</span>${Array.from({length: settings.termCount === 3 ? 3 : 2}, (_, i) => i + 1).map(tn => `<button onclick="window.setAdminWorkingTerm('${tn}')" class="${String(adminTerm()) === String(tn) ? 'bg-indigo-600 text-white shadow-sm' : 'text-indigo-600 hover:bg-indigo-50'} px-2.5 sm:px-3 py-1 rounded-md font-bold text-[10px] sm:text-xs transition-all">${tn}</button>`).join('')}</div><div class="flex items-center gap-1.5 bg-white p-1 rounded-lg border border-indigo-200 w-max"><span class="text-[9px] sm:text-[10px] font-black text-indigo-400 pl-1.5 pr-0.5 uppercase">ปี</span>${sortedAcademicYears().map(y => `<button onclick="window.setAdminWorkingYear('${y.year}')" class="${String(adminYear()) === String(y.year) ? 'bg-indigo-600 text-white shadow-sm' : 'text-indigo-600 hover:bg-indigo-50'} px-2.5 sm:px-3 py-1 rounded-md font-bold text-[10px] sm:text-xs transition-all flex items-center gap-1">${y.year}${y.status === 'archived' ? '<i class="fas fa-lock text-[8px]"></i>' : ''}</button>`).join('')}</div></div></div><div class="mb-4 sm:mb-6"><p class="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-wider mb-1.5 pl-1"><i class="fas fa-sliders-h"></i> ตั้งค่าระบบ (ใช้ร่วมกันทุกเทอม/ทุกปี)</p><div class="flex flex-wrap gap-1.5 bg-slate-200/50 p-1.5 rounded-xl w-full shadow-inner"><button onclick="window.navigate('admin', {tab: 'settings'})" class="${currentAdminTab === 'settings' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-cog"></i> ตั้งค่าทั่วไป</button><button onclick="window.navigate('admin', {tab: 'term_settings'})" class="${currentAdminTab === 'term_settings' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-calendar-alt"></i> ตั้งค่าภาคเรียน</button><button onclick="window.navigate('admin', {tab: 'data_health'})" class="${currentAdminTab === 'data_health' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-hdd"></i> สถานะข้อมูลระบบ</button><button onclick="window.navigate('admin', {tab: 'holidays'})" class="${currentAdminTab === 'holidays' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-calendar-times"></i> วันหยุดและประกาศ</button><button onclick="window.navigate('admin', {tab: 'logs'})" class="${currentAdminTab === 'logs' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-history"></i> Log</button>${isSuperAdmin ? `<button onclick="window.navigate('admin', {tab: 'users'})" class="${currentAdminTab === 'users' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-user-cog"></i> ผู้ใช้งาน</button>` : ''}</div></div><div class="mb-4 sm:mb-8"><p class="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-wider mb-1.5 pl-1"><i class="fas fa-layer-group"></i> ข้อมูลรายเทอม/รายปี (เทอม ${adminTerm()}/${adminYear()})</p><div class="flex flex-wrap gap-1.5 bg-slate-200/50 p-1.5 rounded-xl w-full shadow-inner"><button onclick="window.navigate('admin', {tab: 'data_status'})" class="${currentAdminTab === 'data_status' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-database"></i> ความพร้อมของข้อมูล</button><button onclick="window.navigate('admin', {tab: 'teachers'})" class="${currentAdminTab === 'teachers' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-chalkboard-teacher"></i> ครู</button><button onclick="window.navigate('admin', {tab: 'advisors'})" class="${currentAdminTab === 'advisors' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-id-badge"></i> ครูที่ปรึกษา</button><button onclick="window.navigate('admin', {tab: 'subjects'})" class="${currentAdminTab === 'subjects' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-book"></i> วิชา</button><button onclick="window.navigate('admin', {tab: 'students'})" class="${currentAdminTab === 'students' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-users"></i> นักเรียน</button></div></div><div id="adminContent" class="bg-white rounded-2xl sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-8 w-full"></div>`;
             document.getElementById('mainContent').innerHTML = html; renderAdminTab();
         }
         // สลับเทอมที่แอดมินกำลังจัดการอยู่ในหน้าแอดมิน - เป็นการตั้งค่าเฉพาะเครื่อง/เซสชันของแอดมินคนนี้เท่านั้น
@@ -1279,6 +1287,16 @@
             if (term === String(adminTerm())) return;
             showConfirm("ยืนยันการสลับเทอม", `ต้องการสลับไปจัดการข้อมูลเทอม ${term}/${adminYear()} ใช่หรือไม่? (มีผลเฉพาะหน้าจอของคุณเองเท่านั้น ไม่กระทบสิ่งที่ผู้ใช้ทั่วไปเห็นที่หน้าแรก)`, () => {
                 adminWorkingTerm = term;
+                renderAdmin();
+            });
+        };
+        // สลับปีการศึกษาที่แอดมินกำลังจัดการอยู่ (แยกอิสระจากปีที่แสดงผลจริงที่หน้าแรก) - ใช้เตรียมข้อมูลปีใหม่ล่วงหน้า หรือย้อนกลับไปดู/แก้ไขปีเก่าได้โดยไม่กระทบผู้ใช้ทั่วไป
+        window.setAdminWorkingYear = function(year) {
+            year = String(year);
+            if (year === String(adminYear())) return;
+            showConfirm("ยืนยันการสลับปีการศึกษา", `ต้องการสลับไปจัดการข้อมูลปีการศึกษา ${year} ใช่หรือไม่? (มีผลเฉพาะหน้าจอของคุณเองเท่านั้น ไม่กระทบปีการศึกษาที่ผู้ใช้ทั่วไปเห็นที่หน้าแรกซึ่งยังคงเป็น ${settings.year} ตามเดิม จนกว่าคุณจะไปตั้งค่าที่แท็บ "ตั้งค่าภาคเรียน" อย่างชัดเจน)`, () => {
+                adminWorkingYear = year;
+                adminWorkingTerm = null; // เปลี่ยนปีแล้วรีเซ็ตกลับไปเทอม 1 ของปีนั้นเพื่อไม่ให้สับสน
                 renderAdmin();
             });
         };
@@ -1685,14 +1703,18 @@ content.innerHTML = html;
         };
         // ===== จัดการปีการศึกษา: เพิ่มปีใหม่ / เลือก+บันทึก / จัดเก็บ (archive) / ปลดล็อค (เฉพาะ Super Admin) =====
         window.openAddYearPrompt = function() {
-            showPrompt("เพิ่มปีการศึกษาใหม่", "กรอกปีการศึกษาที่ต้องการเพิ่ม (เช่น 2570)", '', (val) => {
+            showPrompt("เพิ่มปีการศึกษาใหม่", "กรอกปีการศึกษาที่ต้องการเพิ่ม (เช่น 2570)", '', async (val) => {
                 const yr = (val || '').trim();
                 if (!/^\d{4}$/.test(yr)) { showToast("กรุณากรอกปีการศึกษาเป็นตัวเลข 4 หลัก", "error"); return; }
                 if (!settings.academicYears) settings.academicYears = [];
                 if (settings.academicYears.some(y => String(y.year) === yr)) { showToast("มีปีการศึกษานี้อยู่แล้วในระบบ", "error"); return; }
                 settings.academicYears.push({ year: yr, status: 'active' });
                 logAction('เพิ่มปีการศึกษาใหม่', `ปีการศึกษา ${yr}`, 'settings');
-                saveData('full'); showToast(`เพิ่มปีการศึกษา ${yr} แล้ว (ยังไม่ได้ตั้งเป็นปีที่แสดงผล ต้องเลือกแล้วกดบันทึก)`); renderAdminTab();
+                showToast("กำลังบันทึก...", "info");
+                const ok = await saveData('full');
+                if (ok) { showToast(`เพิ่มปีการศึกษา ${yr} แล้ว (ยังไม่ได้ตั้งเป็นปีที่แสดงผล ต้องเลือกแล้วกดบันทึก)`); }
+                else { settings.academicYears = settings.academicYears.filter(y => String(y.year) !== yr); showToast("บันทึกไม่สำเร็จ ยกเลิกการเพิ่มปีการศึกษานี้ กรุณาลองใหม่อีกครั้ง", "error"); }
+                renderAdminTab();
             });
         };
         window.selectPendingYear = function(year) {
@@ -1701,16 +1723,21 @@ content.innerHTML = html;
             window.__pendingYear = year;
             renderAdminTab();
         };
-        window.saveYearSetting = function() {
+        window.saveYearSetting = async function() {
             const newYear = (window.__pendingYear !== undefined && window.__pendingYear !== null) ? String(window.__pendingYear) : String(settings.year);
             if (getYearStatus(newYear) === 'archived') { showToast("ปีการศึกษานี้ถูกจัดเก็บแล้ว ไม่สามารถตั้งเป็นปีที่แสดงผลได้", "error"); return; }
             if (newYear === String(settings.year) && !window.__pendingYear) { showToast("ปีการศึกษานี้ถูกตั้งเป็นปีที่แสดงผลอยู่แล้ว"); return; }
+            const previousYear = settings.year;
             settings.year = newYear;
             window.__pendingYear = null;
             document.getElementById('navSubtitle').innerText = `ปีการศึกษา ${settings.year}`;
             window.__justSwitchedTerm = true;
             logAction('เปลี่ยนปีการศึกษาที่แสดงผล', `ตั้งปีการศึกษาที่แสดงผลหน้าแรกเป็น ${settings.year}`, 'settings');
-            saveData('full'); showToast(`บันทึกปีการศึกษาที่แสดงผลเป็น ${settings.year} แล้ว`); renderAdminTab();
+            showToast("กำลังบันทึก...", "info");
+            const ok = await saveData('full');
+            if (ok) { showToast(`บันทึกปีการศึกษาที่แสดงผลเป็น ${settings.year} แล้ว`); }
+            else { settings.year = previousYear; document.getElementById('navSubtitle').innerText = `ปีการศึกษา ${settings.year}`; showToast(`บันทึกไม่สำเร็จ ยกเลิกการเปลี่ยนแปลงและกลับไปใช้ปีการศึกษา ${previousYear} ตามเดิม กรุณาลองใหม่อีกครั้ง`, "error"); }
+            renderAdminTab();
         };
         window.archiveAcademicYear = function(year) {
             year = String(year);
