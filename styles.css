@@ -18,10 +18,11 @@
         .sticky-col-2 { position: sticky; left: 40px; z-index: 20; background-color: inherit; }
         @media (min-width: 640px) { .sticky-col-2 { left: 60px; } }
         
-        /* A4 Print Styles (บังคับใช้ Sarabun 100%) */
+        /* A4 Print Styles (บังคับใช้ Sarabun 100% เพื่อความเป็นทางการ) */
         .a4-export-container { 
             width: 794px; background-color: #ffffff; position: absolute; top: 0; left: -9999px; z-index: -50; 
             line-height: 1.6; letter-spacing: 0.01em; font-family: 'Sarabun', sans-serif !important;
+            -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
         }
         .a4-export-container * { font-family: 'Sarabun', sans-serif !important; }
         .a4-page { width: 794px; min-height: 1123px; padding: 40px; background: white; box-sizing: border-box; position: relative; }
