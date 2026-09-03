@@ -2304,15 +2304,16 @@ content.innerHTML = html;
             if (!window.adminSelectedSubjectRoom || window.adminSelectedSubjectRoom === 'all') { showToast("กรุณาเลือกห้องก่อนโหลดฟอร์ม", "error"); return; }
             const roomName = formatRoomName(window.adminSelectedSubjectRoom);
             const ws_data = [
-                ["รหัสวิชา", "ชื่อวิชา"],
-                ["ว31101", "คณิตศาสตร์พื้นฐาน"],
-                ["", "เช็คแถวเช้า"],
+                ["รหัสวิชา", "ชื่อวิชา", "หน่วยกิต"],
+                ["ว31101", "คณิตศาสตร์พื้นฐาน", "1.0"],
+                ["", "เช็คแถวเช้า", "0.5"],
                 [],
-                ["หมายเหตุ: นำเข้าได้เฉพาะ รหัสวิชา และ ชื่อวิชา เท่านั้น (รหัสวิชาจะเว้นว่างไว้ก็ได้)"],
-                ["ส่วนที่เหลือ (ครูผู้สอน / หน่วยกิต / ตารางเรียน) เจ้าหน้าที่ต้องเข้ามาแก้ไขเพิ่มเติมเองทีหลังในหน้าเว็บ"],
+                ["หมายเหตุ: นำเข้าได้เฉพาะ รหัสวิชา, ชื่อวิชา และ หน่วยกิต เท่านั้น (รหัสวิชาจะเว้นว่างไว้ก็ได้, หน่วยกิตเว้นว่างไว้จะใช้ค่าเริ่มต้น 0.5)"],
+                ["หน่วยกิตที่ใช้ได้: 0.5 / 1.0 / 1.5 / 2.0 / 2.5 / 3.0 (เว้นว่างหรือใส่ค่าอื่นจะปัดเป็น 0.5 อัตโนมัติ)"],
+                ["ส่วนที่เหลือ (ครูผู้สอน / ตารางเรียน) เจ้าหน้าที่ต้องเข้ามาแก้ไขเพิ่มเติมเองทีหลังในหน้าเว็บ"],
                 ["วิชาที่นำเข้าใหม่จะยังไม่มีตารางเรียน จะไม่นับรวมในการเช็คสถานะ \"ตารางเต็ม\" จนกว่าจะแก้ไขตารางให้ครบ"]
             ];
-            const ws = XLSX.utils.aoa_to_sheet(ws_data); ws['!cols'] = [{wch: 12}, {wch: 32}];
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); ws['!cols'] = [{wch: 12}, {wch: 32}, {wch: 10}];
             const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Template");
             XLSX.writeFile(wb, `แบบฟอร์มนำเข้ารายวิชา_${roomName}.xlsx`);
             showToast("ดาวน์โหลดแบบฟอร์มรายวิชาสำเร็จ", "success");
@@ -2322,6 +2323,7 @@ content.innerHTML = html;
             if (!window.adminSelectedSubjectRoom || window.adminSelectedSubjectRoom === 'all') { showToast("กรุณาเลือกห้องก่อนนำเข้า", "error"); e.target.value = ''; return; }
             if (guardTermLock('นำเข้ารายวิชา')) { e.target.value = ''; return; }
             const targetRoom = window.adminSelectedSubjectRoom;
+            const VALID_CREDITS = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0];
             const file = e.target.files[0];
             if (!file) return; showToast("กำลังอ่านไฟล์..."); const reader = new FileReader();
             reader.onload = async function(evt) {
@@ -2335,14 +2337,16 @@ content.innerHTML = html;
                         const row = jsonData[i];
                         if (!row || !row[1] || !String(row[1]).trim()) continue;
                         const name = String(row[1]).trim();
-                        if (name.startsWith('หมายเหตุ') || name.startsWith('ส่วนที่เหลือ') || name.startsWith('วิชาที่นำเข้าใหม่')) continue;
+                        if (name.startsWith('หมายเหตุ') || name.startsWith('ส่วนที่เหลือ') || name.startsWith('วิชาที่นำเข้าใหม่') || name.startsWith('หน่วยกิตที่ใช้ได้')) continue;
                         const code = String(row[0] || '').trim();
+                        const creditsRaw = parseFloat(row[2]);
+                        const credits = VALID_CREDITS.includes(creditsRaw) ? creditsRaw : 0.5;
                         const roomActive = getRoomSubjects(targetRoom, adminTerm(), adminYear());
                         const exists = code ? roomActive.find(s => s.code && s.code === code) : roomActive.find(s => s.name === name && !s.teacher);
-                        if (exists) { exists.name = name; exists.code = code;
-                        } else { subjects.push({ id: generateId(), roomId: targetRoom, name, code, teacher: '', teacher2: '', credits: 0.5, schedules: [], term: adminTerm(), year: adminYear(), locked: false }); } imported++;
+                        if (exists) { exists.name = name; exists.code = code; exists.credits = credits;
+                        } else { subjects.push({ id: generateId(), roomId: targetRoom, name, code, teacher: '', teacher2: '', credits, schedules: [], term: adminTerm(), year: adminYear(), locked: false }); } imported++;
                     }
-                    if (imported > 0) { await saveData('full'); logAction('นำเข้ารายวิชาจาก Excel (เฉพาะชื่อ+รหัส)', `นำเข้า ${imported} วิชา ห้อง ${formatRoomName(targetRoom)} - รอเจ้าหน้าที่เพิ่มครู/ตารางเรียน`);
+                    if (imported > 0) { await saveData('full'); logAction('นำเข้ารายวิชาจาก Excel (ชื่อ+รหัส+หน่วยกิต)', `นำเข้า ${imported} วิชา ห้อง ${formatRoomName(targetRoom)} - รอเจ้าหน้าที่เพิ่มครู/ตารางเรียน`);
                         showToast(`นำเข้า ${imported} วิชา สำเร็จ! กรุณาเข้าไปเพิ่มครูผู้สอนและตารางเรียนให้ครบต่อไป`); renderAdminTab(); } else { showToast("ไม่พบข้อมูลที่ถูกต้องในไฟล์ (ต้องมีอย่างน้อยคอลัมน์ชื่อวิชา)", "error");
                     }
                 } catch (err) { showToast("เกิดข้อผิดพลาดในการอ่านไฟล์", "error");
