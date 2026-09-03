@@ -212,7 +212,10 @@
 
         /* ===== ไล่สีพื้นหลัง (gradient) แบบพาสเทลอ่อน ที่ยังคงสว่างค้างอยู่ในโหมดมืด (from-*/via-*/to-* เป็นคนละกลไกกับ bg-* ปกติ ต้อง override ผ่านตัวแปร CSS ของ Tailwind โดยตรง) ===== */
         /* จุดที่พบชัดสุด: การ์ดใหญ่ "ระบบจัดการประจำตัวครู" ที่หน้าแรก ใช้ from-indigo-50 via-white to-blue-50 ทำให้ตัวหนังสือ (ถูกแปลงเป็นสีอ่อนแล้ว) ไปตกอยู่บนพื้นหลังที่ยังสว่างอยู่ อ่านแทบไม่ออก */
+        /* เปลี่ยนจากไล่สีเป็นพื้นทึบสีเข้มล้วนไปเลยในโหมดมืด (ตัดภาพไล่สีทิ้งทั้งหมด กันปัญหาสีอ่อนโผล่มาบางจุดจากการไล่สี ให้ดูเรียบร้อย สม่ำเสมอ) - from-indigo-50/from-blue-50/from-emerald-50/from-slate-100 ใช้เฉพาะกับพื้นหลังไล่สีอ่อนแบบนี้เท่านั้น ไม่ปนกับไล่สีไอคอนที่เข้มอยู่แล้ว จึงตัดได้อย่างปลอดภัย */
         html.dark .from-indigo-50, html.dark .from-blue-50, html.dark .from-emerald-50, html.dark .from-slate-100 {
+            background-image: none !important;
+            background-color: #141e33 !important;
             --tw-gradient-from: #17233b var(--tw-gradient-from-position) !important;
             --tw-gradient-to: rgb(23 35 59 / 0) var(--tw-gradient-to-position) !important;
         }
@@ -221,7 +224,7 @@
             --tw-gradient-stops: var(--tw-gradient-from), #141e33 var(--tw-gradient-via-position), var(--tw-gradient-to) !important;
         }
         html.dark .to-blue-50 {
-            --tw-gradient-to: #0f1b2e var(--tw-gradient-to-position) !important;
+            --tw-gradient-to: #141e33 var(--tw-gradient-to-position) !important;
         }
         html.dark .hover\:text-indigo-600:hover, html.dark .hover\:text-rose-500:hover, html.dark .hover\:text-rose-700:hover,
         html.dark .group-hover\:text-amber-600, html.dark .group-hover\:text-blue-600,
