@@ -2906,13 +2906,28 @@ content.innerHTML = html;
 
         // ===== สมุดทะเบียนการเช็คชื่อรายเดือน (รวมหน้าปก + บันทึกรายวันทุกวันจันทร์-ศุกร์ + หน้าสรุปทั้งเดือน + ลงนามครั้งเดียวท้ายเล่ม) =====
         // นับเฉพาะวันจันทร์-ศุกร์เท่านั้น (เสาร์-อาทิตย์ไม่นับรวมเด็ดขาด) วันที่ตรงกับวันหยุดที่แอดมินประกาศไว้จะขึ้นหน้าแจ้งวันหยุดแทนตารางเช็คชื่อ
+        let __registerChoicePending = null;
         window.downloadRoomMonthlyRegisterPDF = function(roomId, month) {
             const reportCheck = window.tempRoomReport; if (!reportCheck || reportCheck.roomId !== roomId) { showToast("กรุณาเปิดหน้าสรุปห้องนี้ก่อนสร้างสมุดทะเบียน", "error"); return; }
-            showConfirm("สร้างสมุดทะเบียนรายเดือน", "จะสร้างสมุดทะเบียนรวมทุกวันในเดือนนี้ (ปก + บันทึกรายวันทุกวันจันทร์-ศุกร์ + สรุปทั้งเดือน) ซึ่งอาจมีหลายสิบหน้าและใช้เวลาสักครู่ พร้อมดำเนินการหรือไม่?", () => {
-                window.__runDownloadRoomMonthlyRegisterPDF(roomId, month);
+            __registerChoicePending = { roomId, month };
+            const modal = document.getElementById('registerChoiceModal'); const box = document.getElementById('registerChoiceModalBox');
+            modal.classList.remove('hidden'); setTimeout(() => { box.classList.remove('scale-95', 'opacity-0'); box.classList.add('scale-100', 'opacity-100'); }, 10);
+        };
+        window.closeRegisterChoiceModal = function() {
+            const modal = document.getElementById('registerChoiceModal'); const box = document.getElementById('registerChoiceModalBox');
+            box.classList.remove('scale-100', 'opacity-100'); box.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => { modal.classList.add('hidden'); }, 300);
+        };
+        window.__chooseRegisterMode = function(mode) {
+            window.closeRegisterChoiceModal();
+            if (!__registerChoicePending) return;
+            const { roomId, month } = __registerChoicePending; __registerChoicePending = null;
+            const modeLabel = mode === 'summary' ? 'เฉพาะสรุป (ปก + สรุปทั้งเดือน + ลงนาม)' : 'ทั้งเล่ม (รวมภาคผนวกบันทึกรายวันทุกวัน)';
+            showConfirm("สร้างสมุดทะเบียนรายเดือน", `จะสร้างสมุดทะเบียนแบบ "${modeLabel}" ซึ่งอาจใช้เวลาสักครู่ พร้อมดำเนินการหรือไม่?`, () => {
+                window.__runDownloadRoomMonthlyRegisterPDF(roomId, month, mode);
             });
         };
-        window.__runDownloadRoomMonthlyRegisterPDF = async function(roomId, month) {
+        window.__runDownloadRoomMonthlyRegisterPDF = async function(roomId, month, mode = 'full') {
             const report = window.tempRoomReport; if (!report || report.roomId !== roomId) { showToast("กรุณาเปิดหน้าสรุปห้องนี้ก่อนสร้างสมุดทะเบียน", "error"); return; }
             showProgressModal("กำลังจัดทำสมุดทะเบียน", "กำลังเตรียมข้อมูล...");
             const __wasDark = document.documentElement.classList.contains('dark'); if (__wasDark) document.documentElement.classList.remove('dark');
@@ -2978,7 +2993,8 @@ content.innerHTML = html;
                 htmlContainer += `<div class="a4-page flex flex-col justify-between bg-white">${pdfPageBadge(summaryPagesCount > 1 ? `หน้าสรุป ${page+1}/${summaryPagesCount}` : '')}<div><div class="text-center mb-6 border-b-2 border-slate-700 pb-4">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-3xl font-black" style="margin-bottom:22px; line-height:1.5;">สรุปผลรวมทั้งเดือน</h1><h2 class="text-xl font-bold bg-emerald-100 px-4 py-1.5 rounded-full inline-block border border-emerald-300">ห้อง: ${roomName} | ประจำเดือน: ${displayMonthYear}</h2></div>${tableHTML}</div>${page === summaryPagesCount - 1 ? buildPdfSignatureBlock(signerList) : ''}</div>`;
             }
 
-            // ===== หน้าคั่นภาคผนวก =====
+            // ===== หน้าคั่นภาคผนวก + บันทึกรายวัน (เฉพาะโหมด "จัดทำทั้งเล่ม" เท่านั้น) =====
+            if (mode === 'full') {
             htmlContainer += `<div class="a4-page flex flex-col items-center justify-center bg-white text-center">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-3xl font-black text-slate-800 mb-3 mt-6">ภาคผนวก</h1><h2 class="text-xl font-bold text-slate-500">บันทึกการเช็คชื่อรายวัน</h2><p class="text-sm text-slate-400 mt-3">ห้อง ${roomName} · ประจำเดือน${displayMonthYear} · เอกสารประกอบสำหรับตรวจสอบย้อนหลัง</p></div>`;
 
             // ===== หน้าบันทึกรายวัน (จันทร์-ศุกร์ทุกวัน) - ภาคผนวก อยู่ท้ายเล่ม =====
@@ -3009,6 +3025,7 @@ content.innerHTML = html;
                     htmlContainer += `<div class="a4-page flex flex-col bg-white">${pdfPageBadge(pagesForDay > 1 ? `ภาคผนวก · หน้าเสริม ${p+1}/${pagesForDay}` : 'ภาคผนวก')}<div class="text-center mb-6 border-b-2 border-slate-700 pb-4">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-3xl font-black" style="margin-bottom:22px; line-height:1.5;">บันทึกประจำวันที่ ${displayDateStr}</h1><h2 class="text-xl font-bold bg-indigo-100 px-4 py-1.5 rounded-full inline-block border border-indigo-300">ห้อง: ${roomName}</h2></div>${tableHTML}</div>`;
                 }
             });
+            } // ปิดเงื่อนไข mode === 'full'
 
             htmlContainer += `</div>`; document.body.insertAdjacentHTML('beforeend', htmlContainer);
             await document.fonts.ready;
@@ -3023,7 +3040,7 @@ content.innerHTML = html;
                     if (i > 0) pdfDoc.addPage(); pdfDoc.addImage(imgData, 'JPEG', 0, 0, 595.28, 841.89);
                 }
                 updateProgressModal(100, "กำลังบันทึกไฟล์...");
-                pdfDoc.save(`สมุดทะเบียน_${roomName}_${month}.pdf`);
+                pdfDoc.save(`สมุดทะเบียน_${roomName}_${month}${mode === 'summary' ? '_สรุป' : ''}.pdf`);
                 completeProgressModal("ดำเนินการเสร็จสิ้น", `สร้างสมุดทะเบียน (${totalPages} หน้า) สำเร็จ ไฟล์ถูกดาวน์โหลดแล้ว`);
             } catch (err) { errorProgressModal("เกิดข้อผิดพลาดในการสร้างสมุดทะเบียน กรุณาลองใหม่อีกครั้ง"); }
             document.getElementById('pdf-register-container').remove();
