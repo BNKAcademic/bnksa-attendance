@@ -630,7 +630,6 @@
         window.toggleDarkMode = function() {
             const isDark = !document.documentElement.classList.contains('dark');
             setDarkMode(isDark, true);
-            showToast(isDark ? "เปิดโหมดมืดแล้ว" : "ปิดโหมดมืดแล้ว");
             try { safeRenderState(history.state || { view: 'dashboard' }); } catch (e) {}
         };
 
@@ -861,6 +860,7 @@
         function renderDashboard() {
             if(isAdmin) { document.getElementById('btnAdminLogin').classList.add('hidden');
                 document.getElementById('btnAdminPanel').classList.remove('hidden'); document.getElementById('btnAdminLogout').classList.remove('hidden'); }
+            const isDarkNow = document.documentElement.classList.contains('dark'); // เช็คโหมดมืดตรงๆ ตอนวาดหน้า กันปัญหาการไล่สีพาสเทลไม่ยอมเปลี่ยนเป็นสีเข้ม (แก้ตรงจุดแทนพึ่ง CSS override ที่อาจโดนแคช/ลำดับชนกัน)
             // หน้าแรกแสดงเทอมเริ่มต้นตามที่แอดมินกำหนดไว้เสมอเมื่อเข้าเว็บ/รีเฟรช (settings.term)
             // แต่สามารถกดปุ่มด้านล่างเพื่อ "ดูตัวอย่าง" เทอมอื่นชั่วคราวได้ - การเลือกนี้ไม่ถูกบันทึก รีเฟรชหน้าเว็บแล้วจะกลับไปเทอมเริ่มต้นเสมอ
             const termCount = settings.termCount || 2;
@@ -899,7 +899,7 @@
 
             html += `<div class="bg-white rounded-3xl sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-8 relative overflow-hidden group/level"><div class="absolute top-0 left-0 w-1.5 sm:w-2.5 h-full bg-gradient-to-b from-slate-500 to-slate-700"></div><button onclick="window.navigate('school_summary')" class="w-full text-left flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 pl-3 sm:pl-4 group"><div class="flex items-center gap-3 sm:gap-4"><div class="w-10 h-10 sm:w-14 sm:h-14 bg-slate-100 text-slate-700 rounded-xl sm:rounded-2xl flex items-center justify-center text-xl sm:text-2xl shrink-0 group-hover:scale-110 transition-transform shadow-sm"><i class="fas fa-school"></i></div><div><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800 flex items-center gap-2">รวมทุกห้อง</h3><p class="text-xs sm:text-sm text-slate-500 mt-1 font-medium">ภาพรวมจำนวนนักเรียนและสถิติการมาเรียนทั้งโรงเรียนรายเดือน</p></div></div><span class="shrink-0 bg-slate-700 group-hover:bg-slate-800 text-white px-4 py-2.5 sm:px-6 sm:py-3 rounded-xl font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-2 w-full sm:w-auto justify-center"><i class="fas fa-chart-pie"></i> ดูภาพรวมทั้งโรงเรียน</span></button></div>`;
             
-            html += `</div><div class="mt-12 sm:mt-20 mb-8"><div class="bg-gradient-to-br from-indigo-50 via-white to-blue-50 rounded-[2rem] sm:rounded-[2.5rem] border-2 border-indigo-100 shadow-xl shadow-indigo-100/60 p-5 sm:p-10 relative overflow-hidden"><div class="absolute -top-16 -right-16 w-56 h-56 bg-indigo-200/30 rounded-full blur-3xl pointer-events-none"></div><div class="absolute -bottom-16 -left-16 w-56 h-56 bg-blue-200/30 rounded-full blur-3xl pointer-events-none"></div><div class="relative z-10"><div class="text-center mb-8 sm:mb-10"><div class="inline-flex items-center justify-center w-14 h-14 sm:w-20 sm:h-20 bg-gradient-to-br from-indigo-500 to-blue-600 rounded-2xl sm:rounded-3xl shadow-lg shadow-indigo-300/50 mb-4 sm:mb-5 text-white text-2xl sm:text-4xl"><i class="fas fa-chalkboard-teacher"></i></div><span class="bg-white text-indigo-700 font-black px-3 py-1 sm:px-4 sm:py-1.5 rounded-full text-[10px] sm:text-sm inline-block mb-2 sm:mb-3 shadow-sm border border-indigo-200 tracking-wide">สำหรับคุณครูผู้สอน</span><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800">ระบบจัดการประจำตัวครู</h2><p class="text-xs sm:text-lg text-slate-500 mt-2 sm:mt-3 font-medium px-4">เลือกกลุ่มสาระด้านล่าง แล้วแตะชื่อของท่านเพื่อเช็คชื่อหรือดูรายงาน</p></div>`;
+            html += `</div><div class="mt-12 sm:mt-20 mb-8"><div class="${isDarkNow ? 'bg-[#141e33]' : 'bg-gradient-to-br from-indigo-50 via-white to-blue-50'} rounded-[2rem] sm:rounded-[2.5rem] border-2 ${isDarkNow ? 'border-[#2d3d5a]' : 'border-indigo-100'} shadow-xl ${isDarkNow ? '' : 'shadow-indigo-100/60'} p-5 sm:p-10 relative overflow-hidden"><div class="absolute -top-16 -right-16 w-56 h-56 ${isDarkNow ? 'bg-indigo-500/10' : 'bg-indigo-200/30'} rounded-full blur-3xl pointer-events-none"></div><div class="absolute -bottom-16 -left-16 w-56 h-56 ${isDarkNow ? 'bg-blue-500/10' : 'bg-blue-200/30'} rounded-full blur-3xl pointer-events-none"></div><div class="relative z-10"><div class="text-center mb-8 sm:mb-10"><div class="inline-flex items-center justify-center w-14 h-14 sm:w-20 sm:h-20 bg-gradient-to-br from-indigo-500 to-blue-600 rounded-2xl sm:rounded-3xl shadow-lg shadow-indigo-300/50 mb-4 sm:mb-5 text-white text-2xl sm:text-4xl"><i class="fas fa-chalkboard-teacher"></i></div><span class="${isDarkNow ? 'bg-[#1f2c47] text-indigo-300 border-[#2d3d5a]' : 'bg-white text-indigo-700 border-indigo-200'} font-black px-3 py-1 sm:px-4 sm:py-1.5 rounded-full text-[10px] sm:text-sm inline-block mb-2 sm:mb-3 shadow-sm border tracking-wide">สำหรับคุณครูผู้สอน</span><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800">ระบบจัดการประจำตัวครู</h2><p class="text-xs sm:text-lg text-slate-500 mt-2 sm:mt-3 font-medium px-4">เลือกกลุ่มสาระด้านล่าง แล้วแตะชื่อของท่านเพื่อเช็คชื่อหรือดูรายงาน</p></div>`;
             if (teachers.length === 0) { 
                 html += `<div class="text-center text-slate-400 p-6 sm:p-8 bg-white/70 rounded-3xl border-2 border-slate-200 border-dashed text-sm sm:text-lg font-medium">ยังไม่มีข้อมูลครูผู้สอนในระบบ</div>`;
             } else { 
@@ -2260,6 +2260,7 @@ content.innerHTML = html;
             if (!name) { showToast("กรอกชื่อวิชา", "error"); return; }
             let count = credit * 2; let schedules = [];
             for (let i = 0; i < count; i++) { schedules.push({ day: parseInt(document.getElementById(`newSubDay_${i}`).value), period: parseInt(document.getElementById(`newSubPeriod_${i}`).value) }); }
+            showToast("กำลังบันทึกข้อมูลวิชา...", "info");
             document.body.style.pointerEvents = 'none';
             const __prefetch1 = await refreshBeforeEdit(['subjects']); // ดึงข้อมูลล่าสุดก่อนบันทึก กันชนกับแอดมินคนอื่นที่แก้ไขพร้อมกัน
             if (editingSubjectId) {
@@ -2277,6 +2278,7 @@ content.innerHTML = html;
             await saveData('full', null, __prefetch1); document.body.style.pointerEvents = 'auto'; showToast("บันทึกสำเร็จ"); renderAdminTab(); closeSubjectModal();
         };
         window.toggleSubjectLock = async function(id) {
+            showToast("กำลังบันทึก...", "info");
             document.body.style.pointerEvents = 'none';
             const __prefetch2 = await refreshBeforeEdit(['subjects']);
             const sub = subjects.find(s => s.id === id);
@@ -2291,6 +2293,7 @@ content.innerHTML = html;
             const all = getRoomSubjects(roomId, adminTerm(), adminYear()); const targets = all.filter(s => !s.locked); const lockedCount = all.length - targets.length;
             if (targets.length === 0) { showToast("ไม่มีวิชาที่สามารถลบได้ (อาจถูกล็อคไว้ทั้งหมด หรือห้องนี้ยังไม่มีวิชา)", "error"); return; }
             showConfirm("ลบวิชาทั้งหมดในห้องนี้", `จะลบวิชาที่ไม่ได้ล็อคไว้ ${targets.length} รายการ พร้อมข้อมูลการเช็คชื่อที่เกี่ยวข้อง ของห้อง ${formatRoomName(roomId)} เทอม ${adminTerm()}/${adminYear()}${lockedCount > 0 ? ` (วิชาที่ล็อคไว้ ${lockedCount} รายการจะไม่ถูกลบ)` : ''} แน่ใจหรือไม่?`, async () => {
+                showToast("กำลังลบวิชา...", "info");
                 document.body.style.pointerEvents = 'none';
                 const __prefetch3 = await refreshBeforeEdit(['subjects']);
                 const freshTargets = getRoomSubjects(roomId, adminTerm(), adminYear()).filter(s => !s.locked);
@@ -2452,6 +2455,7 @@ content.innerHTML = html;
         window.saveStudentForm = async function() {
             const number = document.getElementById('newStuNum').value, name = document.getElementById('newStuName').value.trim(), status = document.getElementById('newStuStatus').value;
             if (!number || !name) { showToast("กรอกข้อมูลให้ครบ", "error"); return; }
+            showToast("กำลังบันทึกข้อมูลนักเรียน...", "info");
             document.body.style.pointerEvents = 'none';
             const __prefetch5 = await refreshBeforeEdit(['students']); // ดึงข้อมูลล่าสุดก่อนบันทึก กันชนกับแอดมินคนอื่นที่เพิ่ม/แก้ไขนักเรียนพร้อมกัน
             if (editingStudentId) {
@@ -2469,6 +2473,7 @@ content.innerHTML = html;
             const subCheck = subjects.find(s => s.id === id);
             if (subCheck && subCheck.locked) { showToast("วิชานี้ถูกล็อคไว้ กรุณาปลดล็อคก่อนลบ", "error"); return; }
             showConfirm("ลบวิชา", "ข้อมูลการเช็คชื่อทั้งหมดในวิชานี้จะถูกลบไปด้วย แน่ใจหรือไม่?", async () => {
+                showToast("กำลังลบวิชา...", "info");
                 document.body.style.pointerEvents = 'none';
                 const __prefetch6 = await refreshBeforeEdit(['subjects']);
                 const sub = subjects.find(s => s.id === id);
@@ -2480,6 +2485,7 @@ content.innerHTML = html;
         }
         function deleteStudent(id) {
             showConfirm("ลบนักเรียน", "แน่ใจหรือไม่ที่จะลบนักเรียนคนนี้?", async () => {
+                showToast("กำลังลบนักเรียน...", "info");
                 document.body.style.pointerEvents = 'none';
                 const __prefetch7 = await refreshBeforeEdit(['students']);
                 const st = students.find(s => s.id === id);
