@@ -163,6 +163,7 @@
         html.dark .border-emerald-600, html.dark .border-emerald-700 { border-color: #10b981 !important; }
         html.dark .border-indigo-600, html.dark .border-indigo-700 { border-color: #6366f1 !important; }
         html.dark .border-purple-700 { border-color: #9333ea !important; }
+        html.dark .border-purple-600 { border-color: #9333ea !important; }
         html.dark .border-slate-500, html.dark .border-slate-600, html.dark .border-slate-700 { border-color: #4a5d80 !important; }
 
         /* ===== ส่วนขยายรอบ 2: คลาสที่มีตัวปรับความโปร่งใส (เช่น bg-blue-50/70) ซึ่ง Tailwind มองเป็นคนละคลาสกับ bg-blue-50 ปกติ ตัวตรวจสอบรอบแรกจึงพลาดไป ===== */
@@ -179,6 +180,18 @@
             box-shadow: 0 8px 20px -4px rgba(0,0,0,0.6) !important;
         }
         html.dark .bg-blue-500, html.dark .bg-cyan-500, html.dark .bg-emerald-500, html.dark .bg-indigo-500, html.dark .bg-rose-500, html.dark .bg-purple-600 { box-shadow: 0 2px 8px rgba(0,0,0,0.5) !important; }
+
+        /* ส่วนครู: ปุ่มกลุ่มสาระที่หน้าแรกสร้าง class แบบไดนามิก (bg-${color}-600, shadow-${color}-200) ตามสีของแต่ละกลุ่มสาระ - ครอบคลุมให้ครบทุกสีที่เป็นไปได้ */
+        html.dark .bg-orange-600, html.dark .bg-cyan-600, html.dark .bg-slate-600 { box-shadow: 0 2px 8px rgba(0,0,0,0.5) !important; }
+        html.dark .shadow-blue-200, html.dark .shadow-emerald-200, html.dark .shadow-amber-200,
+        html.dark .shadow-rose-200, html.dark .shadow-orange-200, html.dark .shadow-cyan-200,
+        html.dark .shadow-purple-200, html.dark .shadow-teal-200, html.dark .shadow-slate-200 {
+            box-shadow: 0 8px 20px -4px rgba(0,0,0,0.6) !important;
+        }
+
+        /* ส่วนล่างสุดของหน้าเว็บ (footer เครดิตผู้พัฒนา) ใช้พื้นหลังโปร่งแสงสีขาว/เส้นขอบโปร่งแสง ซึ่งเป็นอีกจุดที่ยังเป็นสีอ่อนค้างอยู่ตอนเปิด Dark Mode */
+        html.dark .bg-white\/60 { background-color: rgba(20, 30, 51, 0.75) !important; }
+        html.dark .border-slate-200\/70 { border-color: rgba(45, 61, 90, 0.7) !important; }
         html.dark .text-amber-700\/70, html.dark .text-blue-700\/70, html.dark .text-emerald-700\/70, html.dark .text-rose-700\/70 { opacity: 0.85; }
 
         /* ปุ่ม hover ต่างๆ ที่ยังไม่ครอบคลุม (แถบเมนู, ปุ่มการ์ด, แท็บ) */
