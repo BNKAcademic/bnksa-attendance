@@ -750,6 +750,44 @@
             box.classList.remove('scale-100', 'opacity-100'); box.classList.add('scale-95', 'opacity-0'); setTimeout(() => { modal.classList.add('hidden'); promptCallback = null; }, 300);
         }
         document.getElementById('promptBtn').addEventListener('click', () => { const val = document.getElementById('promptInput').value.trim(); if (promptCallback) promptCallback(val); closePrompt(); });
+        // ===== ป็อปอัพแสดง Progress Bar สำหรับงานที่ใช้เวลานาน (เช่น สร้างสมุดทะเบียนหลายสิบหน้า) =====
+        function showProgressModal(title, message) {
+            document.getElementById('progressTitle').innerText = title;
+            document.getElementById('progressMessage').innerText = message || 'กรุณารอสักครู่...';
+            document.getElementById('progressBarFill').style.width = '0%';
+            document.getElementById('progressPercentText').innerText = '0%';
+            document.getElementById('progressIconWrap').className = 'w-16 h-16 sm:w-20 sm:h-20 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6 text-indigo-500 text-3xl sm:text-4xl shadow-inner';
+            document.getElementById('progressIcon').className = 'fas fa-cog fa-spin';
+            document.getElementById('progressCloseBtn').classList.add('hidden');
+            const modal = document.getElementById('progressModal'); const box = document.getElementById('progressModalBox');
+            modal.classList.remove('hidden'); setTimeout(() => { box.classList.remove('scale-95', 'opacity-0'); box.classList.add('scale-100', 'opacity-100'); }, 10);
+        }
+        function updateProgressModal(percent, message) {
+            document.getElementById('progressBarFill').style.width = Math.min(100, Math.max(0, percent)) + '%';
+            document.getElementById('progressPercentText').innerText = Math.round(percent) + '%';
+            if (message) document.getElementById('progressMessage').innerText = message;
+        }
+        function completeProgressModal(title, message) {
+            document.getElementById('progressBarFill').style.width = '100%';
+            document.getElementById('progressPercentText').innerText = '100%';
+            document.getElementById('progressTitle').innerText = title || 'ดำเนินการเสร็จสิ้น';
+            document.getElementById('progressMessage').innerText = message || '';
+            document.getElementById('progressIconWrap').className = 'w-16 h-16 sm:w-20 sm:h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6 text-emerald-500 text-3xl sm:text-4xl shadow-inner';
+            document.getElementById('progressIcon').className = 'fas fa-check';
+            document.getElementById('progressCloseBtn').classList.remove('hidden');
+        }
+        function errorProgressModal(message) {
+            document.getElementById('progressTitle').innerText = 'เกิดข้อผิดพลาด';
+            document.getElementById('progressMessage').innerText = message || 'กรุณาลองใหม่อีกครั้ง';
+            document.getElementById('progressIconWrap').className = 'w-16 h-16 sm:w-20 sm:h-20 bg-rose-100 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6 text-rose-500 text-3xl sm:text-4xl shadow-inner';
+            document.getElementById('progressIcon').className = 'fas fa-exclamation-triangle';
+            document.getElementById('progressCloseBtn').classList.remove('hidden');
+        }
+        window.closeProgressModal = function() {
+            const modal = document.getElementById('progressModal'); const box = document.getElementById('progressModalBox');
+            box.classList.remove('scale-100', 'opacity-100'); box.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => { modal.classList.add('hidden'); }, 300);
+        };
         function renderAdminLogin() {
             if (isAdmin) { navigate('admin'); return; }
             let rememberedUser = ''; let rememberedPass = ''; let rememberedChecked = false;
@@ -1288,7 +1326,7 @@
                     dayButtonsHtml += `<button onclick="window.tempDailyDate='${iterDateStr}'; window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'daily'})" class="px-2 py-1 sm:px-3 sm:py-1.5 rounded text-[10px] sm:text-sm font-bold transition-colors ${activeCls}">${daysLabel[i-1].replace('วัน','')}</button>`;
                 }
                 dayButtonsHtml += `</div>`;
-                html += `<div class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 p-3 sm:p-8"><div class="flex flex-col mb-4 gap-2"><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800 flex items-center gap-2"><i class="far fa-calendar-day text-indigo-500"></i> เช็คชื่อรวมรายวิชา</h3><div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2"><div class="flex flex-col sm:flex-row gap-2 w-full md:w-auto"><input type="date" value="${displayDate}" onchange="window.tempDailyDate=this.value; window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'daily'})" class="w-full sm:w-auto bg-slate-50 border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-[11px] sm:text-sm font-bold shadow-inner outline-none focus:ring-2 focus:ring-indigo-500">${dayButtonsHtml}</div><div class="flex gap-1.5 w-full md:w-auto mt-2 md:mt-0"><button onclick="window.downloadRoomDailyPDF('${roomId}', '${displayDate}')" class="flex-1 md:flex-none bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm flex gap-1 items-center justify-center transition-colors"><i class="fas fa-file-pdf"></i> PDF</button><button onclick="window.exportRoomDailyExcel('${roomId}', '${displayDate}')" class="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm flex gap-1 items-center justify-center transition-colors"><i class="fas fa-file-excel"></i> Excel</button></div></div></div><div class="overflow-x-auto rounded-xl border border-slate-200 shadow-sm max-h-[600px] w-full"><table class="w-full text-center border-collapse text-[10px] sm:text-sm min-w-[500px] sm:min-w-[800px]"><thead class="bg-slate-100 sticky top-0 z-30 shadow-sm border-b-2 border-slate-200"><tr><th class="p-2 font-extrabold sticky left-0 z-20 bg-slate-100 border-r border-slate-300 w-[40px] sm:w-[60px] min-w-[40px] sm:min-w-[60px] text-center shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">เลขที่</th><th class="p-2 font-extrabold sticky left-[40px] sm:left-[60px] z-20 bg-slate-100 border-r border-slate-300 w-[120px] sm:w-[200px] min-w-[120px] sm:min-w-[200px] text-left shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">ชื่อ-นามสกุล</th>`;
+                html += `<div class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 p-3 sm:p-8"><div class="flex flex-col mb-4 gap-2"><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800 flex items-center gap-2"><i class="far fa-calendar-day text-indigo-500"></i> เช็คชื่อรวมรายวิชา</h3><div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2"><div class="flex flex-col sm:flex-row gap-2 w-full md:w-auto"><input type="date" value="${displayDate}" onchange="window.tempDailyDate=this.value; window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'daily'})" class="w-full sm:w-auto bg-slate-50 border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-[11px] sm:text-sm font-bold shadow-inner outline-none focus:ring-2 focus:ring-indigo-500">${dayButtonsHtml}</div><div class="flex gap-1.5 w-full md:w-auto mt-2 md:mt-0"><button onclick="window.downloadRoomDailyPDF('${roomId}', '${displayDate}')" class="flex-1 md:flex-none bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm flex gap-1 items-center justify-center transition-colors"><i class="fas fa-file-pdf"></i> PDF</button><button onclick="window.exportRoomDailyExcel('${roomId}', '${displayDate}')" class="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm flex gap-1 items-center justify-center transition-colors"><i class="fas fa-file-excel"></i> Excel</button><button onclick="window.downloadRoomMonthlyRegisterPDF('${roomId}', '${selectedMonth}')" title="สมุดทะเบียนรวมทุกวันในเดือนนี้ (ปก + รายวันทุกวัน จ-ศ + สรุปทั้งเดือน + ลงนามท้ายเล่ม)" class="flex-1 md:flex-none bg-indigo-700 hover:bg-indigo-800 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm flex gap-1 items-center justify-center transition-colors"><i class="fas fa-book"></i> <span class="hidden sm:inline">สมุดทะเบียน</span><span class="sm:hidden">ทะเบียน</span></button></div></div></div><div class="overflow-x-auto rounded-xl border border-slate-200 shadow-sm max-h-[600px] w-full"><table class="w-full text-center border-collapse text-[10px] sm:text-sm min-w-[500px] sm:min-w-[800px]"><thead class="bg-slate-100 sticky top-0 z-30 shadow-sm border-b-2 border-slate-200"><tr><th class="p-2 font-extrabold sticky left-0 z-20 bg-slate-100 border-r border-slate-300 w-[40px] sm:w-[60px] min-w-[40px] sm:min-w-[60px] text-center shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">เลขที่</th><th class="p-2 font-extrabold sticky left-[40px] sm:left-[60px] z-20 bg-slate-100 border-r border-slate-300 w-[120px] sm:w-[200px] min-w-[120px] sm:min-w-[200px] text-left shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">ชื่อ-นามสกุล</th>`;
                 if (subjectsToday.length === 0) { html += `<th class="p-2 text-slate-500">ไม่มีวิชาเรียนในวันนี้</th>`;
                 } else { subjectsToday.forEach(sub => { html += `<th class="p-1 sm:p-2 border-r border-slate-200 bg-slate-50 min-w-[60px] sm:min-w-[80px]"><div class="font-extrabold text-indigo-700 break-words line-clamp-2 max-w-[100px] mx-auto leading-tight" title="${sub.name}">${sub.name}</div><div class="text-[8px] sm:text-[10px] text-slate-500 mt-0.5 bg-slate-200/50 rounded inline-block px-1 border border-slate-300">ค.${sub.period}</div></th>`; });
                 }
@@ -2865,4 +2903,127 @@ content.innerHTML = html;
             } catch (err) { showToast("เกิดข้อผิดพลาดในการสร้าง PDF", "error"); } document.getElementById('pdf-daily-room-container').remove();
             if (__wasDark) document.documentElement.classList.add('dark');
         }
+
+        // ===== สมุดทะเบียนการเช็คชื่อรายเดือน (รวมหน้าปก + บันทึกรายวันทุกวันจันทร์-ศุกร์ + หน้าสรุปทั้งเดือน + ลงนามครั้งเดียวท้ายเล่ม) =====
+        // นับเฉพาะวันจันทร์-ศุกร์เท่านั้น (เสาร์-อาทิตย์ไม่นับรวมเด็ดขาด) วันที่ตรงกับวันหยุดที่แอดมินประกาศไว้จะขึ้นหน้าแจ้งวันหยุดแทนตารางเช็คชื่อ
+        window.downloadRoomMonthlyRegisterPDF = function(roomId, month) {
+            const reportCheck = window.tempRoomReport; if (!reportCheck || reportCheck.roomId !== roomId) { showToast("กรุณาเปิดหน้าสรุปห้องนี้ก่อนสร้างสมุดทะเบียน", "error"); return; }
+            showConfirm("สร้างสมุดทะเบียนรายเดือน", "จะสร้างสมุดทะเบียนรวมทุกวันในเดือนนี้ (ปก + บันทึกรายวันทุกวันจันทร์-ศุกร์ + สรุปทั้งเดือน) ซึ่งอาจมีหลายสิบหน้าและใช้เวลาสักครู่ พร้อมดำเนินการหรือไม่?", () => {
+                window.__runDownloadRoomMonthlyRegisterPDF(roomId, month);
+            });
+        };
+        window.__runDownloadRoomMonthlyRegisterPDF = async function(roomId, month) {
+            const report = window.tempRoomReport; if (!report || report.roomId !== roomId) { showToast("กรุณาเปิดหน้าสรุปห้องนี้ก่อนสร้างสมุดทะเบียน", "error"); return; }
+            showProgressModal("กำลังจัดทำสมุดทะเบียน", "กำลังเตรียมข้อมูล...");
+            const __wasDark = document.documentElement.classList.contains('dark'); if (__wasDark) document.documentElement.classList.remove('dark');
+            await document.fonts.ready; // รอฟอนต์ครั้งเดียวตอนเริ่ม ไม่ต้องรอซ้ำทุกหน้า (มีหลายสิบหน้า จะช้ามากถ้ารอทุกหน้า)
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            const roomName = formatRoomName(roomId);
+            const roomStudents = getRoomStudents(roomId).sort((a,b) => parseInt(a.number) - parseInt(b.number));
+            const roomSubjects = getRoomSubjects(roomId);
+            const advData = getRoomAdvisors(roomId);
+            const staffName = getRoomStaff(roomId);
+            const signerList = [];
+            if (advData[0]) signerList.push({ name: advData[0], role: advData[1] ? 'ครูที่ปรึกษาคนที่ 1' : 'ครูที่ปรึกษา' });
+            if (advData[1]) signerList.push({ name: advData[1], role: 'ครูที่ปรึกษาคนที่ 2' });
+            signerList.push({ name: staffName, role: 'เจ้าหน้าที่ / นายทะเบียน' });
+
+            const monthNames = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+            const thaiMonthsShort = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+            const [yearStr, monthStr] = month.split('-');
+            const year = parseInt(yearStr), monthNum = parseInt(monthStr);
+            const daysInMonth = new Date(year, monthNum, 0).getDate();
+            const displayMonthYear = `${monthNames[monthNum-1]} ${year+543}`;
+            const STUDENTS_PER_PAGE = 24;
+
+            // เก็บเฉพาะวันจันทร์-ศุกร์ในเดือนนี้ (dow: 1=จันทร์ ... 5=ศุกร์) เสาร์-อาทิตย์ข้ามไปเลย ไม่นับรวมในเล่ม
+            const weekdays = [];
+            for (let d = 1; d <= daysInMonth; d++) {
+                const dObj = new Date(year, monthNum - 1, d);
+                const dow = dObj.getDay();
+                if (dow === 0 || dow === 6) continue;
+                const dateStr = `${year}-${String(monthNum).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                weekdays.push({ day: d, dateStr, dObj, dow, holiday: getHolidayForDate(dateStr) });
+            }
+            const totalWeekdays = weekdays.length;
+            const totalHolidays = weekdays.filter(w => w.holiday).length;
+            const totalTeachingDays = totalWeekdays - totalHolidays;
+
+            const pdfDoc = new jspdf.jsPDF('p', 'pt', 'a4');
+            let htmlContainer = `<div id="pdf-register-container" class="a4-export-container text-slate-800" style="font-family: 'Sarabun', sans-serif;">`;
+
+            // ===== หน้าปก =====
+            htmlContainer += `<div id="pdf-reg-cover" class="a4-page flex flex-col items-center justify-center bg-white text-center">${settings.logoDataUrl ? `<img src="${settings.logoDataUrl}" style="width:90px; height:90px; object-fit:cover; border-radius:9999px; margin:0 auto 18px auto; display:block; border:3px solid #e2e8f0;">` : ''}<p class="text-sm text-slate-400 font-bold mb-10 tracking-wide">${settings.title || 'ระบบเช็คชื่อนักเรียนอัจฉริยะ'}</p><h1 class="text-4xl font-black text-slate-800 mb-3">สมุดทะเบียนการเช็คชื่อนักเรียน</h1><h2 class="text-2xl font-bold text-indigo-600 mb-1">ห้อง ${roomName}</h2><p class="text-xl font-bold text-slate-500 mb-10">ประจำเดือน${displayMonthYear}</p><div class="grid grid-cols-2 gap-5 w-full max-w-sm text-left bg-slate-50 border border-slate-200 rounded-2xl p-6 sm:p-8"><div><p class="text-[11px] text-slate-400 font-bold">นักเรียนทั้งหมด</p><p class="text-2xl font-black text-slate-700">${roomStudents.length} คน</p></div><div><p class="text-[11px] text-slate-400 font-bold">วันทำการ (จ-ศ)</p><p class="text-2xl font-black text-slate-700">${totalWeekdays} วัน</p></div><div><p class="text-[11px] text-slate-400 font-bold">วันหยุดประกาศ</p><p class="text-2xl font-black text-rose-500">${totalHolidays} วัน</p></div><div><p class="text-[11px] text-slate-400 font-bold">วันเรียนจริง</p><p class="text-2xl font-black text-emerald-600">${totalTeachingDays} วัน</p></div></div><div class="mt-12">${pdfDocMeta()}</div></div>`;
+
+            // ===== หน้าบันทึกรายวัน (จันทร์-ศุกร์ทุกวัน) =====
+            weekdays.forEach(w => {
+                const displayDateStr = `${w.day} ${thaiMonthsShort[monthNum-1]} ${year + 543}`;
+                if (w.holiday) {
+                    htmlContainer += `<div class="a4-page flex flex-col bg-white"><div class="text-center mb-6 border-b-2 border-slate-700 pb-4">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-3xl font-black" style="margin-bottom:22px; line-height:1.5;">บันทึกประจำวันที่ ${displayDateStr}</h1><h2 class="text-xl font-bold bg-indigo-100 px-4 py-1.5 rounded-full inline-block border border-indigo-300">ห้อง: ${roomName}</h2></div><div class="flex-1 flex flex-col items-center justify-center text-center py-16"><div class="w-20 h-20 bg-rose-100 text-rose-500 rounded-full flex items-center justify-center text-4xl mb-6"><i class="fas fa-calendar-times"></i></div><p class="text-2xl font-black text-rose-600 mb-2">วันหยุด</p><p class="text-lg font-bold text-slate-600">${w.holiday.label}</p><p class="text-sm text-slate-400 mt-4">ไม่มีการเรียนการสอนในวันนี้</p></div></div>`;
+                    return;
+                }
+                const subjectsToday = []; roomSubjects.forEach(s => { if (s.schedules) { s.schedules.forEach(sch => { if (parseInt(sch.day) === w.dow) { subjectsToday.push({ ...s, period: parseInt(sch.period) }); } }); } });
+                subjectsToday.sort((a,b) => a.period - b.period);
+                const dailyAttRecords = attendanceData.filter(a => a.date === w.dateStr && subjectsToday.some(st => st.id === a.subjectId && String(st.period) === String(a.period)));
+                const pagesForDay = Math.ceil(roomStudents.length / STUDENTS_PER_PAGE) || 1;
+                for (let p = 0; p < pagesForDay; p++) {
+                    const dataChunk = roomStudents.slice(p * STUDENTS_PER_PAGE, (p + 1) * STUDENTS_PER_PAGE);
+                    let tableHTML = `<table class="w-full text-center border-collapse text-[12px] bg-white border border-slate-500" style="table-layout: fixed; width: 100%;"><thead class="bg-slate-100 text-slate-700"><tr><th class="p-2 border border-slate-500" style="width: 10%;">เลขที่</th><th class="p-2 border border-slate-500 text-left" style="width: 35%;">ชื่อ-นามสกุล</th>`;
+                    if (subjectsToday.length === 0) { tableHTML += `<th class="p-2 border border-slate-500 w-auto">ไม่มีวิชาเรียน</th>`;
+                    } else { const subColWidth = 55 / subjectsToday.length; subjectsToday.forEach(sub => { tableHTML += `<th class="p-2 border border-slate-500" style="width: ${subColWidth}%;"><div class="leading-tight" title="${sub.name}">${sub.name}</div><div class="text-[9px] mt-1 text-slate-500">คาบ ${sub.period}</div></th>`; }); }
+                    tableHTML += `</tr></thead><tbody class="divide-y divide-slate-400">`;
+                    dataChunk.forEach((st) => {
+                        const isRes = st.status === 'resigned'; let bgRow = isRes ? 'bg-slate-100 text-slate-500 opacity-80' : 'bg-white';
+                        tableHTML += `<tr class="${bgRow}"><td class="p-1.5 border border-slate-500 font-bold">${st.number}</td><td class="p-1.5 border border-slate-500 text-left font-bold">${st.name} ${isRes?'(ออก/ย้าย)':''}</td>`;
+                        if (subjectsToday.length === 0) { tableHTML += `<td class="p-1.5 border border-slate-500">-</td>`; } else { subjectsToday.forEach(sub => { const attRecord = dailyAttRecords.find(a => a.subjectId === sub.id && String(a.period) === String(sub.period)); let statusStr = '-', statusCls = ''; if (attRecord && attRecord.records[st.id]) { statusStr = attRecord.records[st.id]; if(statusStr === 'มา' || statusStr === 'ร่วมกิจกรรม') statusCls = 'text-emerald-700 font-bold'; else if(statusStr === 'สาย') statusCls = 'text-amber-600 font-bold'; else statusCls = 'text-rose-600 font-bold';
+                        } tableHTML += `<td class="p-1.5 border border-slate-500 ${statusCls} whitespace-nowrap">${statusStr}</td>`; }); }
+                        tableHTML += `</tr>`;
+                    });
+                    tableHTML += '</tbody></table>';
+                    htmlContainer += `<div class="a4-page flex flex-col bg-white">${pdfPageBadge(pagesForDay > 1 ? `หน้าเสริม ${p+1}/${pagesForDay}` : '')}<div class="text-center mb-6 border-b-2 border-slate-700 pb-4">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-3xl font-black" style="margin-bottom:22px; line-height:1.5;">บันทึกประจำวันที่ ${displayDateStr}</h1><h2 class="text-xl font-bold bg-indigo-100 px-4 py-1.5 rounded-full inline-block border border-indigo-300">ห้อง: ${roomName}</h2></div>${tableHTML}</div>`;
+                }
+            });
+
+            // ===== หน้าสรุปทั้งเดือน + ลงนามครั้งเดียวท้ายเล่ม =====
+            const summaryPagesCount = Math.ceil(report.data.length / STUDENTS_PER_PAGE) || 1;
+            for (let page = 0; page < summaryPagesCount; page++) {
+                const dataChunk = report.data.slice(page * STUDENTS_PER_PAGE, (page + 1) * STUDENTS_PER_PAGE);
+                let tableHTML = `<table class="w-full text-center border-collapse text-[12px] bg-white border border-slate-500" style="table-layout: fixed; width: 100%;"><thead class="bg-slate-100 text-slate-700"><tr><th class="p-2 border border-slate-500" style="width: 8%;">เลขที่</th><th class="p-2 border border-slate-500 text-left" style="width: 32%;">ชื่อ-นามสกุล</th><th class="p-2 border border-slate-500" style="width: 6%;">ส.1</th><th class="p-2 border border-slate-500" style="width: 6%;">ส.2</th><th class="p-2 border border-slate-500" style="width: 6%;">ส.3</th><th class="p-2 border border-slate-500" style="width: 6%;">ส.4</th><th class="p-2 border border-slate-500" style="width: 6%;">ส.5</th><th class="p-2 border border-slate-500 bg-emerald-50 text-emerald-800" style="width: 6%;">มา</th><th class="p-2 border border-slate-500 bg-blue-50 text-blue-800" style="width: 6%;">ลา</th><th class="p-2 border border-slate-500 bg-rose-50 text-rose-800" style="width: 6%;">ขาด</th><th class="p-2 border border-slate-500 text-indigo-700" style="width: 12%;">การติดตาม</th></tr></thead><tbody class="divide-y divide-slate-400">`;
+                dataChunk.forEach((row) => {
+                    const isRes = row.student.status === 'resigned'; let bgRow = isRes ? 'bg-slate-100 text-slate-500 opacity-80' : 'bg-white';
+                    let valid = row.monthly['มา'] + row.monthly['ร่วมกิจกรรม'], leave = row.monthly['ลากิจ'] + row.monthly['ลาป่วย'], absent = row.monthly['ขาด'] + row.monthly['โดดเรียน'];
+                    let fwText = '-'; let fwCls = '';
+                    let lateLimit = settings.thresholds?.late || 4; let absLimit = settings.thresholds?.absent || 4;
+                    let lateCount = row.monthly['สาย'] || 0; let absentCount = row.monthly['ขาด'] || 0;
+                    if (lateCount >= lateLimit || absentCount >= absLimit) {
+                        const isFollowedUp = followUps.find(f => f.studentId === row.student.id && f.month === month);
+                        if (isFollowedUp) { fwText = 'ติดตามแล้ว'; fwCls = 'text-emerald-700 bg-emerald-50 font-bold'; }
+                        else { fwText = 'ต้องติดตาม'; fwCls = 'text-rose-700 bg-rose-50 font-bold'; }
+                    }
+                    tableHTML += `<tr class="${bgRow}"><td class="p-1.5 border border-slate-500 font-bold">${row.student.number}</td><td class="p-1.5 border border-slate-500 text-left font-bold">${row.student.name} ${isRes?'(ออก)':''}</td><td class="p-1.5 border border-slate-500">${row.weekly[1]||'-'}</td><td class="p-1.5 border border-slate-500">${row.weekly[2]||'-'}</td><td class="p-1.5 border border-slate-500">${row.weekly[3]||'-'}</td><td class="p-1.5 border border-slate-500">${row.weekly[4]||'-'}</td><td class="p-1.5 border border-slate-500">${row.weekly[5]||'-'}</td><td class="p-1.5 border border-slate-500 font-black text-emerald-700 bg-emerald-50/50">${valid||'-'}</td><td class="p-1.5 border border-slate-500 font-black text-blue-700 bg-blue-50/50">${leave||'-'}</td><td class="p-1.5 border border-slate-500 font-black text-rose-700 bg-rose-50/50">${absent||'-'}</td><td class="p-1.5 border border-slate-500 ${fwCls} text-[10px]">${fwText}</td></tr>`;
+                });
+                tableHTML += '</tbody></table>';
+                htmlContainer += `<div class="a4-page flex flex-col justify-between bg-white">${pdfPageBadge(summaryPagesCount > 1 ? `หน้าสรุป ${page+1}/${summaryPagesCount}` : '')}<div><div class="text-center mb-6 border-b-2 border-slate-700 pb-4">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-3xl font-black" style="margin-bottom:22px; line-height:1.5;">สรุปผลรวมทั้งเดือน</h1><h2 class="text-xl font-bold bg-emerald-100 px-4 py-1.5 rounded-full inline-block border border-emerald-300">ห้อง: ${roomName} | ประจำเดือน: ${displayMonthYear}</h2></div>${tableHTML}</div>${page === summaryPagesCount - 1 ? buildPdfSignatureBlock(signerList) : ''}</div>`;
+            }
+
+            htmlContainer += `</div>`; document.body.insertAdjacentHTML('beforeend', htmlContainer);
+            await document.fonts.ready;
+            await new Promise(resolve => setTimeout(resolve, 800));
+            try {
+                const allPages = document.querySelectorAll('#pdf-register-container .a4-page');
+                const totalPages = allPages.length;
+                for (let i = 0; i < totalPages; i++) {
+                    updateProgressModal((i / totalPages) * 100, `กำลังสร้างหน้าที่ ${i+1} จาก ${totalPages}...`);
+                    const canvas = await html2canvas(allPages[i], { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false });
+                    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                    if (i > 0) pdfDoc.addPage(); pdfDoc.addImage(imgData, 'JPEG', 0, 0, 595.28, 841.89);
+                }
+                updateProgressModal(100, "กำลังบันทึกไฟล์...");
+                pdfDoc.save(`สมุดทะเบียน_${roomName}_${month}.pdf`);
+                completeProgressModal("ดำเนินการเสร็จสิ้น", `สร้างสมุดทะเบียน (${totalPages} หน้า) สำเร็จ ไฟล์ถูกดาวน์โหลดแล้ว`);
+            } catch (err) { errorProgressModal("เกิดข้อผิดพลาดในการสร้างสมุดทะเบียน กรุณาลองใหม่อีกครั้ง"); }
+            document.getElementById('pdf-register-container').remove();
+            if (__wasDark) document.documentElement.classList.add('dark');
+        };
     

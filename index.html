@@ -88,6 +88,19 @@
         </div>
     </div>
 
+    <div id="progressModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-4 transition-opacity">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm transform scale-95 opacity-0 transition-all duration-300" id="progressModalBox">
+            <div class="p-6 sm:p-8 text-center">
+                <div class="w-16 h-16 sm:w-20 sm:h-20 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6 text-indigo-500 text-3xl sm:text-4xl shadow-inner" id="progressIconWrap"><i class="fas fa-cog fa-spin" id="progressIcon"></i></div>
+                <h3 class="text-xl sm:text-2xl font-extrabold text-slate-800 mb-2" id="progressTitle">กำลังดำเนินการ</h3>
+                <p class="text-sm sm:text-base text-slate-500 mb-4 font-medium" id="progressMessage">กรุณารอสักครู่...</p>
+                <div class="w-full h-3 sm:h-4 bg-slate-200 rounded-full overflow-hidden shadow-inner mb-2"><div id="progressBarFill" class="bg-indigo-600 h-full rounded-full transition-all duration-300" style="width: 0%"></div></div>
+                <p class="text-xs sm:text-sm font-bold text-slate-400 mb-6" id="progressPercentText">0%</p>
+                <button id="progressCloseBtn" onclick="window.closeProgressModal()" class="hidden w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl sm:rounded-2xl font-bold transition-colors shadow-lg shadow-indigo-200 text-sm sm:text-base">ปิด</button>
+            </div>
+        </div>
+    </div>
+
     <script src="app.js"></script>
 </body>
 </html>
