@@ -499,7 +499,7 @@
             try {
                 const response = await fetch(GOOGLE_APP_SCRIPT_URL);
                 const latest = await response.json();
-                if (!latest) return;
+                if (!latest) return null;
                 if (fields.includes('subjects') && latest.subjects) {
                     subjects = latest.subjects.map(s => {
                         if (s.day !== undefined && s.period !== undefined && !s.schedules) { s.credits = 0.5; s.schedules = [{ day: s.day, period: s.period }]; delete s.day; delete s.period; }
@@ -511,7 +511,8 @@
                     students = latest.students.map(st => { if (!st.status) st.status = 'active'; if (st.title) { st.name = (st.title + (st.name || '')).trim(); st.title = ''; } return st; });
                 }
                 if (fields.includes('teachers') && latest.teachers) teachers = latest.teachers;
-            } catch (e) { /* เครือข่ายมีปัญหา ใช้ข้อมูลปัจจุบันในเครื่องแทนไปก่อน */ }
+                return latest; // คืนข้อมูลที่ดึงมาให้ผู้เรียกใช้ต่อได้ - ป้องกัน saveData('full') ต้อง fetch DB ทั้งก้อนซ้ำอีกรอบทันที (ตัวการที่ทำให้บันทึกช้า/หน่วง)
+            } catch (e) { /* เครือข่ายมีปัญหา ใช้ข้อมูลปัจจุบันในเครื่องแทนไปก่อน */ return null; }
         }
 
         // ===== บันทึกข้อมูลแบบ Real-time รองรับการบันทึกพร้อมกันจากหลายอุปกรณ์ =====
@@ -519,7 +520,7 @@
         // (ล็อกการเขียนไว้ฝั่ง Apps Script ด้วย LockService กันข้อมูลชนกันเวลาเช็คชื่อพร้อมกันหลายห้อง/หลายวิชา)
         // คืนค่า true/false บอกว่าบันทึกสำเร็จจริงหรือไม่ (เดิมไม่คืนค่าอะไรเลย ทำให้ถ้าบันทึกล้มเหลว (เช่น เน็ตหลุด/เซิร์ฟเวอร์ error) หน้าเว็บจะไม่รู้ตัวและไม่แจ้งเตือนผู้ใช้เลย
         // เข้าใจผิดว่าบันทึกสำเร็จ พอโหลดหน้าใหม่ค่าที่เพิ่งเปลี่ยน (เช่น ปีการศึกษา) จะหายไปเพราะไม่เคยถูกบันทึกจริงบนเซิร์ฟเวอร์)
-        async function saveData(action = 'full', payload = null) {
+        async function saveData(action = 'full', payload = null, prefetchedLatest = null) {
             try {
                 if (GOOGLE_APP_SCRIPT_URL === "YOUR_WEB_APP_URL_HERE") return false;
                 let res;
@@ -538,9 +539,10 @@
                     res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_all_attendance' }) });
                 } else {
                     // 'full' - ใช้สำหรับตั้งค่า/ครู/วิชา/นักเรียน/ผู้ใช้งาน ฯลฯ ยังคง fetch ข้อมูลล่าสุดมาผสาน attendanceData/followUps/logs ก่อนเขียนทับเสมอ กันไม่ให้ไปทับข้อมูลที่ถูกเช็คชื่อพร้อมกันจากอุปกรณ์อื่น
+                    // ถ้าผู้เรียกเพิ่ง fetch ข้อมูลล่าสุดมาแล้ว (เช่นผ่าน refreshBeforeEdit) ให้ส่ง prefetchedLatest มาใช้ต่อได้เลย ไม่ต้อง fetch ซ้ำอีกรอบ (จุดที่ทำให้บันทึกช้า/หน่วงเดิม)
                     let dataToSave = { settings, teachers, subjects, students, attendanceData, followUps, logs };
-                    const response = await fetch(GOOGLE_APP_SCRIPT_URL);
-                    const latestData = await response.json();
+                    let latestData = prefetchedLatest;
+                    if (!latestData) { const response = await fetch(GOOGLE_APP_SCRIPT_URL); latestData = await response.json(); }
                     if (latestData && latestData.attendanceData) {
                         dataToSave.attendanceData = latestData.attendanceData; attendanceData = latestData.attendanceData;
                         dataToSave.followUps = latestData.followUps || followUps; followUps = dataToSave.followUps;
@@ -1529,7 +1531,7 @@ content.innerHTML = html;
             }
             else if (currentAdminTab === 'teachers') {
                 let deptOptions = departmentsList.map(d => `<option value="${d}">${d}</option>`).join('');
-                let html = `<div class="flex flex-col sm:flex-row justify-between sm:items-center mb-3 gap-2"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-chalkboard-teacher text-indigo-500"></i> จัดการครูผู้สอน</h3><button onclick="window.openTeacherModal()" class="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg font-bold text-sm shadow-sm transition-colors"><i class="fas fa-plus"></i> เพิ่มครูใหม่</button></div>`;
+                let html = `<div class="flex flex-col sm:flex-row justify-between sm:items-center mb-3 gap-2"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-chalkboard-teacher text-indigo-500"></i> จัดการครูผู้สอน</h3><div class="flex flex-wrap gap-1.5"><button onclick="window.openTeacherModal()" class="flex-1 sm:flex-none bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors"><i class="fas fa-plus"></i> เพิ่มครูใหม่</button><button onclick="window.downloadTeacherTemplate()" class="flex-1 sm:flex-none bg-amber-500 hover:bg-amber-600 text-white px-3 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-download"></i> โหลดฟอร์มครู</button><label class="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg font-bold text-xs sm:text-sm cursor-pointer text-center shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-import"></i> นำเข้ารายชื่อครู<input type="file" accept=".xlsx, .xls" class="hidden" onchange="window.handleImportTeachers(event)"></label></div></div>`;
                 html += `<div class="mb-4 bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-sm"><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><i class="fas fa-search text-slate-400"></i></div><input type="text" id="searchTeacherInput" onkeyup="window.filterTeachers()" class="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-400 shadow-inner" placeholder="ค้นหาชื่อครู หรือกลุ่มสาระฯ..."></div></div>`;
                 html += `<div id="teacherModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-3 transition-opacity"><div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto transform scale-95 opacity-0 transition-all duration-300" id="teacherModalBox"><div class="p-4 sm:p-6"><div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-extrabold text-lg" id="teacherModalTitle">เพิ่มครูใหม่</h4><button onclick="window.closeTeacherModal()" class="text-slate-400 text-xl hover:text-rose-500 transition-colors"><i class="fas fa-times"></i></button></div><div class="flex flex-col gap-3 mb-4"><div><label class="block text-[10px] sm:text-xs font-bold mb-1">ชื่อ-นามสกุล ครูผู้สอน</label><input type="text" id="newTcName" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-400" placeholder="เช่น ครูสมใจ รักเรียน"></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">กลุ่มสาระการเรียนรู้</label><select id="newTcDept" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-400">${deptOptions}</select></div></div><div class="flex justify-end gap-2"><button onclick="window.closeTeacherModal()" class="bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded font-bold text-sm transition-colors">ยกเลิก</button><button onclick="window.saveTeacherForm()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded font-bold text-sm shadow-sm transition-colors"><i class="fas fa-save"></i> บันทึก</button></div></div></div></div>`;
                 html += `<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3" id="adminTeacherGrid">`;
@@ -2259,7 +2261,7 @@ content.innerHTML = html;
             let count = credit * 2; let schedules = [];
             for (let i = 0; i < count; i++) { schedules.push({ day: parseInt(document.getElementById(`newSubDay_${i}`).value), period: parseInt(document.getElementById(`newSubPeriod_${i}`).value) }); }
             document.body.style.pointerEvents = 'none';
-            await refreshBeforeEdit(['subjects']); // ดึงข้อมูลล่าสุดก่อนบันทึก กันชนกับแอดมินคนอื่นที่แก้ไขพร้อมกัน
+            const __prefetch1 = await refreshBeforeEdit(['subjects']); // ดึงข้อมูลล่าสุดก่อนบันทึก กันชนกับแอดมินคนอื่นที่แก้ไขพร้อมกัน
             if (editingSubjectId) {
                 const sub = subjects.find(s => s.id === editingSubjectId);
                 if (sub) {
@@ -2272,16 +2274,16 @@ content.innerHTML = html;
                 subjects.push({ id: generateId(), roomId, name, code, teacher, teacher2, credits: credit, schedules, term: adminTerm(), year: adminYear(), locked: false });
                 logAction('เพิ่มวิชาใหม่', `${name} (${formatRoomName(roomId)})`);
             }
-            await saveData('full'); document.body.style.pointerEvents = 'auto'; showToast("บันทึกสำเร็จ"); renderAdminTab(); closeSubjectModal();
+            await saveData('full', null, __prefetch1); document.body.style.pointerEvents = 'auto'; showToast("บันทึกสำเร็จ"); renderAdminTab(); closeSubjectModal();
         };
         window.toggleSubjectLock = async function(id) {
             document.body.style.pointerEvents = 'none';
-            await refreshBeforeEdit(['subjects']);
+            const __prefetch2 = await refreshBeforeEdit(['subjects']);
             const sub = subjects.find(s => s.id === id);
             if (!sub) { document.body.style.pointerEvents = 'auto'; showToast("ไม่พบวิชานี้แล้ว", "error"); renderAdminTab(); return; }
             sub.locked = !sub.locked;
             logAction(sub.locked ? 'ล็อควิชา (ป้องกันการลบ)' : 'ปลดล็อควิชา', `${sub.name} (${formatRoomName(sub.roomId)})`);
-            await saveData('full'); document.body.style.pointerEvents = 'auto'; showToast(sub.locked ? "ล็อควิชานี้แล้ว" : "ปลดล็อควิชานี้แล้ว"); renderAdminTab();
+            await saveData('full', null, __prefetch2); document.body.style.pointerEvents = 'auto'; showToast(sub.locked ? "ล็อควิชานี้แล้ว" : "ปลดล็อควิชานี้แล้ว"); renderAdminTab();
         };
         window.clearRoomSubjects = function(roomId) {
             if (!roomId || roomId === 'all') { showToast("กรุณาเลือกห้องก่อน", "error"); return; }
@@ -2290,13 +2292,13 @@ content.innerHTML = html;
             if (targets.length === 0) { showToast("ไม่มีวิชาที่สามารถลบได้ (อาจถูกล็อคไว้ทั้งหมด หรือห้องนี้ยังไม่มีวิชา)", "error"); return; }
             showConfirm("ลบวิชาทั้งหมดในห้องนี้", `จะลบวิชาที่ไม่ได้ล็อคไว้ ${targets.length} รายการ พร้อมข้อมูลการเช็คชื่อที่เกี่ยวข้อง ของห้อง ${formatRoomName(roomId)} เทอม ${adminTerm()}/${adminYear()}${lockedCount > 0 ? ` (วิชาที่ล็อคไว้ ${lockedCount} รายการจะไม่ถูกลบ)` : ''} แน่ใจหรือไม่?`, async () => {
                 document.body.style.pointerEvents = 'none';
-                await refreshBeforeEdit(['subjects']);
+                const __prefetch3 = await refreshBeforeEdit(['subjects']);
                 const freshTargets = getRoomSubjects(roomId, adminTerm(), adminYear()).filter(s => !s.locked);
                 const ids = new Set(freshTargets.map(s => s.id));
                 subjects = subjects.filter(s => !ids.has(s.id));
                 attendanceData = attendanceData.filter(a => !ids.has(a.subjectId));
                 logAction('ลบวิชาทั้งหมดในห้อง', `${formatRoomName(roomId)} เทอม ${adminTerm()}/${adminYear()} (${freshTargets.length} วิชา)`);
-                await saveData('full'); document.body.style.pointerEvents = 'auto'; showToast("ลบวิชาทั้งหมดในห้องเรียบร้อย"); renderAdminTab();
+                await saveData('full', null, __prefetch3); document.body.style.pointerEvents = 'auto'; showToast("ลบวิชาทั้งหมดในห้องเรียบร้อย"); renderAdminTab();
             });
         };
 
@@ -2325,14 +2327,17 @@ content.innerHTML = html;
             const targetRoom = window.adminSelectedSubjectRoom;
             const VALID_CREDITS = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0];
             const file = e.target.files[0];
-            if (!file) return; showToast("กำลังอ่านไฟล์..."); const reader = new FileReader();
+            if (!file) return; showProgressModal("กำลังนำเข้ารายวิชา", "กำลังอ่านไฟล์..."); const reader = new FileReader();
             reader.onload = async function(evt) {
                 try {
+                    updateProgressModal(20, "กำลังตรวจสอบข้อมูลในไฟล์...");
                     const data = new Uint8Array(evt.target.result);
                     const workbook = XLSX.read(data, {type: 'array'}); const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
                     let startIndex = (jsonData.length > 0 && (String(jsonData[0][0] || '').includes("รหัสวิชา") || String(jsonData[0][1] || '').includes("ชื่อวิชา"))) ? 1 : 0;
                     let imported = 0;
-                    await refreshBeforeEdit(['subjects']); // ดึงข้อมูลล่าสุดก่อนนำเข้า กันชนกับแอดมินคนอื่น
+                    updateProgressModal(40, "กำลังดึงข้อมูลล่าสุดจากเซิร์ฟเวอร์...");
+                    const __prefetch4 = await refreshBeforeEdit(['subjects']); // ดึงข้อมูลล่าสุดก่อนนำเข้า กันชนกับแอดมินคนอื่น
+                    updateProgressModal(60, "กำลังนำเข้าข้อมูลรายวิชา...");
                     for (let i = startIndex; i < jsonData.length; i++) {
                         const row = jsonData[i];
                         if (!row || !row[1] || !String(row[1]).trim()) continue;
@@ -2346,10 +2351,57 @@ content.innerHTML = html;
                         if (exists) { exists.name = name; exists.code = code; exists.credits = credits;
                         } else { subjects.push({ id: generateId(), roomId: targetRoom, name, code, teacher: '', teacher2: '', credits, schedules: [], term: adminTerm(), year: adminYear(), locked: false }); } imported++;
                     }
-                    if (imported > 0) { await saveData('full'); logAction('นำเข้ารายวิชาจาก Excel (ชื่อ+รหัส+หน่วยกิต)', `นำเข้า ${imported} วิชา ห้อง ${formatRoomName(targetRoom)} - รอเจ้าหน้าที่เพิ่มครู/ตารางเรียน`);
-                        showToast(`นำเข้า ${imported} วิชา สำเร็จ! กรุณาเข้าไปเพิ่มครูผู้สอนและตารางเรียนให้ครบต่อไป`); renderAdminTab(); } else { showToast("ไม่พบข้อมูลที่ถูกต้องในไฟล์ (ต้องมีอย่างน้อยคอลัมน์ชื่อวิชา)", "error");
+                    if (imported > 0) { updateProgressModal(85, "กำลังบันทึกขึ้นเซิร์ฟเวอร์..."); await saveData('full', null, __prefetch4); logAction('นำเข้ารายวิชาจาก Excel (ชื่อ+รหัส+หน่วยกิต)', `นำเข้า ${imported} วิชา ห้อง ${formatRoomName(targetRoom)} - รอเจ้าหน้าที่เพิ่มครู/ตารางเรียน`);
+                        completeProgressModal("นำเข้าสำเร็จ", `นำเข้า ${imported} วิชา สำเร็จ! กรุณาเข้าไปเพิ่มครูผู้สอนและตารางเรียนให้ครบต่อไป`); renderAdminTab(); } else { errorProgressModal("ไม่พบข้อมูลที่ถูกต้องในไฟล์ (ต้องมีอย่างน้อยคอลัมน์ชื่อวิชา)");
                     }
-                } catch (err) { showToast("เกิดข้อผิดพลาดในการอ่านไฟล์", "error");
+                } catch (err) { errorProgressModal("เกิดข้อผิดพลาดในการอ่านไฟล์ กรุณาตรวจสอบรูปแบบไฟล์");
+                } e.target.value = '';
+            }; reader.readAsArrayBuffer(file);
+        };
+
+        // ===== นำเข้ารายชื่อครู (ชื่อครู + กลุ่มสาระการเรียนรู้) =====
+        window.downloadTeacherTemplate = function() {
+            const deptList = departmentsList.join(' / ');
+            const ws_data = [
+                ["ชื่อ-นามสกุล ครูผู้สอน", "กลุ่มสาระการเรียนรู้"],
+                ["ครูสมใจ รักเรียน", departmentsList[0] || 'ระบบ/อื่นๆ'],
+                ["ครูสมหญิง ใจดี", departmentsList[1] || 'ระบบ/อื่นๆ'],
+                [],
+                ["หมายเหตุ: กลุ่มสาระการเรียนรู้ต้องพิมพ์ให้ตรงกับที่มีอยู่ในระบบเป๊ะ ไม่เช่นนั้นจะถูกจัดเป็น \"ระบบ/อื่นๆ\" โดยอัตโนมัติ"],
+                [`กลุ่มสาระที่มีในระบบ: ${deptList}`],
+                ["ถ้ามีชื่อครูซ้ำกับที่มีอยู่แล้ว ระบบจะอัปเดตกลุ่มสาระให้ตามไฟล์ที่นำเข้าแทนการเพิ่มซ้ำ"]
+            ];
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); ws['!cols'] = [{wch: 28}, {wch: 30}];
+            const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Template");
+            XLSX.writeFile(wb, `แบบฟอร์มนำเข้ารายชื่อครู.xlsx`);
+            showToast("ดาวน์โหลดแบบฟอร์มครูสำเร็จ", "success");
+        };
+        window.handleImportTeachers = function(e) {
+            const file = e.target.files[0];
+            if (!file) return; showProgressModal("กำลังนำเข้ารายชื่อครู", "กำลังอ่านไฟล์..."); const reader = new FileReader();
+            reader.onload = async function(evt) {
+                try {
+                    updateProgressModal(20, "กำลังตรวจสอบข้อมูลในไฟล์...");
+                    const data = new Uint8Array(evt.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'}); const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
+                    let startIndex = (jsonData.length > 0 && (String(jsonData[0][0] || '').includes("ชื่อ") || String(jsonData[0][1] || '').includes("กลุ่มสาระ"))) ? 1 : 0;
+                    let imported = 0, updated = 0;
+                    updateProgressModal(50, "กำลังนำเข้าข้อมูลครู...");
+                    for (let i = startIndex; i < jsonData.length; i++) {
+                        const row = jsonData[i];
+                        if (!row || !row[0] || !String(row[0]).trim()) continue;
+                        const name = String(row[0]).trim();
+                        if (name.startsWith('หมายเหตุ') || name.startsWith('กลุ่มสาระที่มีในระบบ') || name.startsWith('ถ้ามีชื่อครูซ้ำ')) continue;
+                        const deptRaw = String(row[1] || '').trim();
+                        const department = departmentsList.includes(deptRaw) ? deptRaw : 'ระบบ/อื่นๆ';
+                        const existing = teachers.find(t => t.name === name);
+                        if (existing) { existing.department = department; updated++; }
+                        else { teachers.push({ id: generateId(), name, department }); imported++; }
+                    }
+                    if (imported > 0 || updated > 0) { updateProgressModal(85, "กำลังบันทึกขึ้นเซิร์ฟเวอร์..."); await saveData('full'); logAction('นำเข้ารายชื่อครูจาก Excel', `เพิ่มใหม่ ${imported} คน อัปเดต ${updated} คน`);
+                        completeProgressModal("นำเข้าสำเร็จ", `เพิ่มครูใหม่ ${imported} คน${updated > 0 ? ` และอัปเดตกลุ่มสาระของครูเดิม ${updated} คน` : ''}`); renderAdminTab(); } else { errorProgressModal("ไม่พบข้อมูลที่ถูกต้องในไฟล์ (ต้องมีอย่างน้อยคอลัมน์ชื่อครู)");
+                    }
+                } catch (err) { errorProgressModal("เกิดข้อผิดพลาดในการอ่านไฟล์ กรุณาตรวจสอบรูปแบบไฟล์");
                 } e.target.value = '';
             }; reader.readAsArrayBuffer(file);
         };
@@ -2401,7 +2453,7 @@ content.innerHTML = html;
             const number = document.getElementById('newStuNum').value, name = document.getElementById('newStuName').value.trim(), status = document.getElementById('newStuStatus').value;
             if (!number || !name) { showToast("กรอกข้อมูลให้ครบ", "error"); return; }
             document.body.style.pointerEvents = 'none';
-            await refreshBeforeEdit(['students']); // ดึงข้อมูลล่าสุดก่อนบันทึก กันชนกับแอดมินคนอื่นที่เพิ่ม/แก้ไขนักเรียนพร้อมกัน
+            const __prefetch5 = await refreshBeforeEdit(['students']); // ดึงข้อมูลล่าสุดก่อนบันทึก กันชนกับแอดมินคนอื่นที่เพิ่ม/แก้ไขนักเรียนพร้อมกัน
             if (editingStudentId) {
                 const st = students.find(s => s.id === editingStudentId);
                 if (st) { st.number = number; st.name = name; st.status = status; logAction('แก้ไขข้อมูลนักเรียน', `${name} (เลขที่ ${number}, ${formatRoomName(st.roomId)})`); }
@@ -2410,7 +2462,7 @@ content.innerHTML = html;
                 students.push({ id: generateId(), roomId: window.adminSelectedRoom, number, name, status });
                 logAction('เพิ่มนักเรียนใหม่', `${name} (เลขที่ ${number}, ${formatRoomName(window.adminSelectedRoom)})`);
             }
-            await saveData('full'); document.body.style.pointerEvents = 'auto'; showToast("บันทึกสำเร็จ"); renderAdminTab(); closeStudentModal();
+            await saveData('full', null, __prefetch5); document.body.style.pointerEvents = 'auto'; showToast("บันทึกสำเร็จ"); renderAdminTab(); closeStudentModal();
         };
         function deleteSubject(id) {
             if (guardTermLock('ลบวิชา')) return;
@@ -2418,22 +2470,22 @@ content.innerHTML = html;
             if (subCheck && subCheck.locked) { showToast("วิชานี้ถูกล็อคไว้ กรุณาปลดล็อคก่อนลบ", "error"); return; }
             showConfirm("ลบวิชา", "ข้อมูลการเช็คชื่อทั้งหมดในวิชานี้จะถูกลบไปด้วย แน่ใจหรือไม่?", async () => {
                 document.body.style.pointerEvents = 'none';
-                await refreshBeforeEdit(['subjects']);
+                const __prefetch6 = await refreshBeforeEdit(['subjects']);
                 const sub = subjects.find(s => s.id === id);
                 subjects = subjects.filter(s => s.id !== id);
                 attendanceData = attendanceData.filter(a => a.subjectId !== id);
                 logAction('ลบวิชา', sub ? sub.name : id);
-                await saveData('full'); document.body.style.pointerEvents = 'auto'; renderAdminTab();
+                await saveData('full', null, __prefetch6); document.body.style.pointerEvents = 'auto'; renderAdminTab();
             });
         }
         function deleteStudent(id) {
             showConfirm("ลบนักเรียน", "แน่ใจหรือไม่ที่จะลบนักเรียนคนนี้?", async () => {
                 document.body.style.pointerEvents = 'none';
-                await refreshBeforeEdit(['students']);
+                const __prefetch7 = await refreshBeforeEdit(['students']);
                 const st = students.find(s => s.id === id);
                 students = students.filter(s => s.id !== id);
                 logAction('ลบนักเรียน', st ? `${st.name} (${formatRoomName(st.roomId)})` : id);
-                await saveData('full'); document.body.style.pointerEvents = 'auto'; renderAdminTab();
+                await saveData('full', null, __prefetch7); document.body.style.pointerEvents = 'auto'; renderAdminTab();
             });
         }
 
@@ -2530,12 +2582,14 @@ content.innerHTML = html;
 
         window.handleImportStudents = function(e) {
             const file = e.target.files[0];
-            if (!file) return; showToast("กำลังอ่านไฟล์..."); const reader = new FileReader();
-            reader.onload = function(evt) {
+            if (!file) return; showProgressModal("กำลังนำเข้ารายชื่อนักเรียน", "กำลังอ่านไฟล์..."); const reader = new FileReader();
+            reader.onload = async function(evt) {
                 try {
+                    updateProgressModal(25, "กำลังตรวจสอบข้อมูลในไฟล์...");
                     const data = new Uint8Array(evt.target.result);
                     const workbook = XLSX.read(data, {type: 'array'}); const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
                     let startIndex = (jsonData.length > 0 && String(jsonData[0][0]).includes("เลขที่")) ? 1 : 0; let imported = 0;
+                    updateProgressModal(55, "กำลังนำเข้ารายชื่อนักเรียน...");
                     for(let i = startIndex; i < jsonData.length; i++) {
                         const row = jsonData[i];
                         if(row && row.length >= 2 && row[0] && row[1]) {
@@ -2545,10 +2599,10 @@ content.innerHTML = html;
                             } else { students.push({ id: generateId(), roomId: window.adminSelectedRoom, number, name, status: 'active' }); } imported++;
                         }
                     }
-                    if (imported > 0) { saveData('full'); logAction('นำเข้ารายชื่อนักเรียนจาก Excel', `นำเข้า ${imported} คน ห้อง ${formatRoomName(window.adminSelectedRoom)}`);
-                        showToast(`นำเข้า ${imported} คน สำเร็จ!`); renderAdminTab(); } else { showToast("ไม่พบข้อมูลที่ถูกต้อง", "error");
+                    if (imported > 0) { updateProgressModal(85, "กำลังบันทึกขึ้นเซิร์ฟเวอร์..."); await saveData('full'); logAction('นำเข้ารายชื่อนักเรียนจาก Excel', `นำเข้า ${imported} คน ห้อง ${formatRoomName(window.adminSelectedRoom)}`);
+                        completeProgressModal("นำเข้าสำเร็จ", `นำเข้า ${imported} คน สำเร็จ!`); renderAdminTab(); } else { errorProgressModal("ไม่พบข้อมูลที่ถูกต้องในไฟล์");
                     }
-                } catch (err) { showToast("เกิดข้อผิดพลาดในการอ่านไฟล์", "error");
+                } catch (err) { errorProgressModal("เกิดข้อผิดพลาดในการอ่านไฟล์ กรุณาตรวจสอบรูปแบบไฟล์");
                 } e.target.value = '';
             }; reader.readAsArrayBuffer(file);
         };
@@ -2584,15 +2638,18 @@ content.innerHTML = html;
 
         window.handleImportStudentsAllRooms = function(e) {
             const file = e.target.files[0];
-            if (!file) return; showToast("กำลังอ่านไฟล์..."); const reader = new FileReader();
+            if (!file) return; showProgressModal("กำลังนำเข้ารายชื่อนักเรียนทุกห้อง", "กำลังอ่านไฟล์..."); const reader = new FileReader();
             reader.onload = async function(evt) {
                 try {
+                    updateProgressModal(15, "กำลังตรวจสอบข้อมูลในไฟล์...");
                     const data = new Uint8Array(evt.target.result);
                     const workbook = XLSX.read(data, {type: 'array'}); const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
                     let startIndex = (jsonData.length > 0 && String(jsonData[0][0] || '').includes("ห้อง")) ? 1 : 0;
                     let imported = 0, skippedRoom = 0;
                     const roomsTouched = new Set();
-                    await refreshBeforeEdit(['students']);
+                    updateProgressModal(35, "กำลังดึงข้อมูลล่าสุดจากเซิร์ฟเวอร์...");
+                    const __prefetch8 = await refreshBeforeEdit(['students']);
+                    updateProgressModal(55, "กำลังนำเข้ารายชื่อนักเรียน...");
                     for (let i = startIndex; i < jsonData.length; i++) {
                         const row = jsonData[i];
                         if (!row || row.length < 3 || !row[0] || !row[1] || !row[2]) continue;
@@ -2604,10 +2661,10 @@ content.innerHTML = html;
                         if (exists) { exists.name = name; } else { students.push({ id: generateId(), roomId, number, name, status: 'active' }); }
                         roomsTouched.add(roomId); imported++;
                     }
-                    if (imported > 0) { await saveData('full'); logAction('นำเข้ารายชื่อนักเรียนทุกห้องจาก Excel', `นำเข้า ${imported} คน ใน ${roomsTouched.size} ห้อง`);
-                        showToast(`นำเข้า ${imported} คน ใน ${roomsTouched.size} ห้อง สำเร็จ!${skippedRoom > 0 ? ' (ข้าม ' + skippedRoom + ' แถวที่ระบุห้องไม่ถูกต้อง)' : ''}`); renderAdminTab();
-                    } else { showToast("ไม่พบข้อมูลที่ถูกต้อง หรือชื่อห้องในไฟล์ไม่ตรงกับห้องในระบบ", "error"); }
-                } catch (err) { showToast("เกิดข้อผิดพลาดในการอ่านไฟล์", "error");
+                    if (imported > 0) { updateProgressModal(85, "กำลังบันทึกขึ้นเซิร์ฟเวอร์..."); await saveData('full', null, __prefetch8); logAction('นำเข้ารายชื่อนักเรียนทุกห้องจาก Excel', `นำเข้า ${imported} คน ใน ${roomsTouched.size} ห้อง`);
+                        completeProgressModal("นำเข้าสำเร็จ", `นำเข้า ${imported} คน ใน ${roomsTouched.size} ห้อง สำเร็จ!${skippedRoom > 0 ? ' (ข้าม ' + skippedRoom + ' แถวที่ระบุห้องไม่ถูกต้อง)' : ''}`); renderAdminTab();
+                    } else { errorProgressModal("ไม่พบข้อมูลที่ถูกต้อง หรือชื่อห้องในไฟล์ไม่ตรงกับห้องในระบบ"); }
+                } catch (err) { errorProgressModal("เกิดข้อผิดพลาดในการอ่านไฟล์ กรุณาตรวจสอบรูปแบบไฟล์");
                 } e.target.value = '';
             }; reader.readAsArrayBuffer(file);
         };
