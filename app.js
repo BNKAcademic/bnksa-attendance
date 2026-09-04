@@ -1581,7 +1581,17 @@ content.innerHTML = html;
                 const trackedSubjectIds = new Set(subjects.filter(s => String(s.term) === String(adminTerm()) && String(s.year) === String(adminYear())).map(s => s.id));
                 const allTeacherNamesInLog = Array.from(new Set(
                     subjects.filter(s => trackedSubjectIds.has(s.id)).flatMap(s => [s.teacher, s.teacher2]).filter(Boolean)
-                )).sort((a, b) => a.localeCompare(b, 'th'));
+                ));
+                // จัดกลุ่มครูตามกลุ่มสาระการเรียนรู้ (department) สำหรับ dropdown - ครูที่ไม่มีข้อมูล department จะถูกจัดไว้ในกลุ่ม "ไม่ระบุกลุ่มสาระ"
+                const teacherDeptGroups = {};
+                allTeacherNamesInLog.forEach(name => {
+                    const t = teachers.find(x => x.name === name);
+                    const dept = (t && t.department) ? t.department : 'ไม่ระบุกลุ่มสาระ';
+                    if (!teacherDeptGroups[dept]) teacherDeptGroups[dept] = [];
+                    teacherDeptGroups[dept].push(name);
+                });
+                Object.keys(teacherDeptGroups).forEach(dept => teacherDeptGroups[dept].sort((a, b) => a.localeCompare(b, 'th')));
+                const sortedDeptNames = Object.keys(teacherDeptGroups).sort((a, b) => a.localeCompare(b, 'th'));
                 if (!window.__teacherLogState) window.__teacherLogState = { mode: 'all', teacherFilter: null, search: '' };
                 const tls = window.__teacherLogState;
                 let events = attendanceData
@@ -1608,7 +1618,7 @@ content.innerHTML = html;
                 }
 
                 let html = `<div class="flex flex-wrap items-center justify-between gap-2 mb-1"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-user-clock text-rose-500"></i> ติดตามครู</h3><button onclick="window.refreshTeacherLog()" class="bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-sync-alt${window.__teacherLogRefreshing ? ' fa-spin' : ''}"></i> รีเฟรช</button></div><p class="text-[10px] sm:text-xs text-slate-500 font-medium mb-4">รายการแจ้งเตือนว่าวิชาใด ของครูคนใด มีการเช็คชื่อไปแล้วเมื่อใด (เฉพาะเทอม ${adminTerm()}/${adminYear()}) เรียงจากล่าสุดไปเก่าสุด</p>`;
-                html += `<div class="flex flex-wrap gap-1.5 mb-3"><button onclick="window.setTeacherLogMode('all', null)" class="${tls.mode === 'all' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'} px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs transition-colors">ทั้งหมด</button>${allTeacherNamesInLog.map(t => `<button onclick="window.setTeacherLogMode('teacher', '${t.replace(/'/g, "\\'")}')" class="${tls.mode === 'teacher' && tls.teacherFilter === t ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'} px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs transition-colors">${t}</button>`).join('')}</div>`;
+                html += `<div class="flex flex-wrap items-center gap-2 mb-3"><span class="text-[10px] sm:text-xs font-bold text-slate-500">แสดง:</span><select onchange="if (this.value === '__all__') window.setTeacherLogMode('all', null); else window.setTeacherLogMode('teacher', this.value);" class="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[10px] sm:text-xs font-bold outline-none focus:ring-1 focus:ring-indigo-400"><option value="__all__" ${tls.mode === 'all' ? 'selected' : ''}>ทั้งหมด</option>${sortedDeptNames.map(dept => `<optgroup label="${dept}">${teacherDeptGroups[dept].map(t => `<option value="${t}" ${tls.mode === 'teacher' && tls.teacherFilter === t ? 'selected' : ''}>${t}</option>`).join('')}</optgroup>`).join('')}</select></div>`;
                 html += `<div class="relative mb-4"><i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i><input type="text" value="${(tls.search || '').replace(/"/g, '&quot;')}" oninput="window.setTeacherLogSearch(this.value)" placeholder="ค้นหาชื่อครู / ห้องเรียน / วิชาเรียน..." class="w-full bg-white border border-slate-200 rounded-lg pl-8 pr-3 py-2 text-xs sm:text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none"></div>`;
                 if (events.length === 0) {
                     html += `<div class="text-center text-slate-400 py-10 text-sm font-medium"><i class="fas fa-info-circle"></i> ยังไม่มีการเช็คชื่อในเทอมนี้</div>`;
