@@ -3037,7 +3037,7 @@ content.innerHTML = html;
             window.closeRegisterChoiceModal();
             if (!__registerChoicePending) return;
             const { roomId, month } = __registerChoicePending; __registerChoicePending = null;
-            const modeLabel = mode === 'summary' ? 'เฉพาะสรุป (ปก + สรุปทั้งเดือน + ลงนาม)' : 'ทั้งเล่ม (รวมภาคผนวกบันทึกรายวันทุกวัน)';
+            const modeLabel = mode === 'summary' ? 'เฉพาะสรุป (ปก + สรุปทั้งเดือน + รายชื่อเข้าเรียนไม่ครบ)' : (mode === 'incomplete_only' ? 'เฉพาะรายชื่อเข้าเรียนไม่ครบ' : 'ทั้งเล่ม (รวมภาคผนวกบันทึกรายวันทุกวัน)');
             showConfirm("สร้างสมุดทะเบียนรายเดือน", `จะสร้างสมุดทะเบียนแบบ "${modeLabel}" ซึ่งอาจใช้เวลาสักครู่ พร้อมดำเนินการหรือไม่?`, () => {
                 window.__runDownloadRoomMonthlyRegisterPDF(roomId, month, mode);
             });
@@ -3083,10 +3083,11 @@ content.innerHTML = html;
             const pdfDoc = new jspdf.jsPDF('p', 'pt', 'a4');
             let htmlContainer = `<div id="pdf-register-container" class="a4-export-container text-slate-800" style="font-family: 'Sarabun', sans-serif;">`;
 
-            // ===== หน้าปก =====
+            // ===== หน้าปก (ข้ามในโหมด "จัดทำเฉพาะรายชื่อเข้าเรียนไม่ครบ") =====
+            if (mode !== 'incomplete_only') {
             htmlContainer += `<div id="pdf-reg-cover" class="a4-page flex flex-col items-center justify-center bg-white text-center">${settings.logoDataUrl ? `<img src="${settings.logoDataUrl}" style="width:90px; height:90px; object-fit:cover; border-radius:9999px; margin:0 auto 18px auto; display:block; border:3px solid #e2e8f0;">` : ''}<p class="text-sm text-slate-400 font-bold mb-10 tracking-wide">${settings.title || 'ระบบเช็คชื่อนักเรียนอัจฉริยะ'}</p><h1 class="text-4xl font-black text-slate-800 mb-3">สมุดทะเบียนการเช็คชื่อนักเรียน</h1><h2 class="text-2xl font-bold text-indigo-600 mb-1">ห้อง ${roomName}</h2><p class="text-xl font-bold text-slate-500 mb-10">ประจำเดือน${displayMonthYear}</p><div class="grid grid-cols-2 gap-5 w-full max-w-sm text-left bg-slate-50 border border-slate-200 rounded-2xl p-6 sm:p-8"><div><p class="text-[11px] text-slate-400 font-bold">นักเรียนทั้งหมด</p><p class="text-2xl font-black text-slate-700">${roomStudents.length} คน</p></div><div><p class="text-[11px] text-slate-400 font-bold">วันทำการ (จ-ศ)</p><p class="text-2xl font-black text-slate-700">${totalWeekdays} วัน</p></div><div><p class="text-[11px] text-slate-400 font-bold">วันหยุดประกาศ</p><p class="text-2xl font-black text-rose-500">${totalHolidays} วัน</p></div><div><p class="text-[11px] text-slate-400 font-bold">วันเรียนจริง</p><p class="text-2xl font-black text-emerald-600">${totalTeachingDays} วัน</p></div></div><div class="mt-12">${pdfDocMeta()}</div></div>`;
 
-            // ===== หน้าสรุปทั้งเดือน (ไม่มีลงนามในหน้านี้แล้ว - ย้ายไปอยู่ท้ายส่วนที่ 4 แทน) =====
+            // ===== หน้าสรุปทั้งเดือน + ลงนาม (กลับมาลงนามในหน้านี้ตามเดิม) =====
             const summaryPagesCount = Math.ceil(report.data.length / STUDENTS_PER_PAGE) || 1;
             for (let page = 0; page < summaryPagesCount; page++) {
                 const dataChunk = report.data.slice(page * STUDENTS_PER_PAGE, (page + 1) * STUDENTS_PER_PAGE);
@@ -3107,10 +3108,11 @@ content.innerHTML = html;
                     tableHTML += `<tr class="${bgRow}"><td class="p-1.5 border border-slate-500 font-bold">${row.student.number}</td><td class="p-1.5 border border-slate-500 text-left font-bold">${row.student.name} ${isRes?'(ออก)':''}</td><td class="p-1.5 border border-slate-500">${row.weekly[1]||'-'}</td><td class="p-1.5 border border-slate-500">${row.weekly[2]||'-'}</td><td class="p-1.5 border border-slate-500">${row.weekly[3]||'-'}</td><td class="p-1.5 border border-slate-500">${row.weekly[4]||'-'}</td><td class="p-1.5 border border-slate-500">${row.weekly[5]||'-'}</td><td class="p-1.5 border border-slate-500 font-black text-emerald-700 bg-emerald-50/50">${valid||'-'}</td><td class="p-1.5 border border-slate-500 font-black text-blue-700 bg-blue-50/50">${leave||'-'}</td><td class="p-1.5 border border-slate-500 font-black text-rose-700 bg-rose-50/50">${absent||'-'}</td><td class="p-1.5 border border-slate-500 ${fwCls} text-[10px]">${fwText}</td></tr>`;
                 });
                 tableHTML += '</tbody></table>';
-                htmlContainer += `<div class="a4-page flex flex-col justify-between bg-white">${pdfPageBadge(summaryPagesCount > 1 ? `หน้าสรุป ${page+1}/${summaryPagesCount}` : '')}<div><div class="text-center mb-6 border-b-2 border-slate-700 pb-4">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-3xl font-black" style="margin-bottom:22px; line-height:1.5;">สรุปผลรวมทั้งเดือน</h1><h2 class="text-xl font-bold bg-emerald-100 px-4 py-1.5 rounded-full inline-block border border-emerald-300">ห้อง: ${roomName} | ประจำเดือน: ${displayMonthYear}</h2></div>${tableHTML}</div></div>`;
+                htmlContainer += `<div class="a4-page flex flex-col justify-between bg-white">${pdfPageBadge(summaryPagesCount > 1 ? `หน้าสรุป ${page+1}/${summaryPagesCount}` : '')}<div><div class="text-center mb-6 border-b-2 border-slate-700 pb-4">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-3xl font-black" style="margin-bottom:22px; line-height:1.5;">สรุปผลรวมทั้งเดือน</h1><h2 class="text-xl font-bold bg-emerald-100 px-4 py-1.5 rounded-full inline-block border border-emerald-300">ห้อง: ${roomName} | ประจำเดือน: ${displayMonthYear}</h2></div>${tableHTML}</div>${page === summaryPagesCount - 1 ? buildPdfSignatureBlock(signerList) : ''}</div>`;
             }
+            } // ปิดเงื่อนไข mode !== 'incomplete_only' (ปก + สรุปทั้งเดือน)
 
-            // ===== รายชื่อ "มาแต่เข้าเรียนไม่ครบ" + ลงนามครั้งเดียวท้ายส่วนนี้ (ยังถือเป็นส่วนสำคัญ อยู่ในโหมด "จัดทำเฉพาะสรุป" ด้วย) =====
+            // ===== รายชื่อ "มาแต่เข้าเรียนไม่ครบ" + ลงนามของส่วนนี้เอง (เป็นการยืนยันแยกต่างหากจากหน้าสรุป) - แสดงทุกโหมด =====
             const incompleteList = report.incompleteList || [];
             const INC_PER_PAGE = 20;
             const incPagesCount = Math.ceil(incompleteList.length / INC_PER_PAGE) || 1;
@@ -3118,7 +3120,7 @@ content.innerHTML = html;
                 const chunk = incompleteList.slice(page * INC_PER_PAGE, (page + 1) * INC_PER_PAGE);
                 let listHTML;
                 if (incompleteList.length === 0) {
-                    listHTML = `<div class="flex-1 flex flex-col items-center justify-center text-center py-16"><div class="w-16 h-16 bg-emerald-100 text-emerald-500 rounded-full flex items-center justify-center text-3xl mb-4"><i class="fas fa-check"></i></div><p class="text-lg font-black text-emerald-600">ไม่มีนักเรียนที่เข้าเงื่อนไขในเดือนนี้</p><p class="text-sm text-slate-400 mt-2">(มาโรงเรียนแต่เข้าเรียนไม่ครบตั้งแต่ ${(settings.thresholds && settings.thresholds.incompleteDays) || 3} วันขึ้นไป)</p></div>`;
+                    listHTML = `<div class="flex-1 flex flex-col items-center justify-center text-center py-16"><p class="text-lg font-black text-emerald-600">ไม่มีนักเรียนที่เข้าเงื่อนไขในเดือนนี้</p><p class="text-sm text-slate-400 mt-2">(มาโรงเรียนแต่เข้าเรียนไม่ครบตั้งแต่ ${(settings.thresholds && settings.thresholds.incompleteDays) || 3} วันขึ้นไป)</p></div>`;
                 } else {
                     listHTML = `<table class="w-full text-center border-collapse text-[12px] bg-white border border-slate-500" style="table-layout: fixed; width: 100%;"><thead class="bg-slate-100 text-slate-700"><tr><th class="p-2 border border-slate-500" style="width: 8%;">เลขที่</th><th class="p-2 border border-slate-500 text-left" style="width: 40%;">ชื่อ-นามสกุล</th><th class="p-2 border border-slate-500" style="width: 26%;">จำนวนวันที่เข้าเรียนไม่ครบ</th><th class="p-2 border border-slate-500" style="width: 26%;">เฉลี่ยคาบที่ขาด/วัน</th></tr></thead><tbody class="divide-y divide-slate-400">${chunk.map(row => { const avgMissing = (row.incompleteDays.reduce((a,d) => a+d.missingCount, 0) / row.incompleteDays.length).toFixed(1); return `<tr class="bg-white"><td class="p-1.5 border border-slate-500 font-bold">${row.student.number}</td><td class="p-1.5 border border-slate-500 text-left font-bold">${row.student.name}</td><td class="p-1.5 border border-slate-500 font-black text-orange-600">${row.incompleteDays.length} วัน</td><td class="p-1.5 border border-slate-500 font-black text-orange-600">${avgMissing} คาบ</td></tr>`; }).join('')}</tbody></table>`;
                 }
@@ -3172,7 +3174,8 @@ content.innerHTML = html;
                     if (i > 0) pdfDoc.addPage(); pdfDoc.addImage(imgData, 'JPEG', 0, 0, 595.28, 841.89);
                 }
                 updateProgressModal(100, "กำลังบันทึกไฟล์...");
-                pdfDoc.save(`สมุดทะเบียน_${roomName}_${month}${mode === 'summary' ? '_สรุป' : ''}.pdf`);
+                const modeSuffix = mode === 'summary' ? '_สรุป' : (mode === 'incomplete_only' ? '_เข้าเรียนไม่ครบ' : '');
+                pdfDoc.save(`สมุดทะเบียน_${roomName}_${month}${modeSuffix}.pdf`);
                 completeProgressModal("ดำเนินการเสร็จสิ้น", `สร้างสมุดทะเบียน (${totalPages} หน้า) สำเร็จ ไฟล์ถูกดาวน์โหลดแล้ว`);
             } catch (err) { errorProgressModal("เกิดข้อผิดพลาดในการสร้างสมุดทะเบียน กรุณาลองใหม่อีกครั้ง"); }
             document.getElementById('pdf-register-container').remove();
