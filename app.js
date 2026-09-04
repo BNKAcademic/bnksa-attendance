@@ -1602,6 +1602,7 @@ content.innerHTML = html;
                         const sub = subjects.find(s => s.id === a.subjectId);
                         const teacherNames = sub ? [sub.teacher, sub.teacher2].filter(Boolean).join(' และ ') : '-';
                         return {
+                            id: a.id,
                             subjectName: sub ? sub.name : '(ไม่พบวิชานี้แล้ว)',
                             roomId: sub ? sub.roomId : '',
                             teacherList: sub ? [sub.teacher, sub.teacher2].filter(Boolean) : [],
@@ -1627,25 +1628,28 @@ content.innerHTML = html;
                     html += `<div class="text-center text-slate-400 py-10 text-sm font-medium"><i class="fas fa-info-circle"></i> ยังไม่มีการเช็คชื่อในเทอมนี้</div>`;
                 } else {
                     html += `<div class="space-y-1.5 max-h-[32rem] overflow-y-auto">${events.map(ev => {
-                        const checkedAtStr = ev.checkedAt ? new Date(ev.checkedAt).toLocaleString('th-TH', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '- (ไม่มีข้อมูลเวลา)';
-                        // ถ้าเวลาสร้างครั้งแรก (createdAt) กับเวลาบันทึกล่าสุด (checkedAt) ต่างกัน แปลว่ามีการแก้ไขการเช็คชื่อภายหลัง
+                        const firstCheckStr = ev.createdAt ? new Date(ev.createdAt).toLocaleString('th-TH', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (ev.checkedAt ? new Date(ev.checkedAt).toLocaleString('th-TH', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '- (ไม่มีข้อมูลเวลา)');
+                        const latestEditStr = ev.checkedAt ? new Date(ev.checkedAt).toLocaleString('th-TH', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
+                        // ถ้าเวลาสร้างครั้งแรก (createdAt) กับเวลาบันทึกล่าสุด (checkedAt) ต่างกัน แปลว่ามีการแก้ไขการเช็คชื่อภายหลัง (ไม่ว่าจะแก้กี่ครั้งก็ตาม เก็บแค่ครั้งแรกกับล่าสุด)
                         const wasEdited = ev.createdAt && ev.checkedAt && ev.createdAt !== ev.checkedAt;
-                        const statusBadge = wasEdited
-                            ? `<span class="bg-amber-100 text-amber-700 border border-amber-300 text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded shrink-0"><i class="fas fa-pen"></i> แก้ไขแล้ว</span>`
-                            : `<span class="bg-emerald-100 text-emerald-700 border border-emerald-300 text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded shrink-0"><i class="fas fa-check"></i> เช็คครั้งแรก</span>`;
-                        return `<div class="flex flex-wrap items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-[11px] sm:text-xs">
-                            <div class="flex items-center gap-2 min-w-0">
-                                <i class="fas ${wasEdited ? 'fa-pen text-amber-500' : 'fa-check-circle text-emerald-500'} shrink-0"></i>
-                                <span class="font-bold text-slate-800 truncate">${ev.subjectName}</span>
-                                <span class="text-slate-400">·</span>
-                                <span class="text-slate-600 truncate">${ev.teacherNames}${ev.checkedBy ? ` <span class="text-slate-400">(บันทึกโดย ${ev.checkedBy})</span>` : ''}</span>
-                                ${statusBadge}
+                        const isExpanded = !!(window.__teacherLogExpanded && window.__teacherLogExpanded[ev.id]);
+                        return `<div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+                            <div class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-[11px] sm:text-xs">
+                                <div class="flex items-center gap-2 min-w-0">
+                                    <i class="fas fa-check-circle text-emerald-500 shrink-0"></i>
+                                    <span class="font-bold text-slate-800 truncate">${ev.subjectName}</span>
+                                    <span class="text-slate-400">·</span>
+                                    <span class="text-slate-600 truncate">${ev.teacherNames}</span>
+                                    <span class="bg-emerald-100 text-emerald-700 border border-emerald-300 text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded shrink-0"><i class="fas fa-check"></i> เช็คครั้งแรก</span>
+                                    ${wasEdited ? `<button onclick="window.toggleTeacherLogExpand('${ev.id}')" class="bg-amber-100 text-amber-700 border border-amber-300 text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded shrink-0 hover:bg-amber-200 transition-colors"><i class="fas fa-pen"></i> แก้ไขแล้ว <i class="fas fa-chevron-${isExpanded ? 'up' : 'down'} ml-0.5"></i></button>` : ''}
+                                </div>
+                                <div class="flex items-center gap-2 shrink-0 text-slate-500">
+                                    <span>${formatRoomName(ev.roomId)}</span>
+                                    <span>คาบ ${ev.period}</span>
+                                    <span class="font-bold text-indigo-600"><i class="far fa-clock"></i> ${firstCheckStr}</span>
+                                </div>
                             </div>
-                            <div class="flex items-center gap-2 shrink-0 text-slate-500">
-                                <span>${formatRoomName(ev.roomId)}</span>
-                                <span>คาบ ${ev.period}</span>
-                                <span class="font-bold text-indigo-600"><i class="far fa-clock"></i> ${checkedAtStr}</span>
-                            </div>
+                            ${(wasEdited && isExpanded) ? `<div class="bg-amber-50 border-t border-amber-200 px-3 py-2 text-[10px] sm:text-xs flex flex-wrap items-center gap-2"><i class="fas fa-pen text-amber-500"></i><span class="font-bold text-amber-800">แก้ไขล่าสุด${ev.checkedBy ? ` โดย ${ev.checkedBy}` : ''}:</span><span class="font-bold text-indigo-600"><i class="far fa-clock"></i> ${latestEditStr}</span></div>` : ''}
                         </div>`;
                     }).join('')}</div>`;
                 }
@@ -2132,6 +2136,11 @@ content.innerHTML = html;
         };
         window.setTeacherLogMode = function(mode, teacherName) {
             window.__teacherLogState = { mode, teacherFilter: teacherName, search: (window.__teacherLogState && window.__teacherLogState.search) || '' };
+            renderAdminTab();
+        };
+        window.toggleTeacherLogExpand = function(recordId) {
+            if (!window.__teacherLogExpanded) window.__teacherLogExpanded = {};
+            window.__teacherLogExpanded[recordId] = !window.__teacherLogExpanded[recordId];
             renderAdminTab();
         };
         window.setTeacherLogSearch = function(value) {
