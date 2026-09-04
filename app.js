@@ -6,7 +6,7 @@
 // ==========================================================
 
         // 🚨 นำ Web App URL ของคุณจาก Google Apps Script มาใส่ในบรรทัดด้านล่างนี้
-        const GOOGLE_APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxXMjm0S-hoZ9kd2FZ1rPlyo2LZZdNugahOUZ8AfPv_J3vverflPBL7GrTirvhM_D4Fuw/exec"; 
+        const GOOGLE_APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwhNFwtgCmNhIat4PyluEG7tIMdgPcfGLQmfccwjSCCQFjtwrk7lOV5QYsix-4iDPPOvA/exec"; 
 
         let isAdmin = false, isDbInitialized = false, currentAdminTab = 'settings', currentRoomId = null, currentSubjectId = null;
         let editingTeacherId = null, editingSubjectId = null, editingStudentId = null, editingUserId = null;
