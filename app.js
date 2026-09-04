@@ -1518,6 +1518,11 @@ content.innerHTML = html;
                 // ===== 3. ดูข้อมูลเช็คชื่อที่เก็บถาวรแล้ว (รวมทุกแหล่งที่มาไว้ในที่เดียว) =====
                 html += `<div class="mb-6 bg-slate-50 p-4 sm:p-6 rounded-2xl border border-slate-200"><div class="flex flex-wrap items-center justify-between gap-2 mb-2"><h4 class="text-base sm:text-lg font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-box-open text-slate-500"></i> ดูข้อมูลเช็คชื่อที่เก็บถาวรแล้ว</h4><button onclick="window.loadArchiveList()" class="bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-sync-alt"></i> โหลดรายชื่อไฟล์</button></div><p class="text-[10px] sm:text-xs text-slate-500 font-medium mb-3">รวมไฟล์ที่เก็บถาวรไว้ทั้งหมด ไม่ว่าจะมาจากนโยบายอัตโนมัติทุก 2 ปี, เก็บด่วนนอกรอบ, หรือจัดเก็บรายปีการศึกษาด้านบน กดปุ่ม "โหลดรายชื่อไฟล์" เพื่อเริ่มดู แล้วเลือกไฟล์ที่ต้องการดาวน์โหลดเป็น Excel เพื่อดูรายละเอียด</p><div id="archiveListContainer" class="space-y-0"><div class="text-center text-slate-400 py-4 text-xs sm:text-sm font-medium">กดปุ่ม "โหลดรายชื่อไฟล์" ด้านบนเพื่อเริ่มต้น</div></div></div>`;
 
+                // ===== 4. กู้คืนฐานข้อมูลจาก Snapshot (สำรองอัตโนมัติรายสัปดาห์) - เฉพาะ Super Admin เท่านั้น เพราะเป็นการเขียนทับข้อมูลปัจจุบันทั้งหมด =====
+                if (isSuperAdminBk) {
+                    html += `<div class="mb-6 bg-rose-50/60 p-4 sm:p-6 rounded-2xl border-2 border-rose-300"><div class="flex flex-wrap items-center justify-between gap-2 mb-2"><h4 class="text-base sm:text-lg font-extrabold text-rose-800 flex items-center gap-2"><i class="fas fa-history text-rose-500"></i> กู้คืนฐานข้อมูลจาก Snapshot</h4><button onclick="window.loadSnapshotList()" class="bg-white border border-rose-300 hover:bg-rose-100 text-rose-700 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-sync-alt"></i> โหลดรายชื่อไฟล์สำรอง</button></div><p class="text-[10px] sm:text-xs text-rose-600 font-bold mb-3"><i class="fas fa-exclamation-triangle"></i> ใช้เฉพาะกรณีฉุกเฉินเท่านั้น เช่น ข้อมูลถูกล้าง/เขียนทับผิดพลาด — การกู้คืนจะ<u>เขียนทับข้อมูลปัจจุบันทั้งหมด</u>ด้วยข้อมูล ณ เวลาที่สำรองไว้ (ระบบจะสำรองสถานะปัจจุบันไว้ก่อนกู้คืนให้อัตโนมัติเผื่อกู้คืนผิดไฟล์)</p><div id="snapshotListContainer" class="space-y-1.5"><div class="text-center text-slate-400 py-4 text-xs sm:text-sm font-medium">กดปุ่ม "โหลดรายชื่อไฟล์สำรอง" ด้านบนเพื่อเริ่มต้น</div></div></div>`;
+                }
+
                 content.innerHTML = html;
             }
             else if (currentAdminTab === 'data_status') {
@@ -2257,6 +2262,47 @@ content.innerHTML = html;
                 downloadAttendanceExcel(records, `${fileName.replace('.json', '')}.xlsx`);
                 showToast("ดาวน์โหลดไฟล์ Excel สำเร็จ", "success");
             } catch (err) { showToast("ดึงข้อมูลไม่สำเร็จ ลองใหม่อีกครั้ง", "error"); }
+        };
+
+        // ===== กู้คืนฐานข้อมูลจาก Snapshot (สำรองอัตโนมัติรายสัปดาห์) - เฉพาะ Super Admin =====
+        window.loadSnapshotList = async function() {
+            const listEl = document.getElementById('snapshotListContainer');
+            if (!listEl) return;
+            listEl.innerHTML = `<div class="text-center text-rose-400 py-6 text-xs sm:text-sm font-bold"><i class="fas fa-spinner fa-spin"></i> กำลังโหลดรายชื่อไฟล์สำรอง...</div>`;
+            try {
+                const res = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=list_snapshots`);
+                const data = await res.json();
+                if (data.status !== 'success' || !data.snapshots || data.snapshots.length === 0) {
+                    listEl.innerHTML = `<div class="text-center text-slate-400 py-6 text-xs sm:text-sm font-medium">ยังไม่พบไฟล์สำรอง Snapshot ในระบบ (อาจยังไม่เคยตั้งเวลาให้รันอัตโนมัติ หรือยังไม่ถึงรอบแรก)</div>`;
+                    return;
+                }
+                const fmtSize = (b) => b < 1024 ? `${b} B` : (b < 1024*1024 ? `${(b/1024).toFixed(1)} KB` : `${(b/1024/1024).toFixed(2)} MB`);
+                listEl.innerHTML = data.snapshots.map(f => {
+                    const d = new Date(f.dateCreated);
+                    const dateStr = isNaN(d) ? '' : d.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                    return `<div class="flex items-center justify-between gap-2 bg-white border ${f.corrupted ? 'border-rose-400' : 'border-rose-200'} rounded-lg px-3 py-2.5"><div class="min-w-0"><div class="font-bold text-slate-700 text-xs sm:text-sm truncate">${f.name}${f.corrupted ? ' <span class="text-rose-500 text-[9px] font-black">(ไฟล์นี้ข้อมูลเสีย ห้ามกู้คืน)</span>' : ''}</div><div class="text-[10px] sm:text-xs text-slate-400 font-medium">สำรองเมื่อ ${dateStr} · ${fmtSize(f.sizeBytes)}</div></div>${f.corrupted ? '' : `<button onclick="window.restoreSnapshot('${f.name}')" class="shrink-0 bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-undo"></i> กู้คืนไฟล์นี้</button>`}</div>`;
+                }).join('<div class="h-1.5"></div>');
+            } catch (err) {
+                listEl.innerHTML = `<div class="text-center text-rose-400 py-6 text-xs sm:text-sm font-bold"><i class="fas fa-exclamation-circle"></i> โหลดรายชื่อไฟล์ไม่สำเร็จ ลองใหม่อีกครั้ง</div>`;
+            }
+        };
+        window.restoreSnapshot = function(fileName) {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่กู้คืนข้อมูลได้", "error"); return; }
+            showConfirm("ยืนยันการกู้คืนข้อมูล", `จะเขียนทับข้อมูลปัจจุบันทั้งหมด (ห้อง/วิชา/นักเรียน/การเช็คชื่อ) ด้วยไฟล์สำรอง "${fileName}" การกระทำนี้ไม่สามารถยกเลิกได้ทันที (แต่ระบบจะสำรองสถานะปัจจุบันไว้ก่อนกู้คืนให้อัตโนมัติ) แน่ใจหรือไม่?`, async () => {
+                showProgressModal("กำลังกู้คืนข้อมูล", "กรุณารอสักครู่ ห้ามปิดหน้านี้...");
+                try {
+                    updateProgressModal(30, "กำลังส่งคำขอกู้คืนไปยังเซิร์ฟเวอร์...");
+                    const res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'restore_snapshot', file: fileName }) });
+                    const result = await res.json().catch(() => null);
+                    if (!res.ok || !result || result.status === 'error') {
+                        errorProgressModal(result && result.message ? result.message : "กู้คืนข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+                        return;
+                    }
+                    updateProgressModal(100, "กู้คืนสำเร็จ กำลังโหลดหน้าเว็บใหม่...");
+                    completeProgressModal("กู้คืนข้อมูลสำเร็จ", "ระบบจะโหลดหน้าเว็บใหม่เพื่อดึงข้อมูลที่กู้คืนแล้ว");
+                    setTimeout(() => { location.reload(); }, 1500);
+                } catch (err) { errorProgressModal("เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง"); }
+            });
         };
 
         window.renderScheduleInputs = function(existingSchedules = null) {
