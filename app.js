@@ -1048,8 +1048,9 @@
             const daySubjects = [];
             roomSubjects.forEach(s => { if(!s.schedules) return; const schedsOnDay = s.schedules.filter(sch => parseInt(sch.day) === dayIndex); schedsOnDay.forEach(sch => { daySubjects.push({ ...s, currentPeriod: parseInt(sch.period) }); }); });
             let html = `<div class="mb-4 sm:mb-8 flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-48 sm:w-64 h-full ${isDarkNow ? '' : 'bg-gradient-to-l from-indigo-50 to-transparent opacity-50'}"></div><div class="relative z-10"><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2 sm:gap-4"><div class="w-10 h-10 sm:w-14 sm:h-14 bg-indigo-600 text-white rounded-xl sm:rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-200"><i class="fas fa-door-open text-lg sm:text-2xl"></i></div> ห้องเรียน ${roomNameStr}</h2><div class="flex flex-wrap items-center gap-2 mt-3 text-[10px] sm:text-sm"><p class="text-slate-600 bg-slate-100 px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg border border-slate-200 font-bold flex items-center gap-1 sm:gap-2"><i class="fas fa-user-tie text-indigo-500"></i> <span class="hidden sm:inline">ที่ปรึกษา: </span><span class="text-indigo-700">${advisorText}</span></p><p class="text-slate-600 bg-slate-100 px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg border border-slate-200 font-bold flex items-center gap-1 sm:gap-2"><i class="fas fa-users text-blue-500"></i> <span class="hidden sm:inline">นักเรียน: </span><span class="text-blue-700">${activeStudents.length} คน</span></p></div></div><div class="relative z-10 flex flex-wrap gap-2 w-full md:w-auto"><button onclick="window.navigate('room_summary', {roomId: '${roomId}', tab: 'daily'})" class="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 px-3 py-2 sm:px-6 sm:py-3 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-xs sm:text-base"><i class="fas fa-chart-bar"></i> ภาพรวมห้อง</button><button onclick="window.navigate('dashboard')" class="flex-1 md:flex-none bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-2 sm:px-6 sm:py-3 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-xs sm:text-base"><i class="fas fa-arrow-left"></i> กลับ</button></div></div>`;
-            const todayFullThaiDateStr = new Date().toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' });
-            html += `<div class="bg-white rounded-2xl sm:rounded-3xl shadow-sm border border-slate-200 p-3 sm:p-8 mb-6 sm:mb-10"><div class="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4 sm:mb-8"><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800 flex items-center gap-2 flex-wrap"><i class="far fa-calendar-alt text-blue-500 text-xl sm:text-3xl"></i> ตารางเรียน <span class="text-xs sm:text-sm font-bold text-slate-400">(${todayFullThaiDateStr})</span></h3><div class="flex overflow-x-auto gap-1.5 sm:gap-2 pb-2 md:pb-0 scrollbar-hide w-full md:w-auto">`;
+            const todayFullThaiDateStr = new Date().toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+            const todayProminentDateStr = `วันนี้ ${todayFullThaiDateStr}`;
+            html += `<div class="bg-white rounded-2xl sm:rounded-3xl shadow-sm border border-slate-200 p-3 sm:p-8 mb-6 sm:mb-10"><div class="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4 sm:mb-8"><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800 flex items-center gap-2 flex-wrap"><i class="far fa-calendar-alt text-blue-500 text-xl sm:text-3xl"></i> ตารางเรียน <span class="text-xs sm:text-base font-black ${isDarkNow ? 'bg-indigo-500/20 text-indigo-300 border-indigo-400/40' : 'bg-indigo-50 text-indigo-700 border-indigo-200'} border px-2.5 py-1 rounded-full">${todayProminentDateStr}</span></h3><div class="flex overflow-x-auto gap-1.5 sm:gap-2 pb-2 md:pb-0 scrollbar-hide w-full md:w-auto">`;
             for(let i = 1; i <= 5; i++) {
                 // สีประจำวันแบบไทย: จันทร์เหลือง อังคารชมพู พุธเขียว พฤหัสส้ม ศุกร์ฟ้า
                 const dayColorMap = {
@@ -1060,7 +1061,7 @@
                     5: { active: 'bg-sky-500 border-sky-500', text: 'text-sky-700', hoverBorder: 'hover:border-sky-300' }
                 };
                 const dc = dayColorMap[i];
-                const activeClass = (i === dayIndex) ? `${dc.active} text-slate-900 shadow-md` : `bg-white border-slate-200 text-slate-900 hover:bg-slate-50 ${dc.hoverBorder}`;
+                const activeClass = (i === dayIndex) ? `${dc.active} text-white shadow-md` : `bg-white border-slate-200 text-slate-700 hover:bg-slate-50 ${dc.hoverBorder}`;
                 html += `<button onclick="window.navigate('classroom', {roomId: '${roomId}', dayIndex: ${i}})" class="px-3 sm:px-5 py-2 rounded-lg border font-bold whitespace-nowrap transition-all text-[10px] sm:text-sm flex items-center gap-1 flex-1 justify-center sm:flex-none ${activeClass}">${i === dayIndex ? '<i class="fas fa-check-circle"></i>' : ''} ${daysLabel[i-1].replace('วัน','')}</button>`; }
             
             let dObj = new Date();
@@ -1574,7 +1575,8 @@ content.innerHTML = html;
             }
             else if (currentAdminTab === 'teacher_log') {
                 // ===== เฉพาะ Super Admin เท่านั้นที่ดูแท็บนี้ได้ =====
-                if (!isSuperAdmin) {
+                const isSuperAdminLog = currentUser && currentUser.role === 'super_admin';
+                if (!isSuperAdminLog) {
                     content.innerHTML = `<div class="text-center text-slate-400 py-14 text-sm font-medium"><i class="fas fa-lock text-3xl mb-3 block"></i> หน้านี้สำหรับ Super Admin เท่านั้น</div>`;
                     return;
                 }
