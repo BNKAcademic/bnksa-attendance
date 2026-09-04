@@ -161,6 +161,22 @@
         html.dark .border-pink-100, html.dark .border-pink-200, html.dark .border-pink-300 { border-color: rgba(236, 72, 153, 0.35) !important; }
         html.dark .text-pink-500, html.dark .text-pink-600, html.dark .text-pink-700, html.dark .text-pink-800 { color: #f472b6 !important; }
         html.dark .text-violet-500, html.dark .text-violet-600, html.dark .text-violet-700 { color: #a78bfa !important; }
+
+        /* สีประจำวัน (ปุ่มเลือกวันจันทร์-ศุกร์ในหน้าตารางเรียน) - เพิ่มสี yellow/green/sky ที่ไม่เคยมีในระบบมาก่อน */
+        html.dark .text-yellow-500, html.dark .text-yellow-600, html.dark .text-yellow-700, html.dark .text-yellow-800 { color: #facc15 !important; }
+        html.dark .bg-yellow-50, html.dark .bg-yellow-100 { background-color: rgba(234, 179, 8, 0.16) !important; }
+        html.dark .border-yellow-200, html.dark .border-yellow-300 { border-color: rgba(234, 179, 8, 0.35) !important; }
+
+        html.dark .text-green-500, html.dark .text-green-600, html.dark .text-green-700, html.dark .text-green-800 { color: #4ade80 !important; }
+        html.dark .bg-green-50, html.dark .bg-green-100 { background-color: rgba(22, 163, 74, 0.16) !important; }
+        html.dark .border-green-200, html.dark .border-green-300 { border-color: rgba(22, 163, 74, 0.35) !important; }
+
+        html.dark .text-sky-500, html.dark .text-sky-600, html.dark .text-sky-700, html.dark .text-sky-800 { color: #38bdf8 !important; }
+        html.dark .bg-sky-50, html.dark .bg-sky-100 { background-color: rgba(14, 165, 233, 0.16) !important; }
+        html.dark .border-sky-200, html.dark .border-sky-300 { border-color: rgba(14, 165, 233, 0.35) !important; }
+
+        /* ปุ่มวันที่เลือกอยู่ (พื้นทึบสีประจำวัน) ให้เงาเข้ากับพื้นมืด เหมือนปุ่มทึบสีอื่นๆ ในระบบ */
+        html.dark .bg-yellow-500, html.dark .bg-green-600, html.dark .bg-sky-500, html.dark .bg-orange-500, html.dark .bg-pink-500 { box-shadow: 0 2px 8px rgba(0,0,0,0.5) !important; }
         html.dark .bg-violet-50, html.dark .bg-violet-100 { background-color: rgba(139, 92, 246, 0.16) !important; }
         html.dark .border-violet-100, html.dark .border-violet-200, html.dark .border-violet-300 { border-color: rgba(139, 92, 246, 0.35) !important; }
         html.dark .border-emerald-600, html.dark .border-emerald-700 { border-color: #10b981 !important; }
