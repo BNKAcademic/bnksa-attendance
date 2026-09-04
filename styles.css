@@ -47,6 +47,10 @@
         html.dark .bg-slate-100\/60 { background-color: rgba(31, 44, 71, 0.6) !important; }
         html.dark .bg-slate-200\/50 { background-color: rgba(42, 57, 82, 0.5) !important; }
         html.dark .bg-slate-200\/70 { background-color: rgba(42, 57, 82, 0.7) !important; }
+        /* กล่องอธิบายสถานะเทอม + กล่องกู้คืนจาก Snapshot เคยขึ้นสีขาวล้วนในโหมดมืด เพราะใช้ opacity variant ที่ยังไม่ถูกครอบสี */
+        html.dark .bg-white\/70 { background-color: rgba(20, 30, 51, 0.75) !important; }
+        html.dark .bg-rose-50\/60 { background-color: rgba(76, 29, 39, 0.35) !important; }
+        html.dark .border-rose-300 { border-color: rgba(244, 114, 182, 0.35) !important; }
 
         /* ตัวอักษร */
         html.dark .text-slate-800 { color: #f1f5f9 !important; }
