@@ -1606,7 +1606,7 @@ content.innerHTML = html;
                             subjectName: sub ? sub.name : '(ไม่พบวิชานี้แล้ว)',
                             roomId: sub ? sub.roomId : '',
                             teacherList: sub ? [sub.teacher, sub.teacher2].filter(Boolean) : [],
-                            teacherNames: a.substituteTeacher ? `${a.substituteTeacher} (สอนแทน)` : teacherNames,
+                            teacherNames: a.substituteTeacher ? `${teacherNames} <span class="text-amber-600">(สอนแทนโดย ${a.substituteTeacher})</span>` : teacherNames,
                             date: a.date, period: a.period,
                             checkedAt: a.checkedAt || null,
                             createdAt: a.createdAt || null,
