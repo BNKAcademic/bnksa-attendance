@@ -1739,8 +1739,22 @@ content.innerHTML = html;
                 let html = `<div class="flex flex-col sm:flex-row justify-between sm:items-center mb-3 gap-2"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-chalkboard-teacher text-indigo-500"></i> จัดการครูผู้สอน</h3><div class="flex flex-wrap gap-1.5"><button onclick="window.openTeacherModal()" class="flex-1 sm:flex-none bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors"><i class="fas fa-plus"></i> เพิ่มครูใหม่</button><button onclick="window.downloadTeacherTemplate()" class="flex-1 sm:flex-none bg-amber-500 hover:bg-amber-600 text-white px-3 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-download"></i> โหลดฟอร์มครู</button><label class="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg font-bold text-xs sm:text-sm cursor-pointer text-center shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-import"></i> นำเข้ารายชื่อครู<input type="file" accept=".xlsx, .xls" class="hidden" onchange="window.handleImportTeachers(event)"></label></div></div>`;
                 html += `<div class="mb-4 bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-sm"><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><i class="fas fa-search text-slate-400"></i></div><input type="text" id="searchTeacherInput" onkeyup="window.filterTeachers()" class="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-400 shadow-inner" placeholder="ค้นหาชื่อครู หรือกลุ่มสาระฯ..."></div></div>`;
                 html += `<div id="teacherModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-3 transition-opacity"><div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto transform scale-95 opacity-0 transition-all duration-300" id="teacherModalBox"><div class="p-4 sm:p-6"><div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-extrabold text-lg" id="teacherModalTitle">เพิ่มครูใหม่</h4><button onclick="window.closeTeacherModal()" class="text-slate-400 text-xl hover:text-rose-500 transition-colors"><i class="fas fa-times"></i></button></div><div class="flex flex-col gap-3 mb-4"><div><label class="block text-[10px] sm:text-xs font-bold mb-1">ชื่อ-นามสกุล ครูผู้สอน</label><input type="text" id="newTcName" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-400" placeholder="เช่น ครูสมใจ รักเรียน"></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">กลุ่มสาระการเรียนรู้</label><select id="newTcDept" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-400">${deptOptions}</select></div></div><div class="flex justify-end gap-2"><button onclick="window.closeTeacherModal()" class="bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded font-bold text-sm transition-colors">ยกเลิก</button><button onclick="window.saveTeacherForm()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded font-bold text-sm shadow-sm transition-colors"><i class="fas fa-save"></i> บันทึก</button></div></div></div></div>`;
-                html += `<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3" id="adminTeacherGrid">`;
-                teachers.sort((a,b) => a.name.localeCompare(b.name)).forEach(t => { const count = activeSubjects(adminTerm(), adminYear()).filter(s => s.teacher === t.name || s.teacher2 === t.name).length; const dept = t.department || 'ระบบ/อื่นๆ'; html += `<div class="bg-white border border-slate-200 rounded-xl p-3 text-center relative group shadow-sm hover:shadow-md transition-shadow teacher-card" data-search="${t.name} ${dept}"><div class="absolute top-1.5 right-1.5 flex gap-1"><button onclick="window.prepareEditTeacher('${t.id}')" class="w-6 h-6 bg-amber-50 hover:bg-amber-100 text-amber-600 rounded-full flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity"><i class="fas fa-edit text-[10px]"></i></button><button onclick="window.deleteTeacher('${t.id}', ${count})" class="w-6 h-6 bg-rose-50 hover:bg-rose-100 text-rose-500 rounded-full flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity"><i class="fas fa-trash text-[10px]"></i></button></div><div class="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto text-lg mb-2"><i class="fas fa-user-tie"></i></div><h4 class="font-bold text-slate-800 text-[11px] sm:text-sm line-clamp-2" title="${t.name}">${t.name}</h4><div class="text-[8px] sm:text-[9px] text-slate-400 mt-0.5 line-clamp-1">${dept}</div><span class="text-[9px] sm:text-[10px] font-bold text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded mt-1 inline-block border border-slate-100">สอน ${count} วิชา</span></div>`; });
+                html += `<div class="mb-4 flex items-center gap-1.5"><span class="text-[10px] sm:text-xs font-bold text-slate-500 mr-1">มุมมอง:</span><button onclick="window.setTeacherViewMode('grid')" class="${(window.__teacherViewMode||'grid') === 'grid' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'} px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs transition-colors"><i class="fas fa-th-large"></i> Grid</button><button onclick="window.setTeacherViewMode('list')" class="${window.__teacherViewMode === 'list' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'} px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs transition-colors"><i class="fas fa-list"></i> List</button></div>`;
+                const teacherDeptSections = {};
+                teachers.forEach(t => { const dept = t.department || 'ระบบ/อื่นๆ'; if (!teacherDeptSections[dept]) teacherDeptSections[dept] = []; teacherDeptSections[dept].push(t); });
+                const orderedDeptNames = departmentsList.filter(d => teacherDeptSections[d]).concat(Object.keys(teacherDeptSections).filter(d => !departmentsList.includes(d)));
+                const isListView = window.__teacherViewMode === 'list';
+                html += `<div id="adminTeacherGrid">`;
+                orderedDeptNames.forEach(dept => {
+                    const list = teacherDeptSections[dept].sort((a,b) => a.name.localeCompare(b.name));
+                    html += `<div class="mb-4"><h4 class="text-[10px] sm:text-xs font-black text-indigo-600 uppercase tracking-wider mb-2 flex items-center gap-1.5"><i class="fas fa-layer-group"></i> ${dept} <span class="text-slate-400 font-medium normal-case">(${list.length} คน)</span></h4>`;
+                    if (isListView) {
+                        html += `<div class="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">${list.map(t => { const count = activeSubjects(adminTerm(), adminYear()).filter(s => s.teacher === t.name || s.teacher2 === t.name).length; return `<div class="teacher-card flex items-center gap-3 bg-white hover:bg-slate-50 px-3 py-2 transition-colors" data-search="${t.name} ${dept}"><div class="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-sm shrink-0"><i class="fas fa-user-tie"></i></div><span class="flex-1 min-w-0 font-bold text-slate-800 text-xs sm:text-sm truncate">${t.name}</span><span class="text-[9px] sm:text-[10px] font-bold text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100 shrink-0">สอน ${count} วิชา</span><button onclick="window.prepareEditTeacher('${t.id}')" class="w-7 h-7 bg-amber-50 hover:bg-amber-100 text-amber-600 rounded-full flex items-center justify-center shrink-0"><i class="fas fa-edit text-[10px]"></i></button><button onclick="window.deleteTeacher('${t.id}', ${count})" class="w-7 h-7 bg-rose-50 hover:bg-rose-100 text-rose-500 rounded-full flex items-center justify-center shrink-0"><i class="fas fa-trash text-[10px]"></i></button></div>`; }).join('')}</div>`;
+                    } else {
+                        html += `<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">${list.map(t => { const count = activeSubjects(adminTerm(), adminYear()).filter(s => s.teacher === t.name || s.teacher2 === t.name).length; return `<div class="bg-white border border-slate-200 rounded-xl p-3 text-center relative group shadow-sm hover:shadow-md transition-shadow teacher-card" data-search="${t.name} ${dept}"><div class="absolute top-1.5 right-1.5 flex gap-1"><button onclick="window.prepareEditTeacher('${t.id}')" class="w-6 h-6 bg-amber-50 hover:bg-amber-100 text-amber-600 rounded-full flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity"><i class="fas fa-edit text-[10px]"></i></button><button onclick="window.deleteTeacher('${t.id}', ${count})" class="w-6 h-6 bg-rose-50 hover:bg-rose-100 text-rose-500 rounded-full flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity"><i class="fas fa-trash text-[10px]"></i></button></div><div class="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto text-lg mb-2"><i class="fas fa-user-tie"></i></div><h4 class="font-bold text-slate-800 text-[11px] sm:text-sm line-clamp-2" title="${t.name}">${t.name}</h4><span class="text-[9px] sm:text-[10px] font-bold text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded mt-1 inline-block border border-slate-100">สอน ${count} วิชา</span></div>`; }).join('')}</div>`;
+                    }
+                    html += `</div>`;
+                });
                 html += `</div>`;
                 content.innerHTML = html;
             }
@@ -2185,6 +2199,10 @@ content.innerHTML = html;
             window.__teacherLogState = { mode, teacherFilter: teacherName, search: (window.__teacherLogState && window.__teacherLogState.search) || '' };
             renderAdminTab();
         };
+        window.setTeacherViewMode = function(mode) {
+            window.__teacherViewMode = mode;
+            renderAdminTab();
+        };
         window.toggleTeacherLogExpand = function(recordId) {
             if (!window.__teacherLogExpanded) window.__teacherLogExpanded = {};
             window.__teacherLogExpanded[recordId] = !window.__teacherLogExpanded[recordId];
@@ -2609,22 +2627,40 @@ content.innerHTML = html;
             if (!name) { showToast("กรอกชื่อวิชา", "error"); return; }
             let count = credit * 2; let schedules = [];
             for (let i = 0; i < count; i++) { schedules.push({ day: parseInt(document.getElementById(`newSubDay_${i}`).value), period: parseInt(document.getElementById(`newSubPeriod_${i}`).value) }); }
-            showToast("กำลังบันทึกข้อมูลวิชา...", "info");
-            document.body.style.pointerEvents = 'none';
-            const __prefetch1 = await refreshBeforeEdit(['subjects']); // ดึงข้อมูลล่าสุดก่อนบันทึก กันชนกับแอดมินคนอื่นที่แก้ไขพร้อมกัน
-            if (editingSubjectId) {
-                const sub = subjects.find(s => s.id === editingSubjectId);
-                if (sub) {
-                    sub.roomId = roomId; sub.code = code; sub.name = name; sub.teacher = teacher; sub.teacher2 = teacher2; sub.credits = credit; sub.schedules = schedules;
-                    logAction('แก้ไขข้อมูลวิชา', `${name} (${formatRoomName(roomId)})`);
+
+            // ===== [ใหม่] เช็คว่ามีวิชาอื่น (คนละวิชา) ในห้องเดียวกัน ลงคาบสอนชนกันไหม - ถ้ามีให้เตือนก่อนบันทึก =====
+            const roomSubjectsForConflict = getRoomSubjects(roomId, adminTerm(), adminYear()).filter(s => s.id !== editingSubjectId);
+            const conflicts = [];
+            schedules.forEach(sch => {
+                const clash = roomSubjectsForConflict.find(s => (s.schedules || []).some(os => os.day === sch.day && os.period === sch.period));
+                if (clash) conflicts.push({ day: sch.day, period: sch.period, withName: clash.name });
+            });
+
+            const doActualSave = async () => {
+                showToast("กำลังบันทึกข้อมูลวิชา...", "info");
+                document.body.style.pointerEvents = 'none';
+                const __prefetch1 = await refreshBeforeEdit(['subjects']); // ดึงข้อมูลล่าสุดก่อนบันทึก กันชนกับแอดมินคนอื่นที่แก้ไขพร้อมกัน
+                if (editingSubjectId) {
+                    const sub = subjects.find(s => s.id === editingSubjectId);
+                    if (sub) {
+                        sub.roomId = roomId; sub.code = code; sub.name = name; sub.teacher = teacher; sub.teacher2 = teacher2; sub.credits = credit; sub.schedules = schedules;
+                        logAction('แก้ไขข้อมูลวิชา', `${name} (${formatRoomName(roomId)})`);
+                    } else {
+                        document.body.style.pointerEvents = 'auto'; showToast("ไม่พบวิชานี้แล้ว (อาจถูกลบไปโดยผู้ใช้อื่น) กรุณาลองใหม่", "error"); renderAdminTab(); return;
+                    }
                 } else {
-                    document.body.style.pointerEvents = 'auto'; showToast("ไม่พบวิชานี้แล้ว (อาจถูกลบไปโดยผู้ใช้อื่น) กรุณาลองใหม่", "error"); renderAdminTab(); return;
+                    subjects.push({ id: generateId(), roomId, name, code, teacher, teacher2, credits: credit, schedules, term: adminTerm(), year: adminYear(), locked: false });
+                    logAction('เพิ่มวิชาใหม่', `${name} (${formatRoomName(roomId)})`);
                 }
+                await saveData('full', null, __prefetch1); document.body.style.pointerEvents = 'auto'; showToast("บันทึกสำเร็จ"); renderAdminTab(); closeSubjectModal();
+            };
+
+            if (conflicts.length > 0) {
+                const conflictListText = conflicts.map(c => `${daysLabel[c.day-1] || ''} คาบ ${c.period} ชนกับวิชา "${c.withName}"`).join('\n');
+                showConfirm("พบคาบสอนชนกันในห้องนี้", `ห้อง ${formatRoomName(roomId)} มีคาบที่ชนกับวิชาอื่นในตารางเดียวกัน:\n\n${conflictListText}\n\nต้องการบันทึกต่อไปหรือไม่? (ระบบจะยังบันทึกให้ แต่ทั้งสองวิชาจะซ้อนกันในตาราง)`, doActualSave);
             } else {
-                subjects.push({ id: generateId(), roomId, name, code, teacher, teacher2, credits: credit, schedules, term: adminTerm(), year: adminYear(), locked: false });
-                logAction('เพิ่มวิชาใหม่', `${name} (${formatRoomName(roomId)})`);
+                await doActualSave();
             }
-            await saveData('full', null, __prefetch1); document.body.style.pointerEvents = 'auto'; showToast("บันทึกสำเร็จ"); renderAdminTab(); closeSubjectModal();
         };
         window.toggleSubjectLock = async function(id) {
             showToast("กำลังบันทึก...", "info");
