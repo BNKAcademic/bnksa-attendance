@@ -203,6 +203,22 @@
             if (nearest) return nearest;
             return ["", ""];
         }
+        // ===== [ใหม่] สร้างคาบระบบอัตโนมัติต่อห้อง: "เข้าแถวเช้า" (คาบ 0) และ "คาบโฮมรูม" - ครูที่ปรึกษาเป็นผู้สอน ลบไม่ได้ แต่แก้ไขหน่วยกิต/ตารางได้ =====
+        function ensureSystemSubjectsForRoom(roomId, term, year) {
+            const existing = getRoomSubjects(roomId, term, year);
+            const advisors = getRoomAdvisors(roomId, term, year).filter(Boolean);
+            const advisorName = advisors[0] || '';
+            let changed = false;
+            if (!existing.some(s => s.systemType === 'morning')) {
+                subjects.push({ id: generateId(), roomId, name: 'เข้าแถวเช้า', code: '', teacher: advisorName, teacher2: advisors[1] || '', credits: 0.5, schedules: [{ day: 1, period: 0 }], term, year, locked: true, systemType: 'morning' });
+                changed = true;
+            }
+            if (!existing.some(s => s.systemType === 'homeroom')) {
+                subjects.push({ id: generateId(), roomId, name: 'คาบโฮมรูม', code: '', teacher: advisorName, teacher2: advisors[1] || '', credits: 0.5, schedules: [{ day: 5, period: 0 }], term, year, locked: true, systemType: 'homeroom' });
+                changed = true;
+            }
+            return changed;
+        }
         function getRoomStaff(roomId, term, year) {
             term = term ?? viewTerm(); year = year ?? settings.year;
             const key = termKeyOf(term, year);
@@ -1770,6 +1786,9 @@ content.innerHTML = html;
                     });
                 } else { tcOptions = `<option value="" disabled selected>-- ไม่มีข้อมูล --</option>`; }
                 const subjRoomList = getRoomList();
+                let __sysSubjectsChanged = false;
+                subjRoomList.forEach(r => { if (ensureSystemSubjectsForRoom(r, adminTerm(), adminYear())) __sysSubjectsChanged = true; });
+                if (__sysSubjectsChanged) { logAction('สร้างคาบระบบอัตโนมัติ', 'เข้าแถวเช้า / คาบโฮมรูม'); saveData('full'); }
                 if (!window.adminSelectedSubjectRoom) window.adminSelectedSubjectRoom = 'all';
                 if (window.adminSelectedSubjectRoom !== 'all' && !subjRoomList.includes(window.adminSelectedSubjectRoom)) window.adminSelectedSubjectRoom = 'all';
                 const isAllRooms = window.adminSelectedSubjectRoom === 'all';
@@ -1821,7 +1840,7 @@ content.innerHTML = html;
                         const isDup = dupSet.has(sub.id); const conflictGroup = conflicts.find(g => g.some(x => x.subjectId === sub.id));
                         const rowClass = conflictGroup ? 'bg-rose-50 hover:bg-rose-100' : (isDup ? 'bg-amber-50 hover:bg-amber-100' : 'hover:bg-slate-50');
                         const warnBadges = `${isDup ? '<span class="inline-block bg-amber-100 text-amber-700 border border-amber-300 text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded mr-1 mb-1"><i class="fas fa-clone"></i> ซ้ำ</span>' : ''}${conflictGroup ? '<span class="inline-block bg-rose-100 text-rose-700 border border-rose-300 text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded mr-1 mb-1" title="ครูมีคาบสอนชนกัน"><i class="fas fa-exclamation-triangle"></i> คาบชน</span>' : ''}${sub.locked ? '<span class="inline-block bg-slate-200 text-slate-600 border border-slate-300 text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded mr-1 mb-1"><i class="fas fa-lock"></i> ล็อค</span>' : ''}`;
-                        html += `<tr class="${rowClass} transition-colors" data-room="${sub.roomId}" data-search="${sub.code || ''} ${sub.name} ${sub.teacher} ${sub.teacher2 || ''}">${isAllRooms ? `<td class="p-2 font-bold text-center">${formatRoomName(sub.roomId).replace('ม.','')}</td>` : ''}<td class="p-2">${warnBadges ? `<div class="mb-1">${warnBadges}</div>` : ''}<div class="font-bold text-indigo-700 line-clamp-2">${sub.name}</div>${sub.code ? `<div class="text-[9px] text-slate-500 font-mono mt-0.5">${sub.code}</div>` : ''}</td><td class="p-2 text-[9px] sm:text-sm">${sub.teacher}${sub.teacher2 ? '<br><span class="text-slate-400">' + sub.teacher2 + '</span>' : ''}</td><td class="p-2 whitespace-normal">${schedText}</td><td class="p-2 text-center flex justify-center gap-1"><button onclick="window.toggleSubjectLock('${sub.id}')" title="${sub.locked ? 'ปลดล็อควิชา' : 'ล็อควิชา'}" class="${sub.locked ? 'text-slate-600 bg-slate-200 hover:bg-slate-300' : 'text-slate-400 bg-slate-50 hover:bg-slate-100'} p-1.5 rounded transition-colors"><i class="fas ${sub.locked ? 'fa-lock' : 'fa-lock-open'}"></i></button><button onclick="window.prepareEditSubject('${sub.id}')" class="text-amber-500 bg-amber-50 hover:bg-amber-100 p-1.5 rounded transition-colors"><i class="fas fa-edit"></i></button><button onclick="window.deleteSubject('${sub.id}')" class="text-rose-500 bg-rose-50 hover:bg-rose-100 p-1.5 rounded transition-colors"><i class="fas fa-trash"></i></button></td></tr>`; });
+                        html += `<tr class="${rowClass} transition-colors" data-room="${sub.roomId}" data-search="${sub.code || ''} ${sub.name} ${sub.teacher} ${sub.teacher2 || ''}">${isAllRooms ? `<td class="p-2 font-bold text-center">${formatRoomName(sub.roomId).replace('ม.','')}</td>` : ''}<td class="p-2">${warnBadges ? `<div class="mb-1">${warnBadges}</div>` : ''}<div class="font-bold text-indigo-700 line-clamp-2">${sub.name}</div>${sub.code ? `<div class="text-[9px] text-slate-500 font-mono mt-0.5">${sub.code}</div>` : ''}</td><td class="p-2 text-[9px] sm:text-sm">${sub.teacher}${sub.teacher2 ? '<br><span class="text-slate-400">' + sub.teacher2 + '</span>' : ''}</td><td class="p-2 whitespace-normal">${schedText}</td><td class="p-2 text-center flex justify-center gap-1">${sub.systemType ? `<span class="bg-slate-100 text-slate-500 border border-slate-200 text-[9px] px-2 py-1 rounded-full font-bold whitespace-nowrap" title="คาบระบบ สร้างอัตโนมัติจากครูที่ปรึกษา ลบไม่ได้"><i class="fas fa-shield-alt"></i> คาบระบบ</span><button onclick="window.prepareEditSubject('${sub.id}')" class="text-amber-500 bg-amber-50 hover:bg-amber-100 p-1.5 rounded transition-colors"><i class="fas fa-edit"></i></button>` : `<button onclick="window.toggleSubjectLock('${sub.id}')" title="${sub.locked ? 'ปลดล็อควิชา' : 'ล็อควิชา'}" class="${sub.locked ? 'text-slate-600 bg-slate-200 hover:bg-slate-300' : 'text-slate-400 bg-slate-50 hover:bg-slate-100'} p-1.5 rounded transition-colors"><i class="fas ${sub.locked ? 'fa-lock' : 'fa-lock-open'}"></i></button><button onclick="window.prepareEditSubject('${sub.id}')" class="text-amber-500 bg-amber-50 hover:bg-amber-100 p-1.5 rounded transition-colors"><i class="fas fa-edit"></i></button><button onclick="window.deleteSubject('${sub.id}')" class="text-rose-500 bg-rose-50 hover:bg-rose-100 p-1.5 rounded transition-colors"><i class="fas fa-trash"></i></button>`}</td></tr>`; });
                 }
                 html += `</tbody></table></div>`;
                 content.innerHTML = html;
@@ -2584,7 +2603,7 @@ content.innerHTML = html;
         // ===== ตารางคลิกเลือกคาบสอน (แทนดรอปดาวน์) - คลิกช่องเพื่อเลือก/ยกเลิก เตือนทันทีถ้าชนกับวิชาอื่นในห้องเดียวกัน =====
         window.renderScheduleGrid = function(count) {
             const roomId = document.getElementById('newSubRoom') ? document.getElementById('newSubRoom').value : null;
-            const otherSubs = roomId ? getRoomSubjects(roomId, adminTerm(), adminYear()).filter(s => s.id !== editingSubjectId) : [];
+            const otherSubs = roomId ? getRoomSubjects(roomId, adminTerm(), adminYear()).filter(s => s.id !== editingSubjectId && s.systemType !== 'homeroom') : [];
             const gridPeriods = timeSlots.filter(t => t.period >= 0);
             let html = `<div class="col-span-full"><div class="flex items-center justify-between mb-2"><span class="text-[10px] sm:text-xs font-bold text-slate-600">คลิกช่องเพื่อเลือกคาบสอน <span class="text-indigo-600">(เลือกแล้ว ${window.__scheduleSelection.length}/${count})</span></span>${window.__scheduleSelection.length > 0 ? `<button type="button" onclick="window.clearScheduleSelection()" class="text-[10px] sm:text-xs font-bold text-rose-500 hover:underline"><i class="fas fa-eraser"></i> ล้างทั้งหมด</button>` : ''}</div><div class="overflow-x-auto rounded-xl border border-slate-200"><table class="w-full text-center text-[9px] sm:text-[11px] border-collapse min-w-[600px]"><thead><tr class="bg-slate-100"><th class="p-1.5 border border-slate-200 sticky left-0 bg-slate-100 z-10">วัน\\คาบ</th>${gridPeriods.map(p => `<th class="p-1.5 border border-slate-200 font-bold">${p.period}${p.period === 0 ? '<div class="font-normal text-slate-400 text-[8px]">(แถว)</div>' : ''}</th>${p.period === 4 ? `<th class="p-1 border border-amber-200 bg-amber-50 text-amber-500 w-5" title="พักกลางวัน"><i class="fas fa-utensils"></i></th>` : ''}`).join('')}</tr></thead><tbody>`;
             for (let d = 1; d <= 5; d++) {
@@ -2670,7 +2689,7 @@ content.innerHTML = html;
             for (let i = 0; i < count; i++) { schedules.push({ day: parseInt(document.getElementById(`newSubDay_${i}`).value), period: parseInt(document.getElementById(`newSubPeriod_${i}`).value) }); }
 
             // ===== [ใหม่] เช็คว่ามีวิชาอื่น (คนละวิชา) ในห้องเดียวกัน ลงคาบสอนชนกันไหม - ถ้ามีให้เตือนก่อนบันทึก =====
-            const roomSubjectsForConflict = getRoomSubjects(roomId, adminTerm(), adminYear()).filter(s => s.id !== editingSubjectId);
+            const roomSubjectsForConflict = getRoomSubjects(roomId, adminTerm(), adminYear()).filter(s => s.id !== editingSubjectId && s.systemType !== 'homeroom');
             const conflicts = [];
             schedules.forEach(sch => {
                 const clash = roomSubjectsForConflict.find(s => (s.schedules || []).some(os => os.day === sch.day && os.period === sch.period));
@@ -2932,6 +2951,7 @@ content.innerHTML = html;
         function deleteSubject(id) {
             if (guardTermLock('ลบวิชา')) return;
             const subCheck = subjects.find(s => s.id === id);
+            if (subCheck && subCheck.systemType) { showToast("วิชานี้เป็นคาบระบบ (เข้าแถวเช้า/โฮมรูม) ไม่สามารถลบได้", "error"); return; }
             if (subCheck && subCheck.locked) { showToast("วิชานี้ถูกล็อคไว้ กรุณาปลดล็อคก่อนลบ", "error"); return; }
             showConfirm("ลบวิชา", "ข้อมูลการเช็คชื่อทั้งหมดในวิชานี้จะถูกลบไปด้วย แน่ใจหรือไม่?", async () => {
                 showToast("กำลังลบวิชา...", "info");
