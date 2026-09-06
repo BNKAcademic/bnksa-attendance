@@ -244,6 +244,7 @@
             const list = getRoomSubjects(roomId, term, year); const dupIds = new Set();
             for (let i = 0; i < list.length; i++) { for (let j = i + 1; j < list.length; j++) {
                 const a = list[i], b = list[j];
+                if (a.systemType === 'homeroom' || b.systemType === 'homeroom') continue; // โฮมรูมไม่นับว่าซ้ำกับวิชาใดๆ
                 const sameTeacher = (a.teacher || '').trim() === (b.teacher || '').trim();
                 const sameCode = (a.code || '').trim() === (b.code || '').trim();
                 const sameName = (a.name || '').trim() === (b.name || '').trim();
@@ -253,10 +254,11 @@
             return dupIds;
         }
         function getTeacherDept(name) { const t = teachers.find(x => x.name === name); return t ? (t.department || 'ระบบ/อื่นๆ') : ''; }
-        // หาคาบสอนที่ชนกันของครูคนเดียวกัน (ยกเว้นกลุ่มสาระ "ระบบ/อื่นๆ" ที่ให้ซ้ำได้)
+        // หาคาบสอนที่ชนกันของครูคนเดียวกัน (ยกเว้นกลุ่มสาระ "ระบบ/อื่นๆ" ที่ให้ซ้ำได้ และวิชาโฮมรูมซึ่งไม่นับว่าชนกับวิชาใดๆ)
         function findTeacherConflicts(term, year) {
             const map = {};
             activeSubjects(term, year).forEach(s => {
+                if (s.systemType === 'homeroom') return; // โฮมรูมไม่นับว่าซ้ำ/ชนกับวิชาใดๆ
                 ['teacher', 'teacher2'].forEach(field => {
                     const tname = s[field]; if (!tname) return;
                     if (getTeacherDept(tname) === 'ระบบ/อื่นๆ') return;
