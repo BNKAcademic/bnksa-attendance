@@ -1774,9 +1774,11 @@ content.innerHTML = html;
                     const gridPeriods = timeSlots.filter(t => t.period >= 0);
                     const gridMatrix = {};
                     getRoomSubjects(window.adminSelectedSubjectRoom, adminTerm(), adminYear()).forEach(s => (s.schedules || []).forEach(sch => { gridMatrix[sch.day + '-' + sch.period] = s; }));
-                    html += `<div class="mb-4"><h4 class="text-xs sm:text-sm font-extrabold text-slate-600 mb-2 flex items-center gap-1.5"><i class="fas fa-table text-indigo-400"></i> ตารางเรียนห้อง ${formatRoomName(window.adminSelectedSubjectRoom)} <span class="text-[9px] sm:text-[10px] font-medium text-slate-400">(คลิกช่องว่างเพื่อเพิ่มวิชาในคาบนั้น)</span></h4><div class="overflow-x-auto rounded-xl border border-slate-200"><table class="w-full text-center text-[9px] sm:text-[11px] border-collapse min-w-[720px]"><thead><tr class="bg-slate-100"><th class="p-1.5 sm:p-2 border border-slate-200 sticky left-0 bg-slate-100 z-10">วัน \\ คาบ</th>${gridPeriods.map(p => `<th class="p-1.5 sm:p-2 border border-slate-200 font-bold">${p.period}${p.period === 0 ? '<div class="font-normal text-slate-400 text-[8px] sm:text-[9px]">(แถว)</div>' : ''}</th>`).join('')}</tr></thead><tbody>`;
+                    const gridDayColors = { 1: { bg: 'bg-yellow-50', text: 'text-yellow-800' }, 2: { bg: 'bg-pink-50', text: 'text-pink-800' }, 3: { bg: 'bg-green-50', text: 'text-green-800' }, 4: { bg: 'bg-orange-50', text: 'text-orange-800' }, 5: { bg: 'bg-sky-50', text: 'text-sky-800' } };
+                    html += `<div class="mb-4"><h4 class="text-xs sm:text-sm font-extrabold text-slate-600 mb-2 flex items-center gap-1.5"><i class="fas fa-table text-indigo-400"></i> ตารางเรียนห้อง ${formatRoomName(window.adminSelectedSubjectRoom)} <span class="text-[9px] sm:text-[10px] font-medium text-slate-400">(คลิกช่องว่างเพื่อเพิ่มวิชาในคาบนั้น)</span></h4><div class="overflow-x-auto rounded-xl border border-slate-200"><table class="w-full text-center text-[9px] sm:text-[11px] border-collapse min-w-[720px]"><thead><tr class="bg-slate-100"><th class="p-1.5 sm:p-2 border border-slate-200 sticky left-0 bg-slate-100 z-10">วัน \\ คาบ</th>${gridPeriods.map(p => `<th class="p-1.5 sm:p-2 border border-slate-200 font-bold">${p.period}${p.period === 0 ? '<div class="font-normal text-slate-400 text-[8px] sm:text-[9px]">(แถว)</div>' : ''}</th>${p.period === 4 ? `<th class="p-1 border border-amber-200 font-bold bg-amber-50 text-amber-600 w-6 sm:w-8" title="พักกลางวัน"><i class="fas fa-utensils"></i></th>` : ''}`).join('')}</tr></thead><tbody>`;
                     for (let d = 1; d <= 5; d++) {
-                        html += `<tr><td class="p-1.5 sm:p-2 border border-slate-200 font-bold bg-slate-50 sticky left-0 z-10 whitespace-nowrap">${daysLabel[d-1].replace('วัน','')}</td>`;
+                        const dc = gridDayColors[d];
+                        html += `<tr><td class="p-1.5 sm:p-2 border border-slate-200 font-bold ${dc.bg} ${dc.text} sticky left-0 z-10 whitespace-nowrap">${daysLabel[d-1].replace('วัน','')}</td>`;
                         gridPeriods.forEach(p => {
                             const sub = gridMatrix[d + '-' + p.period];
                             if (sub) {
@@ -1784,6 +1786,7 @@ content.innerHTML = html;
                             } else {
                                 html += `<td class="p-1 border border-slate-200 bg-rose-50/50 hover:bg-rose-100 cursor-pointer transition-colors" title="คลิกเพื่อเพิ่มวิชาคาบนี้" onclick="window.openSubjectModal(${d}, ${p.period})"><i class="fas fa-plus text-rose-300 text-[9px] sm:text-[10px]"></i></td>`;
                             }
+                            if (p.period === 4) html += `<td class="p-1 border border-amber-100 bg-amber-50/50 text-amber-400 text-center"><i class="fas fa-utensils text-[8px] sm:text-[9px]"></i></td>`;
                         });
                         html += `</tr>`;
                     }
