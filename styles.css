@@ -51,6 +51,8 @@
         html.dark .bg-white\/70 { background-color: rgba(20, 30, 51, 0.75) !important; }
         html.dark .bg-rose-50\/60 { background-color: rgba(76, 29, 39, 0.35) !important; }
         html.dark .border-rose-300 { border-color: rgba(244, 114, 182, 0.35) !important; }
+        html.dark #holidayBar { background: linear-gradient(to right, rgba(76,29,39,0.5), rgba(69,10,10,0.5)) !important; border-color: rgba(248,113,113,0.4) !important; }
+        html.dark #holidayBarText { color: #fecaca !important; }
 
         /* ตัวอักษร */
         html.dark .text-slate-800 { color: #f1f5f9 !important; }
