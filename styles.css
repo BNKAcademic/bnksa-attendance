@@ -197,6 +197,7 @@
         html.dark .bg-emerald-50\/70 { background-color: rgba(16, 185, 129, 0.14) !important; }
         html.dark .bg-amber-50\/70 { background-color: rgba(245, 158, 11, 0.14) !important; }
         html.dark .bg-rose-50\/70 { background-color: rgba(244, 63, 94, 0.14) !important; }
+        html.dark .bg-rose-100\/70 { background-color: rgba(244, 63, 94, 0.2) !important; }
         html.dark .bg-purple-50\/70, html.dark .bg-purple-50\/60 { background-color: rgba(168, 85, 247, 0.14) !important; }
         html.dark .bg-cyan-50\/70 { background-color: rgba(6, 182, 212, 0.14) !important; }
         html.dark .bg-indigo-50\/70, html.dark .bg-indigo-50\/30, html.dark .bg-indigo-50\/40, html.dark .bg-indigo-50\/60 { background-color: rgba(99, 102, 241, 0.14) !important; }
