@@ -1235,9 +1235,10 @@
             } else {
                 let copiedFromPrev = false;
                 if (settings.copyPreviousPeriodEnabled) {
+                    const subForCopy = subjects.find(s => s.id === subjectId);
                     const prevPeriod = parseInt(period) - 1;
                     const dObj2 = new Date(date); const dow2 = dObj2.getDay() || 7;
-                    const hasPrevSchedule = (subject.schedules || []).some(s => parseInt(s.day) === dow2 && parseInt(s.period) === prevPeriod);
+                    const hasPrevSchedule = subForCopy && (subForCopy.schedules || []).some(s => parseInt(s.day) === dow2 && parseInt(s.period) === prevPeriod);
                     if (hasPrevSchedule) {
                         const prevRecord = attendanceData.find(a => a.subjectId === subjectId && a.date === date && String(a.period) === String(prevPeriod));
                         if (prevRecord) {
