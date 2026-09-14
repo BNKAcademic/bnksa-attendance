@@ -1667,29 +1667,46 @@
                 content.innerHTML = html;
             }
             else if (currentAdminTab === 'data_health') {
-                // ===== 1. ขนาดข้อมูลที่ใช้ไป (Progress) พร้อมขีดจำกัดที่ตั้งเองได้ =====
                 const isSuperAdminDS = currentUser && currentUser.role === 'super_admin';
-                const fullJson = JSON.stringify({ settings, teachers, subjects, students, attendanceData, followUps, logs });
-                const totalBytes = new Blob([fullJson]).size;
-                const limitChars = settings.storageLimitChars || 50000;
-                const usagePct = Math.min(100, Math.round((fullJson.length / limitChars) * 100));
-                const barColor = usagePct >= 100 ? 'bg-rose-600' : (usagePct >= 90 ? 'bg-rose-500' : (usagePct >= 70 ? 'bg-amber-500' : 'bg-emerald-500'));
                 const fmtSize = (b) => b < 1024 ? `${b} B` : (b < 1024*1024 ? `${(b/1024).toFixed(1)} KB` : `${(b/1024/1024).toFixed(2)} MB`);
-                let statusMsg, statusBg, statusIcon;
-                if (usagePct >= 100) { statusMsg = 'เกินขีดจำกัดที่ตั้งไว้แล้ว! ข้อมูลอาจบันทึกไม่สำเร็จ ควรลดขนาดข้อมูลหรือเพิ่มขีดจำกัดโดยด่วน'; statusBg = 'bg-rose-50 border-rose-300 text-rose-700'; statusIcon = 'fa-exclamation-triangle'; }
-                else if (usagePct >= 90) { statusMsg = 'ใกล้เต็มขีดจำกัดมาก ควรตรวจสอบและวางแผนจัดการพื้นที่โดยเร็ว'; statusBg = 'bg-rose-50 border-rose-200 text-rose-600'; statusIcon = 'fa-exclamation-circle'; }
-                else if (usagePct >= 70) { statusMsg = 'เริ่มใกล้ขีดจำกัด ควรติดตามอย่างใกล้ชิด'; statusBg = 'bg-amber-50 border-amber-200 text-amber-700'; statusIcon = 'fa-exclamation-circle'; }
-                else { statusMsg = 'ปริมาณข้อมูลอยู่ในเกณฑ์ปกติ ไม่ต้องกังวล'; statusBg = 'bg-emerald-50 border-emerald-200 text-emerald-700'; statusIcon = 'fa-check-circle'; }
-                const sizeBreakdown = [
-                    { label: 'ข้อมูลนักเรียน', icon: 'fa-users', color: 'bg-blue-400', bytes: new Blob([JSON.stringify(students)]).size },
-                    { label: 'ข้อมูลรายวิชา', icon: 'fa-book', color: 'bg-indigo-400', bytes: new Blob([JSON.stringify(subjects)]).size },
-                    { label: 'ข้อมูลครู', icon: 'fa-chalkboard-teacher', color: 'bg-purple-400', bytes: new Blob([JSON.stringify(teachers)]).size },
-                    { label: 'ประวัติการเช็คชื่อ', icon: 'fa-calendar-check', color: 'bg-emerald-400', bytes: new Blob([JSON.stringify(attendanceData)]).size },
-                    { label: 'การติดตามนักเรียน', icon: 'fa-clipboard-list', color: 'bg-amber-400', bytes: new Blob([JSON.stringify(followUps)]).size },
-                    { label: 'ประวัติ Log', icon: 'fa-history', color: 'bg-cyan-400', bytes: new Blob([JSON.stringify(logs)]).size },
-                    { label: 'โลโก้ + ไอคอนเว็บไซต์', icon: 'fa-image', color: 'bg-rose-400', bytes: new Blob([JSON.stringify({a: settings.faviconDataUrl, b: settings.logoDataUrl})]).size },
-                ];
-                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-hdd text-indigo-500"></i> ขนาดข้อมูลที่ใช้ไป</h3><div class="mb-4 bg-slate-50 p-4 sm:p-6 rounded-2xl border border-slate-100"><div class="flex justify-between items-end mb-2"><div><span class="text-2xl sm:text-3xl font-black text-slate-800">${fmtSize(totalBytes)}</span><span class="text-slate-400 font-bold text-xs sm:text-sm ml-1">ใช้ไปแล้ว จากขนาด ${(limitChars/1024/1024).toFixed(2)} MB (ขีดจำกัด ${limitChars.toLocaleString()} ตัวอักษร)</span></div><span class="text-lg sm:text-2xl font-black ${usagePct >= 90 ? 'text-rose-500' : (usagePct >= 70 ? 'text-amber-500' : 'text-emerald-500')}">${usagePct}%</span></div><div class="w-full h-4 sm:h-5 bg-slate-200 rounded-full overflow-hidden shadow-inner"><div class="${barColor} h-full rounded-full transition-all duration-700 shadow-sm" style="width: ${usagePct}%"></div></div><div class="flex items-center gap-2 mt-3 border rounded-lg px-3 py-2 ${statusBg}"><i class="fas ${statusIcon}"></i><span class="text-[11px] sm:text-sm font-bold">${statusMsg}</span></div>${isSuperAdminDS ? `<div class="flex flex-wrap items-end gap-2 mt-4 pt-4 border-t border-slate-200"><div class="flex-1 min-w-[160px]"><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ตั้งขีดจำกัดพื้นที่จัดเก็บ (ตัวอักษร)</label><input type="number" id="setStorageLimit" value="${limitChars}" min="1000" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"></div><button onclick="window.saveStorageLimit()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกขีดจำกัด</button></div><p class="text-[10px] sm:text-xs text-slate-400 font-medium mt-2"><i class="fas fa-info-circle"></i> ค่าเริ่มต้นอ้างอิงขีดจำกัด 10MB (ประมาณ 10,000,000 ตัวอักษร) ของ DriveApp.createFile() ในกรณีระบบหลังบ้านเก็บฐานข้อมูลเป็นไฟล์ JSON บน Google Drive (เผื่อระยะปลอดภัยไว้ที่ 8,000,000 ตัวอักษร) หากระบบหลังบ้านของท่านมีขีดจำกัดจริงต่างออกไป สามารถปรับตัวเลขนี้ให้ตรงกับของจริงได้</p>` : `<p class="text-[10px] sm:text-xs text-slate-400 font-medium mt-3"><i class="fas fa-lock"></i> เฉพาะ Super Admin เท่านั้นที่ตั้งขีดจำกัดพื้นที่จัดเก็บได้</p>`}<div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-5">${sizeBreakdown.sort((a,b)=>b.bytes-a.bytes).map(s => `<div class="flex items-center gap-2.5 bg-white border border-slate-200 rounded-lg px-3 py-2"><div class="w-7 h-7 ${s.color} text-white rounded-lg flex items-center justify-center text-[10px] shrink-0"><i class="fas ${s.icon}"></i></div><span class="flex-1 text-xs sm:text-sm font-bold text-slate-700 truncate">${s.label}</span><span class="text-xs sm:text-sm font-black text-slate-500">${fmtSize(s.bytes)}</span></div>`).join('')}</div></div>`;
+                const limitChars = settings.storageLimitChars || 8000000;
+
+                // ===== [ใหม่] ดึงขนาดไฟล์จริงจาก Drive (ไฟล์หลัก + ไฟล์เช็คชื่อรายเทอม/ปีทุกไฟล์) แทนการคำนวณจากข้อมูลในเครื่องซึ่งตอนนี้มีแค่เทอมปัจจุบัน =====
+                if (!window.__storageInfo && !window.__storageInfoLoading) {
+                    window.__storageInfoLoading = true;
+                    fetch(`${GOOGLE_APP_SCRIPT_URL}?action=get_storage_info`).then(r => r.json()).then(info => {
+                        window.__storageInfo = info; window.__storageInfoLoading = false;
+                        if (currentAdminTab === 'data_health') renderAdminTab();
+                    }).catch(() => { window.__storageInfoLoading = false; });
+                }
+
+                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-hdd text-indigo-500"></i> ขนาดข้อมูลที่ใช้ไป</h3><p class="text-[10px] sm:text-xs text-slate-500 font-medium mb-4">ข้อมูลตอนนี้แยกเก็บเป็นหลายไฟล์บน Drive (ไฟล์หลัก + ไฟล์เช็คชื่อแยกรายเทอม/ปี) แต่ละไฟล์มีขีดจำกัดขนาดของตัวเองแยกกัน ไม่รวมกันเหมือนเดิม</p>`;
+
+                if (!window.__storageInfo) {
+                    html += `<div class="flex items-center justify-center py-10 text-slate-400 gap-2"><i class="fas fa-spinner fa-spin"></i> กำลังดึงขนาดไฟล์จริงจากเซิร์ฟเวอร์...</div>`;
+                } else {
+                    const info = window.__storageInfo;
+                    const renderFileBar = (label, icon, color, bytes) => {
+                        const usagePct = Math.min(100, Math.round((bytes / limitChars) * 100));
+                        const barColor = usagePct >= 100 ? 'bg-rose-600' : (usagePct >= 90 ? 'bg-rose-500' : (usagePct >= 70 ? 'bg-amber-500' : 'bg-emerald-500'));
+                        return `<div class="bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 mb-2"><div class="flex justify-between items-center mb-1.5"><span class="text-xs sm:text-sm font-bold text-slate-700 flex items-center gap-1.5"><i class="fas ${icon} ${color.replace('bg-','text-')}"></i> ${label}</span><span class="text-xs sm:text-sm font-black ${usagePct >= 90 ? 'text-rose-500' : (usagePct >= 70 ? 'text-amber-500' : 'text-emerald-600')}">${fmtSize(bytes)} (${usagePct}%)</span></div><div class="w-full h-2.5 sm:h-3 bg-slate-200 rounded-full overflow-hidden"><div class="${barColor} h-full rounded-full transition-all duration-700" style="width: ${usagePct}%"></div></div></div>`;
+                    };
+
+                    html += `<h4 class="text-xs sm:text-sm font-black text-slate-500 uppercase tracking-wider mb-2 mt-4"><i class="fas fa-file-alt"></i> ไฟล์หลัก (ตั้งค่า/ครู/วิชา/นักเรียน/log)</h4>`;
+                    html += info.mainFile ? renderFileBar('SchoolAttendanceDB.json', 'fa-database', 'bg-indigo-400', info.mainFile.sizeBytes) : `<p class="text-xs text-slate-400 mb-4">ยังไม่พบไฟล์หลัก</p>`;
+
+                    html += `<h4 class="text-xs sm:text-sm font-black text-slate-500 uppercase tracking-wider mb-2 mt-5"><i class="fas fa-calendar-check"></i> ไฟล์เช็คชื่อรายเทอม/ปี (${info.attendanceFiles.length} ไฟล์)</h4>`;
+                    if (info.attendanceFiles.length === 0) {
+                        html += `<p class="text-xs text-slate-400 mb-2">ยังไม่มีไฟล์เช็คชื่อ</p>`;
+                    } else {
+                        info.attendanceFiles.forEach(f => {
+                            const isCurrent = String(f.term) === String(adminTerm()) && String(f.year) === String(adminYear());
+                            html += renderFileBar(`เทอม ${f.term}/${f.year}${isCurrent ? ' (กำลังดูอยู่)' : ''}`, 'fa-calendar-check', 'bg-emerald-400', f.sizeBytes);
+                        });
+                    }
+
+                    html += isSuperAdminDS ? `<div class="flex flex-wrap items-end gap-2 mt-4 pt-4 border-t border-slate-200"><div class="flex-1 min-w-[160px]"><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ตั้งขีดจำกัดพื้นที่ต่อไฟล์ (ตัวอักษร)</label><input type="number" id="setStorageLimit" value="${limitChars}" min="1000" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"></div><button onclick="window.saveStorageLimit()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกขีดจำกัด</button></div><p class="text-[10px] sm:text-xs text-slate-400 font-medium mt-2"><i class="fas fa-info-circle"></i> ขีดจำกัดนี้ใช้ประเมิน % ของแต่ละไฟล์แยกกัน (ไม่ใช่รวมกัน) อ้างอิงขีดจำกัดจริงของ DriveApp.createFile() ที่ประมาณ 10MB ต่อไฟล์ เผื่อระยะปลอดภัยไว้ที่ 8,000,000 ตัวอักษร</p>` : `<p class="text-[10px] sm:text-xs text-slate-400 font-medium mt-3"><i class="fas fa-lock"></i> เฉพาะ Super Admin เท่านั้นที่ตั้งขีดจำกัดพื้นที่จัดเก็บได้</p>`;
+                }
 
 content.innerHTML = html;
             }
