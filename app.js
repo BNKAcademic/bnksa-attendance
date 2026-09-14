@@ -1127,6 +1127,11 @@
             const todayProminentDateStr = `วันนี้ ${todayFullThaiDateStr}`;
             html += `<div class="bg-white rounded-2xl sm:rounded-3xl shadow-sm border border-slate-200 p-3 sm:p-8 mb-6 sm:mb-10"><div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-4 sm:mb-8"><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800 flex items-center gap-2 flex-wrap"><i class="far fa-calendar-alt text-blue-500 text-xl sm:text-3xl"></i> ตารางเรียน <span class="text-xs sm:text-base font-black ${isDarkNow ? 'bg-indigo-500/20 text-indigo-300 border-indigo-400/40' : 'bg-indigo-50 text-indigo-700 border-indigo-200'} border px-2.5 py-1 rounded-full">${todayProminentDateStr}</span></h3><div class="flex overflow-x-auto gap-1.5 sm:gap-2 pb-2 lg:pb-0 w-full lg:w-auto">`;
             for(let i = 1; i <= 5; i++) {
+                // คำนวณวันที่ของแต่ละวัน (จันทร์-ศุกร์) ของสัปดาห์ปัจจุบัน - อิงจากวันนี้จริง จะขยับตามสัปดาห์ให้อัตโนมัติทุกครั้งที่เปิดหน้า
+                const todayForWeek = new Date(); const todayDowForWeek = todayForWeek.getDay() || 7; // จันทร์=1 ... อาทิตย์=7
+                const mondayOfWeek = new Date(todayForWeek); mondayOfWeek.setDate(todayForWeek.getDate() - (todayDowForWeek - 1));
+                const dateForThisDay = new Date(mondayOfWeek); dateForThisDay.setDate(mondayOfWeek.getDate() + (i - 1));
+                const dayDateLabel = dateForThisDay.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
                 // สีประจำวันแบบไทย: จันทร์เหลือง อังคารชมพู พุธเขียว พฤหัสส้ม ศุกร์ฟ้า
                 const dayColorMap = {
                     1: { active: 'bg-yellow-500 border-yellow-500', text: 'text-yellow-700', hoverBorder: 'hover:border-yellow-300' },
@@ -1137,7 +1142,7 @@
                 };
                 const dc = dayColorMap[i];
                 const activeClass = (i === dayIndex) ? `${dc.active} text-white shadow-md` : `bg-white border-slate-200 text-slate-700 hover:bg-slate-50 ${dc.hoverBorder}`;
-                html += `<button onclick="window.navigate('classroom', {roomId: '${roomId}', dayIndex: ${i}})" class="px-2 sm:px-3 lg:px-5 py-2 rounded-lg border font-bold whitespace-nowrap transition-all text-[10px] sm:text-sm flex items-center gap-1 flex-1 justify-center ${activeClass}">${i === dayIndex ? '<i class="fas fa-check-circle"></i>' : ''} ${daysLabel[i-1].replace('วัน','')}</button>`; }
+                html += `<button onclick="window.navigate('classroom', {roomId: '${roomId}', dayIndex: ${i}})" class="px-2 sm:px-3 lg:px-5 py-1.5 sm:py-2 rounded-lg border font-bold whitespace-nowrap transition-all flex flex-col items-center justify-center gap-0.5 flex-1 ${activeClass}"><span class="text-[8px] sm:text-[10px] font-medium opacity-80 leading-none">${dayDateLabel}</span><span class="text-[10px] sm:text-sm flex items-center gap-1 leading-none">${i === dayIndex ? '<i class="fas fa-check-circle"></i>' : ''} ${daysLabel[i-1].replace('วัน','')}</span></button>`; }
             
             let dObj = new Date();
             let currentDayOfWeek = dObj.getDay(); let dateToPass = new Date().toISOString().split('T')[0];
