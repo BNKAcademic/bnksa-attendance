@@ -478,7 +478,7 @@
                         }
                     }
                 } catch (e) {}
-            }, 10000);
+            }, 20000);
         }
 
         window.onload = async () => {
