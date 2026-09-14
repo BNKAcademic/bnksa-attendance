@@ -419,7 +419,14 @@
                 try {
                     const response = await fetch(GOOGLE_APP_SCRIPT_URL); const data = await response.json();
                     if (data && data.attendanceData) {
-                        attendanceData = data.attendanceData; followUps = data.followUps || [];
+                        // ===== ผสานข้อมูลแทนการเขียนทับตรงๆ - กันกรณี poll รอบนี้ดันมาถึงก่อนที่เซิร์ฟเวอร์จะประมวลผลการบันทึกล่าสุดเสร็จ ทำให้ข้อมูลที่เพิ่งเช็คชื่อไปหายวับ =====
+                        const attKeyOf = a => a.subjectId + '|' + a.date + '|' + a.period;
+                        const localAttMap = {}; attendanceData.forEach(a => localAttMap[attKeyOf(a)] = a);
+                        const mergedAtt = data.attendanceData.map(sa => { const la = localAttMap[attKeyOf(sa)]; return (la && la.checkedAt && (!sa.checkedAt || la.checkedAt > sa.checkedAt)) ? la : sa; });
+                        const serverAttKeys = new Set(data.attendanceData.map(attKeyOf));
+                        attendanceData.forEach(la => { if (!serverAttKeys.has(attKeyOf(la))) mergedAtt.push(la); });
+                        attendanceData = mergedAtt;
+                        followUps = data.followUps || [];
                         if (!isAdmin) {
                             teachers = data.teachers || []; subjects = data.subjects || []; students = data.students || [];
                             students = students.map(st => { if (st.title) { st.name = (st.title + (st.name || '')).trim(); st.title = ''; } return st; });
@@ -1266,7 +1273,10 @@
             const payloadData = { id: (existingRec && existingRec.id) || generateId(), subjectId: currentSubjectId, date: date, period: period, records: records, createdAt: (existingRec && existingRec.createdAt) || new Date().toISOString(), checkedAt: new Date().toISOString(), checkedBy: currentUser ? currentUser.name : '' };
             if(isSub) payloadData.substituteTeacher = subTeacher;
             showToast("กำลังบันทึกข้อมูล... (อัปเดตแบบเรียลไทม์)", "info"); document.body.style.pointerEvents = 'none';
-            await saveData('attendance', payloadData); document.body.style.pointerEvents = 'auto'; showToast("บันทึกข้อมูลสำเร็จ!");
+            await saveData('attendance', payloadData);
+            // ===== ดึงข้อมูลล่าสุดจากเซิร์ฟเวอร์ทันทีหลังบันทึก กันปัญหา realtime sync (โพลทุก 10 วิ) มาทับข้อมูลที่เพิ่งบันทึกไปแบบ optimistic ก่อนที่เซิร์ฟเวอร์จะยืนยันครบ =====
+            try { const freshRes = await fetch(GOOGLE_APP_SCRIPT_URL); const freshData = await freshRes.json(); if (freshData && freshData.attendanceData) attendanceData = freshData.attendanceData; } catch (e) { /* เน็ตมีปัญหา ใช้ข้อมูลในเครื่องที่บันทึกไปแล้วต่อไปก่อน */ }
+            document.body.style.pointerEvents = 'auto'; showToast("บันทึกข้อมูลสำเร็จ!");
             if (fromTeacherDash) { navigate('teacher_dash', {teacherName: subject.teacher}); } else { navigate('classroom', {roomId: subject.roomId});
             }
         };
