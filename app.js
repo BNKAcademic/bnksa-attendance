@@ -541,6 +541,7 @@
                     }
                     teachers = data.teachers || [];
                     subjects = data.subjects || []; students = data.students || []; attendanceData = data.attendanceData || []; followUps = data.followUps || []; logs = data.logs || [];
+                    window.__loadedAttendanceTermYears.add(String(settings.term) + '_' + String(settings.year)); // เทอม/ปีปัจจุบันถูกโหลดมาพร้อมกับการเปิดเว็บแล้ว ไม่ต้องดึงซ้ำ
                     subjects = subjects.map(s => { if (s.day !== undefined && s.period !== undefined && !s.schedules) { s.credits = 0.5; s.schedules = [{ day: s.day, period: s.period }]; delete s.day; delete s.period; } if (s.term === undefined) s.term = settings.term; if (s.year === undefined) s.year = settings.year; if (s.locked === undefined) s.locked = false; return s; });
                     students = students.map(st => { if (!st.status) st.status = 'active'; if (st.title) { st.name = (st.title + (st.name || '')).trim(); st.title = ''; } return st; });
                 } else {
@@ -613,24 +614,30 @@
                 if (action === 'attendance' && payload) {
                     const idx = attendanceData.findIndex(a => a.subjectId === payload.subjectId && a.date === payload.date && String(a.period) === String(payload.period));
                     if (idx >= 0) attendanceData[idx] = payload; else attendanceData.push(payload);
-                    res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'upsert_attendance', record: payload }) });
+                    // ===== [ใหม่] หา term/year ของวิชานี้ ส่งแนบไปด้วย เพื่อให้เซิร์ฟเวอร์เขียนลงไฟล์เช็คชื่อของเทอม/ปีที่ถูกต้องโดยตรง (ไม่ต้องอ่านไฟล์หลักอีก) =====
+                    const subForAtt = subjects.find(s => s.id === payload.subjectId);
+                    const attTerm = (subForAtt && subForAtt.term) || settings.term;
+                    const attYear = (subForAtt && subForAtt.year) || settings.year;
+                    res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'upsert_attendance', record: payload, term: attTerm, year: attYear }) });
                 } else if (action === 'followup' && payload) {
                     followUps.push(payload);
                     res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'upsert_followup', record: payload }) });
                 } else if (action === 'reset_subject' && payload) {
                     attendanceData = attendanceData.filter(a => a.subjectId !== payload);
-                    res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_subject_attendance', subjectId: payload }) });
+                    const subForReset = subjects.find(s => s.id === payload);
+                    const resetTerm = (subForReset && subForReset.term) || adminTerm();
+                    const resetYear = (subForReset && subForReset.year) || adminYear();
+                    res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_subject_attendance', subjectId: payload, term: resetTerm, year: resetYear }) });
                 } else if (action === 'reset_all') {
-                    attendanceData = []; followUps = [];
-                    res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_all_attendance' }) });
+                    attendanceData = []; followUps = followUps.filter(f => f.term !== adminTerm() || f.year !== adminYear());
+                    res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_all_attendance', term: adminTerm(), year: adminYear() }) });
                 } else {
-                    // 'full' - ใช้สำหรับตั้งค่า/ครู/วิชา/นักเรียน/ผู้ใช้งาน ฯลฯ ยังคง fetch ข้อมูลล่าสุดมาผสาน attendanceData/followUps/logs ก่อนเขียนทับเสมอ กันไม่ให้ไปทับข้อมูลที่ถูกเช็คชื่อพร้อมกันจากอุปกรณ์อื่น
-                    // ถ้าผู้เรียกเพิ่ง fetch ข้อมูลล่าสุดมาแล้ว (เช่นผ่าน refreshBeforeEdit) ให้ส่ง prefetchedLatest มาใช้ต่อได้เลย ไม่ต้อง fetch ซ้ำอีกรอบ (จุดที่ทำให้บันทึกช้า/หน่วงเดิม)
-                    let dataToSave = { settings, teachers, subjects, students, attendanceData, followUps, logs };
+                    // 'full' - ใช้สำหรับตั้งค่า/ครู/วิชา/นักเรียน/ผู้ใช้งาน ฯลฯ
+                    // [ใหม่] ไม่ต้องแนบ/ผสาน attendanceData อีกต่อไป เพราะแยกเก็บเป็นไฟล์รายเทอม/ปีต่างหากแล้ว (เขียนผ่าน action 'attendance' โดยตรง) ทำให้การบันทึกส่วนนี้เบาและเร็วขึ้นมาก
+                    let dataToSave = { settings, teachers, subjects, students, followUps, logs };
                     let latestData = prefetchedLatest;
                     if (!latestData) { const response = await fetch(GOOGLE_APP_SCRIPT_URL); latestData = await response.json(); }
-                    if (latestData && latestData.attendanceData) {
-                        dataToSave.attendanceData = latestData.attendanceData; attendanceData = latestData.attendanceData;
+                    if (latestData) {
                         dataToSave.followUps = latestData.followUps || followUps; followUps = dataToSave.followUps;
                         dataToSave.logs = mergeLogsArrays(latestData.logs, logs); logs = dataToSave.logs;
                     }
@@ -1575,11 +1582,30 @@
         }
         // สลับเทอมที่แอดมินกำลังจัดการอยู่ในหน้าแอดมิน - เป็นการตั้งค่าเฉพาะเครื่อง/เซสชันของแอดมินคนนี้เท่านั้น
         // ไม่บันทึก log และไม่ส่งข้อมูลขึ้นเซิร์ฟเวอร์ จึงไม่กระทบสิ่งที่ผู้ใช้ทั่วไปเห็นที่หน้าแรก และแอดมินแต่ละคนสลับเทอมกันได้อิสระ
+        // ===== [ใหม่] โหลดข้อมูลเช็คชื่อของเทอม/ปีอื่น (นอกเหนือจากเทอม/ปีปัจจุบันที่โหลดมาตอนเปิดเว็บ) แบบ on-demand =====
+        // ใช้ตอนแอดมินสลับไปดู/จัดการเทอม-ปีอื่นที่ไม่ใช่เทอมปัจจุบัน จะได้ไม่ต้องโหลดข้อมูลทุกเทอมทุกปีมาตั้งแต่ต้น (ทำให้เว็บช้า)
+        window.__loadedAttendanceTermYears = new Set();
+        async function ensureAttendanceLoadedForTerm(term, year) {
+            const key = String(term) + '_' + String(year);
+            if (window.__loadedAttendanceTermYears.has(key)) return; // โหลดไว้แล้ว ไม่ต้องโหลดซ้ำ
+            try {
+                const res = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=get_attendance&term=${encodeURIComponent(term)}&year=${encodeURIComponent(year)}`);
+                const data = await res.json();
+                if (data && data.status === 'success' && Array.isArray(data.attendanceData)) {
+                    const existingKeys = new Set(attendanceData.map(a => a.subjectId + '|' + a.date + '|' + a.period));
+                    data.attendanceData.forEach(rec => { const k = rec.subjectId + '|' + rec.date + '|' + rec.period; if (!existingKeys.has(k)) attendanceData.push(rec); });
+                    window.__loadedAttendanceTermYears.add(key);
+                }
+            } catch (e) { /* เน็ตมีปัญหา - ข้อมูลเทอมนี้อาจยังไม่ครบ แต่ไม่ทำให้ทั้งระบบล่ม ลองใหม่ได้ตอนสลับเทอมอีกครั้ง */ }
+        }
         window.setAdminWorkingTerm = function(term) {
             term = String(term);
             if (term === String(adminTerm())) return;
-            showConfirm("ยืนยันการสลับเทอม", `ต้องการสลับไปจัดการข้อมูลเทอม ${term}/${adminYear()} ใช่หรือไม่? (มีผลเฉพาะหน้าจอของคุณเองเท่านั้น ไม่กระทบสิ่งที่ผู้ใช้ทั่วไปเห็นที่หน้าแรก)`, () => {
+            showConfirm("ยืนยันการสลับเทอม", `ต้องการสลับไปจัดการข้อมูลเทอม ${term}/${adminYear()} ใช่หรือไม่? (มีผลเฉพาะหน้าจอของคุณเองเท่านั้น ไม่กระทบสิ่งที่ผู้ใช้ทั่วไปเห็นที่หน้าแรก)`, async () => {
                 adminWorkingTerm = term;
+                document.body.style.pointerEvents = 'none';
+                await ensureAttendanceLoadedForTerm(adminTerm(), adminYear());
+                document.body.style.pointerEvents = 'auto';
                 renderAdmin();
             });
         };
@@ -1587,9 +1613,12 @@
         window.setAdminWorkingYear = function(year) {
             year = String(year);
             if (year === String(adminYear())) return;
-            showConfirm("ยืนยันการสลับปีการศึกษา", `ต้องการสลับไปจัดการข้อมูลปีการศึกษา ${year} ใช่หรือไม่? (มีผลเฉพาะหน้าจอของคุณเองเท่านั้น ไม่กระทบปีการศึกษาที่ผู้ใช้ทั่วไปเห็นที่หน้าแรกซึ่งยังคงเป็น ${settings.year} ตามเดิม จนกว่าคุณจะไปตั้งค่าที่แท็บ "ตั้งค่าภาคเรียน" อย่างชัดเจน)`, () => {
+            showConfirm("ยืนยันการสลับปีการศึกษา", `ต้องการสลับไปจัดการข้อมูลปีการศึกษา ${year} ใช่หรือไม่? (มีผลเฉพาะหน้าจอของคุณเองเท่านั้น ไม่กระทบปีการศึกษาที่ผู้ใช้ทั่วไปเห็นที่หน้าแรกซึ่งยังคงเป็น ${settings.year} ตามเดิม จนกว่าคุณจะไปตั้งค่าที่แท็บ "ตั้งค่าภาคเรียน" อย่างชัดเจน)`, async () => {
                 adminWorkingYear = year;
                 adminWorkingTerm = null; // เปลี่ยนปีแล้วรีเซ็ตกลับไปเทอม 1 ของปีนั้นเพื่อไม่ให้สับสน
+                document.body.style.pointerEvents = 'none';
+                await ensureAttendanceLoadedForTerm(adminTerm(), adminYear());
+                document.body.style.pointerEvents = 'auto';
                 renderAdmin();
             });
         };
