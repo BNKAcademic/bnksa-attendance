@@ -419,13 +419,19 @@
                 try {
                     const response = await fetch(GOOGLE_APP_SCRIPT_URL); const data = await response.json();
                     if (data && data.attendanceData) {
-                        // ===== ผสานข้อมูลแทนการเขียนทับตรงๆ - กันกรณี poll รอบนี้ดันมาถึงก่อนที่เซิร์ฟเวอร์จะประมวลผลการบันทึกล่าสุดเสร็จ ทำให้ข้อมูลที่เพิ่งเช็คชื่อไปหายวับ =====
-                        const attKeyOf = a => a.subjectId + '|' + a.date + '|' + a.period;
-                        const localAttMap = {}; attendanceData.forEach(a => localAttMap[attKeyOf(a)] = a);
-                        const mergedAtt = data.attendanceData.map(sa => { const la = localAttMap[attKeyOf(sa)]; return (la && la.checkedAt && (!sa.checkedAt || la.checkedAt > sa.checkedAt)) ? la : sa; });
-                        const serverAttKeys = new Set(data.attendanceData.map(attKeyOf));
-                        attendanceData.forEach(la => { if (!serverAttKeys.has(attKeyOf(la))) mergedAtt.push(la); });
-                        attendanceData = mergedAtt;
+                        // ===== ผสานข้อมูลเฉพาะตอนที่เพิ่งมีการบันทึกเช็คชื่อไปหมาดๆ (ภายใน 25 วิ) เท่านั้น - กันปัญหา poll มาทับข้อมูลที่เพิ่งบันทึก =====
+                        // นอกช่วงนี้ใช้วิธีเขียนทับตรงๆ แบบเดิม (เร็วกว่ามาก ไม่ต้องไล่ลูปสร้าง Map/Set ทุกรอบโพลโดยไม่จำเป็น)
+                        const justSavedRecently = (Date.now() - (window.__lastAttendanceSaveAt || 0)) < 25000;
+                        if (justSavedRecently) {
+                            const attKeyOf = a => a.subjectId + '|' + a.date + '|' + a.period;
+                            const localAttMap = {}; attendanceData.forEach(a => localAttMap[attKeyOf(a)] = a);
+                            const mergedAtt = data.attendanceData.map(sa => { const la = localAttMap[attKeyOf(sa)]; return (la && la.checkedAt && (!sa.checkedAt || la.checkedAt > sa.checkedAt)) ? la : sa; });
+                            const serverAttKeys = new Set(data.attendanceData.map(attKeyOf));
+                            attendanceData.forEach(la => { if (!serverAttKeys.has(attKeyOf(la))) mergedAtt.push(la); });
+                            attendanceData = mergedAtt;
+                        } else {
+                            attendanceData = data.attendanceData;
+                        }
                         followUps = data.followUps || [];
                         if (!isAdmin) {
                             teachers = data.teachers || []; subjects = data.subjects || []; students = data.students || [];
@@ -1298,6 +1304,7 @@
             if(isSub) payloadData.substituteTeacher = subTeacher;
             showToast("กำลังบันทึกข้อมูล... (อัปเดตแบบเรียลไทม์)", "info"); document.body.style.pointerEvents = 'none';
             await saveData('attendance', payloadData);
+            window.__lastAttendanceSaveAt = Date.now();
             // ===== ดึงข้อมูลล่าสุดจากเซิร์ฟเวอร์ทันทีหลังบันทึก กันปัญหา realtime sync (โพลทุก 10 วิ) มาทับข้อมูลที่เพิ่งบันทึกไปแบบ optimistic ก่อนที่เซิร์ฟเวอร์จะยืนยันครบ =====
             try { const freshRes = await fetch(GOOGLE_APP_SCRIPT_URL); const freshData = await freshRes.json(); if (freshData && freshData.attendanceData) attendanceData = freshData.attendanceData; } catch (e) { /* เน็ตมีปัญหา ใช้ข้อมูลในเครื่องที่บันทึกไปแล้วต่อไปก่อน */ }
             document.body.style.pointerEvents = 'auto'; showToast("บันทึกข้อมูลสำเร็จ!");
