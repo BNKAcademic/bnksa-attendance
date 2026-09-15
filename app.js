@@ -1200,7 +1200,7 @@
             // ===== [ใหม่] เช็คก่อนว่าโหลดข้อมูลเช็คชื่อของห้องนี้มาแล้วหรือยัง ถ้ายัง โหลดก่อนแล้วค่อยวาดหน้าใหม่ (กันเห็นฟอร์มว่างผิดๆ ทั้งที่จริงมีข้อมูลอยู่แล้ว) =====
             const roomKeyForGate = roomAttKey_(subject.term, subject.year, subject.roomId);
             if (!(roomKeyForGate in window.__loadedRoomLastModified)) {
-                document.getElementById('mainContent').innerHTML = renderLoadingProgressHTML(`กำลังโหลดข้อมูลห้อง ${formatRoomName(subject.roomId)}...`, 60, 'roomLoadBar');
+                document.getElementById('mainContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 sm:py-32"><i class="fas fa-spinner fa-spin text-4xl text-indigo-500 mb-4"></i><p class="text-slate-500 font-bold text-sm sm:text-base">กำลังโหลดข้อมูลห้อง ${formatRoomName(subject.roomId)}...</p></div>`;
                 ensureAttendanceLoadedForRoom(subject.term, subject.year, subject.roomId).then(() => openAttendance(subjectId, initialPeriod, fromTeacherDash, passedDate));
                 return;
             }
@@ -1356,7 +1356,7 @@
             if (!subject) return;
             const roomKeyForGate3 = roomAttKey_(subject.term, subject.year, subject.roomId);
             if (!(roomKeyForGate3 in window.__loadedRoomLastModified)) {
-                document.getElementById('mainContent').innerHTML = renderLoadingProgressHTML(`กำลังโหลดข้อมูลห้อง ${formatRoomName(subject.roomId)}...`, 60, 'roomLoadBar');
+                document.getElementById('mainContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 sm:py-32"><i class="fas fa-spinner fa-spin text-4xl text-indigo-500 mb-4"></i><p class="text-slate-500 font-bold text-sm sm:text-base">กำลังโหลดข้อมูลห้อง ${formatRoomName(subject.roomId)}...</p></div>`;
                 ensureAttendanceLoadedForRoom(subject.term, subject.year, subject.roomId).then(() => openSubjectSummary(subjectId, fromTeacherDash));
                 return;
             }
@@ -1417,7 +1417,7 @@
             if (!student) return;
             const roomKeyForGate4 = roomAttKey_(adminTerm(), adminYear(), student.roomId);
             if (!(roomKeyForGate4 in window.__loadedRoomLastModified)) {
-                document.getElementById('mainContent').innerHTML = renderLoadingProgressHTML(`กำลังโหลดข้อมูลห้อง ${formatRoomName(student.roomId)}...`, 60, 'roomLoadBar');
+                document.getElementById('mainContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 sm:py-32"><i class="fas fa-spinner fa-spin text-4xl text-indigo-500 mb-4"></i><p class="text-slate-500 font-bold text-sm sm:text-base">กำลังโหลดข้อมูลห้อง ${formatRoomName(student.roomId)}...</p></div>`;
                 ensureAttendanceLoadedForRoom(adminTerm(), adminYear(), student.roomId).then(() => openStudentSummary(studentId, selectedMonth));
                 return;
             }
@@ -1454,7 +1454,7 @@
             // ===== [ใหม่] เช็คก่อนว่าโหลดข้อมูลเช็คชื่อของห้องนี้มาแล้วหรือยัง ถ้ายัง โหลดก่อนแล้วค่อยวาดหน้าใหม่ =====
             const roomKeyForGate2 = roomAttKey_(adminTerm(), adminYear(), roomId);
             if (!(roomKeyForGate2 in window.__loadedRoomLastModified)) {
-                document.getElementById('mainContent').innerHTML = renderLoadingProgressHTML(`กำลังโหลดข้อมูลห้อง ${formatRoomName(roomId)}...`, 60, 'roomLoadBar');
+                document.getElementById('mainContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 sm:py-32"><i class="fas fa-spinner fa-spin text-4xl text-indigo-500 mb-4"></i><p class="text-slate-500 font-bold text-sm sm:text-base">กำลังโหลดข้อมูลห้อง ${formatRoomName(roomId)}...</p></div>`;
                 ensureAttendanceLoadedForRoom(adminTerm(), adminYear(), roomId).then(() => openRoomSummary(roomId, selectedMonth, tab));
                 return;
             }
@@ -1736,7 +1736,7 @@
                 let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-hdd text-indigo-500"></i> ขนาดข้อมูลที่ใช้ไป</h3><p class="text-[10px] sm:text-xs text-slate-500 font-medium mb-4">ข้อมูลตอนนี้แยกเก็บเป็นหลายไฟล์บน Drive (ไฟล์หลัก + ไฟล์เช็คชื่อแยกรายเทอม/ปี) แต่ละไฟล์มีขีดจำกัดขนาดของตัวเองแยกกัน ไม่รวมกันเหมือนเดิม</p>`;
 
                 if (!window.__storageInfo) {
-                    html += renderLoadingProgressHTML('กำลังดึงขนาดไฟล์จริงจากเซิร์ฟเวอร์...', 50, 'storageLoadBar');
+                    html += `<div class="flex items-center justify-center py-10 text-slate-400 gap-2"><i class="fas fa-spinner fa-spin"></i> กำลังดึงขนาดไฟล์จริงจากเซิร์ฟเวอร์...</div>`;
                 } else {
                     const info = window.__storageInfo;
                     const renderFileBar = (label, icon, color, bytes) => {
@@ -1748,24 +1748,35 @@
                     html += `<h4 class="text-xs sm:text-sm font-black text-slate-500 uppercase tracking-wider mb-2 mt-4"><i class="fas fa-file-alt"></i> ไฟล์หลัก (ตั้งค่า/ครู/วิชา/นักเรียน/log)</h4>`;
                     html += info.mainFile ? renderFileBar('SchoolAttendanceDB.json', 'fa-database', 'bg-indigo-400', info.mainFile.sizeBytes) : `<p class="text-xs text-slate-400 mb-4">ยังไม่พบไฟล์หลัก</p>`;
 
-                    html += `<h4 class="text-xs sm:text-sm font-black text-slate-500 uppercase tracking-wider mb-2 mt-5"><i class="fas fa-calendar-check"></i> ไฟล์เช็คชื่อแยกรายห้อง (${info.attendanceFiles.length} ไฟล์)</h4>`;
-                    if (info.attendanceFiles.length === 0) {
-                        html += `<p class="text-xs text-slate-400 mb-2">ยังไม่มีไฟล์เช็คชื่อ</p>`;
+                    const currentTermYearKey = String(adminTerm()) + '/' + String(adminYear());
+                    // แอดมินทั่วไปเห็นแค่เทอม/ปีที่กำลังดูอยู่ (เบากว่า ไม่ต้องแสดงทุกเทอม) - Super Admin เห็นครบทุกเทอม/ปี พร้อมย่อ/ขยายได้
+                    const visibleAttFiles = isSuperAdminDS ? info.attendanceFiles : info.attendanceFiles.filter(f => (f.term + '/' + f.year) === currentTermYearKey);
+                    html += `<h4 class="text-xs sm:text-sm font-black text-slate-500 uppercase tracking-wider mb-2 mt-5"><i class="fas fa-calendar-check"></i> ไฟล์เช็คชื่อแยกรายห้อง (${visibleAttFiles.length} ไฟล์${isSuperAdminDS ? '' : ` - เทอม ${currentTermYearKey}`})</h4>`;
+                    if (visibleAttFiles.length === 0) {
+                        html += `<p class="text-xs text-slate-400 mb-2">ยังไม่มีไฟล์เช็คชื่อ${isSuperAdminDS ? '' : 'ของเทอมนี้'}</p>`;
                     } else {
                         // จัดกลุ่มตามเทอม/ปีก่อน แล้วเรียงห้องภายในแต่ละกลุ่ม อ่านง่ายกว่าเรียงมั่ว
                         const grouped = {};
-                        info.attendanceFiles.forEach(f => {
+                        visibleAttFiles.forEach(f => {
                             const key = f.term + '/' + f.year;
                             if (!grouped[key]) grouped[key] = [];
                             grouped[key].push(f);
                         });
+                        if (!window.__storageGroupExpanded) window.__storageGroupExpanded = {};
                         Object.keys(grouped).sort().reverse().forEach(key => {
-                            const isCurrentTerm = key === (String(adminTerm()) + '/' + String(adminYear()));
-                            html += `<p class="text-[10px] sm:text-xs font-black text-slate-400 mt-3 mb-1.5">เทอม ${key}${isCurrentTerm ? ' <span class="text-indigo-500">(กำลังดูอยู่)</span>' : ''}</p>`;
-                            grouped[key].sort((a, b) => (a.room || '').localeCompare(b.room || '')).forEach(f => {
+                            const isCurrentTerm = key === currentTermYearKey;
+                            const groupBytes = grouped[key].reduce((sum, f) => sum + f.sizeBytes, 0);
+                            const roomFilesHtml = grouped[key].sort((a, b) => (a.room || '').localeCompare(b.room || '')).map(f => {
                                 const label = f.legacyPendingMigration ? `⏳ ไฟล์รวมทุกห้อง (รอแยกเป็นรายห้องอัตโนมัติ)` : `ห้อง ${formatRoomName(f.room)}`;
-                                html += renderFileBar(label, 'fa-calendar-check', 'bg-emerald-400', f.sizeBytes);
-                            });
+                                return renderFileBar(label, 'fa-calendar-check', 'bg-emerald-400', f.sizeBytes);
+                            }).join('');
+                            if (isSuperAdminDS) {
+                                // Super Admin: หัวข้อกดย่อ/ขยายได้ ค่าเริ่มต้นเปิดเฉพาะเทอมที่กำลังดูอยู่
+                                const expanded = key in window.__storageGroupExpanded ? window.__storageGroupExpanded[key] : isCurrentTerm;
+                                html += `<button onclick="window.__storageGroupExpanded['${key}'] = ${!expanded}; renderAdminTab();" class="w-full flex items-center justify-between gap-2 mt-3 mb-1.5 text-left"><span class="text-[10px] sm:text-xs font-black text-slate-500">เทอม ${key}${isCurrentTerm ? ' <span class="text-indigo-500">(กำลังดูอยู่)</span>' : ''} <span class="text-slate-400 font-medium">(${grouped[key].length} ห้อง, รวม ${fmtSize(groupBytes)})</span></span><i class="fas fa-chevron-${expanded ? 'up' : 'down'} text-slate-400 text-[10px]"></i></button>${expanded ? roomFilesHtml : ''}`;
+                            } else {
+                                html += `<p class="text-[10px] sm:text-xs font-black text-slate-400 mt-3 mb-1.5">เทอม ${key} <span class="text-indigo-500">(กำลังดูอยู่)</span></p>${roomFilesHtml}`;
+                            }
                         });
                     }
 
