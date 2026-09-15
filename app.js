@@ -418,20 +418,9 @@
                 if (!isDbInitialized || GOOGLE_APP_SCRIPT_URL === "YOUR_WEB_APP_URL_HERE") return;
                 try {
                     const response = await fetch(GOOGLE_APP_SCRIPT_URL); const data = await response.json();
-                    if (data && data.attendanceData) {
-                        // ===== ผสานข้อมูลเฉพาะตอนที่เพิ่งมีการบันทึกเช็คชื่อไปหมาดๆ (ภายใน 25 วิ) เท่านั้น - กันปัญหา poll มาทับข้อมูลที่เพิ่งบันทึก =====
-                        // นอกช่วงนี้ใช้วิธีเขียนทับตรงๆ แบบเดิม (เร็วกว่ามาก ไม่ต้องไล่ลูปสร้าง Map/Set ทุกรอบโพลโดยไม่จำเป็น)
-                        const justSavedRecently = (Date.now() - (window.__lastAttendanceSaveAt || 0)) < 25000;
-                        if (justSavedRecently) {
-                            const attKeyOf = a => a.subjectId + '|' + a.date + '|' + a.period;
-                            const localAttMap = {}; attendanceData.forEach(a => localAttMap[attKeyOf(a)] = a);
-                            const mergedAtt = data.attendanceData.map(sa => { const la = localAttMap[attKeyOf(sa)]; return (la && la.checkedAt && (!sa.checkedAt || la.checkedAt > sa.checkedAt)) ? la : sa; });
-                            const serverAttKeys = new Set(data.attendanceData.map(attKeyOf));
-                            attendanceData.forEach(la => { if (!serverAttKeys.has(attKeyOf(la))) mergedAtt.push(la); });
-                            attendanceData = mergedAtt;
-                        } else {
-                            attendanceData = data.attendanceData;
-                        }
+                    if (data) {
+                        // ===== [ใหม่] ไฟล์หลัก (doGet ค่าเริ่มต้น) ไม่มีข้อมูลเช็คชื่อติดมาด้วยแล้ว (แยกไฟล์ตามห้องแล้ว) - เช็คเฉพาะห้องที่เคยโหลดไว้แล้วเท่านั้นว่ามีอะไรเปลี่ยนไหม (ใช้ endpoint meta เบาๆ ก่อนเสมอ ไม่โหลดเต็มถ้าไม่มีอะไรเปลี่ยน) =====
+                        (window.__loadedRoomsList || []).forEach(r => ensureAttendanceLoadedForRoom(r.term, r.year, r.roomId, true));
                         followUps = data.followUps || [];
                         if (!isAdmin) {
                             teachers = data.teachers || []; subjects = data.subjects || []; students = data.students || [];
@@ -540,8 +529,8 @@
                         settings.academicYears.push({ year: settings.year, status: 'active' }); // ปีที่กำลังใช้แสดงผลอยู่ต้องอยู่ในทะเบียนเสมอ
                     }
                     teachers = data.teachers || [];
-                    subjects = data.subjects || []; students = data.students || []; attendanceData = data.attendanceData || []; followUps = data.followUps || []; logs = data.logs || [];
-                    window.__loadedAttendanceTermYears.add(String(settings.term) + '_' + String(settings.year)); // เทอม/ปีปัจจุบันถูกโหลดมาพร้อมกับการเปิดเว็บแล้ว ไม่ต้องดึงซ้ำ
+                    subjects = data.subjects || []; students = data.students || []; attendanceData = []; followUps = data.followUps || []; logs = data.logs || [];
+                    // [ใหม่] ไม่โหลดข้อมูลเช็คชื่อของห้องไหนมาตอนเปิดเว็บอีกต่อไป - จะโหลดเฉพาะห้องที่เปิดดูจริงแบบ on-demand (ดู ensureAttendanceLoadedForRoom)
                     subjects = subjects.map(s => { if (s.day !== undefined && s.period !== undefined && !s.schedules) { s.credits = 0.5; s.schedules = [{ day: s.day, period: s.period }]; delete s.day; delete s.period; } if (s.term === undefined) s.term = settings.term; if (s.year === undefined) s.year = settings.year; if (s.locked === undefined) s.locked = false; return s; });
                     students = students.map(st => { if (!st.status) st.status = 'active'; if (st.title) { st.name = (st.title + (st.name || '')).trim(); st.title = ''; } return st; });
                 } else {
@@ -614,11 +603,13 @@
                 if (action === 'attendance' && payload) {
                     const idx = attendanceData.findIndex(a => a.subjectId === payload.subjectId && a.date === payload.date && String(a.period) === String(payload.period));
                     if (idx >= 0) attendanceData[idx] = payload; else attendanceData.push(payload);
-                    // ===== [ใหม่] หา term/year ของวิชานี้ ส่งแนบไปด้วย เพื่อให้เซิร์ฟเวอร์เขียนลงไฟล์เช็คชื่อของเทอม/ปีที่ถูกต้องโดยตรง (ไม่ต้องอ่านไฟล์หลักอีก) =====
+                    // ===== [ใหม่] หา term/year/roomId ของวิชานี้ ส่งแนบไปด้วย เพื่อให้เซิร์ฟเวอร์เขียนลงไฟล์เช็คชื่อของห้อง/เทอม/ปีที่ถูกต้องโดยตรง (ไม่ต้องอ่านไฟล์หลักอีก) =====
                     const subForAtt = subjects.find(s => s.id === payload.subjectId);
                     const attTerm = (subForAtt && subForAtt.term) || settings.term;
                     const attYear = (subForAtt && subForAtt.year) || settings.year;
-                    res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'upsert_attendance', record: payload, term: attTerm, year: attYear }) });
+                    const attRoom = subForAtt && subForAtt.roomId;
+                    res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'upsert_attendance', record: payload, term: attTerm, year: attYear, roomId: attRoom }) });
+                    if (attRoom) window.__loadedRoomLastModified[roomAttKey_(attTerm, attYear, attRoom)] = Date.now(); // เพิ่งเขียนเอง ไม่ต้องรอ meta-check รอบหน้า
                 } else if (action === 'followup' && payload) {
                     followUps.push(payload);
                     res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'upsert_followup', record: payload }) });
@@ -627,9 +618,12 @@
                     const subForReset = subjects.find(s => s.id === payload);
                     const resetTerm = (subForReset && subForReset.term) || adminTerm();
                     const resetYear = (subForReset && subForReset.year) || adminYear();
-                    res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_subject_attendance', subjectId: payload, term: resetTerm, year: resetYear }) });
+                    const resetRoom = subForReset && subForReset.roomId;
+                    res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_subject_attendance', subjectId: payload, term: resetTerm, year: resetYear, roomId: resetRoom }) });
                 } else if (action === 'reset_all') {
-                    attendanceData = []; followUps = followUps.filter(f => f.term !== adminTerm() || f.year !== adminYear());
+                    attendanceData = attendanceData.filter(a => { const s = subjects.find(x => x.id === a.subjectId); return !s || String(s.term) !== String(adminTerm()) || String(s.year) !== String(adminYear()); });
+                    followUps = followUps.filter(f => f.term !== adminTerm() || f.year !== adminYear());
+                    window.__loadedRoomLastModified = {}; window.__loadedRoomsList = []; // ล้างสถานะที่จำไว้ทั้งหมด กันเข้าใจผิดว่าห้องที่เพิ่งล้างไปแล้วยังเป็นข้อมูลเดิมที่เคยโหลดมา
                     res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_all_attendance', term: adminTerm(), year: adminYear() }) });
                 } else {
                     // 'full' - ใช้สำหรับตั้งค่า/ครู/วิชา/นักเรียน/ผู้ใช้งาน ฯลฯ
@@ -1047,6 +1041,13 @@
         };
 
         function renderSchoolSummary(selectedMonth = null) {
+            const schoolTerm = settings.term, schoolYear = settings.year;
+            const schoolTermYearKey = String(schoolTerm) + '_' + String(schoolYear);
+            if (!window.__adminTermRoomsLoaded.has(schoolTermYearKey)) {
+                document.getElementById('mainContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 sm:py-32"><i class="fas fa-spinner fa-spin text-4xl text-indigo-500 mb-4"></i><p class="text-slate-500 font-bold text-sm sm:text-base">กำลังโหลดข้อมูลเช็คชื่อทุกห้อง...</p></div>`;
+                ensureAttendanceLoadedForAllRoomsInTerm(schoolTerm, schoolYear).then(() => { window.__adminTermRoomsLoaded.add(schoolTermYearKey); renderSchoolSummary(selectedMonth); });
+                return;
+            }
             let currentDate = new Date();
             if (!selectedMonth) { let month = (currentDate.getMonth() + 1).toString().padStart(2, '0'); selectedMonth = `${currentDate.getFullYear()}-${month}`; }
             const monthNames = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
@@ -1123,6 +1124,9 @@
             const isDarkNow = document.documentElement.classList.contains('dark');
             currentRoomId = roomId;
             if (dayIndex === null) { let today = new Date().getDay(); dayIndex = (today >= 1 && today <= 5) ? today : 1; }
+            // ===== [ใหม่] แอบโหลดข้อมูลเช็คชื่อของห้องนี้ไว้ล่วงหน้าเงียบๆ (ไม่บล็อกการแสดงผลหน้านี้) เผื่อผู้ใช้กด "เช็คชื่อ"/"สรุป" ต่อ จะได้ไม่ต้องรอโหลดซ้ำ =====
+            const preloadTerm = adminTerm ? adminTerm() : settings.term, preloadYear = adminYear ? adminYear() : settings.year;
+            ensureAttendanceLoadedForRoom(preloadTerm, preloadYear, roomId);
             
             const roomNameStr = formatRoomName(roomId);
             const advData = getRoomAdvisors(roomId);
@@ -1189,6 +1193,13 @@
         function openAttendance(subjectId, initialPeriod = null, fromTeacherDash = false, passedDate = null) {
             currentSubjectId = subjectId;
             const subject = subjects.find(s => s.id === subjectId); if (!subject) return;
+            // ===== [ใหม่] เช็คก่อนว่าโหลดข้อมูลเช็คชื่อของห้องนี้มาแล้วหรือยัง ถ้ายัง โหลดก่อนแล้วค่อยวาดหน้าใหม่ (กันเห็นฟอร์มว่างผิดๆ ทั้งที่จริงมีข้อมูลอยู่แล้ว) =====
+            const roomKeyForGate = roomAttKey_(subject.term, subject.year, subject.roomId);
+            if (!(roomKeyForGate in window.__loadedRoomLastModified)) {
+                document.getElementById('mainContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 sm:py-32"><i class="fas fa-spinner fa-spin text-4xl text-indigo-500 mb-4"></i><p class="text-slate-500 font-bold text-sm sm:text-base">กำลังโหลดข้อมูลห้อง ${formatRoomName(subject.roomId)}...</p></div>`;
+                ensureAttendanceLoadedForRoom(subject.term, subject.year, subject.roomId).then(() => openAttendance(subjectId, initialPeriod, fromTeacherDash, passedDate));
+                return;
+            }
             const roomStudents = getRoomStudents(subject.roomId).sort((a, b) => parseInt(a.number) - parseInt(b.number));
             const today = passedDate || new Date().toISOString().split('T')[0];
             let selectedPeriod = initialPeriod;
@@ -1339,6 +1350,12 @@
             const isDarkNow = document.documentElement.classList.contains('dark');
             const subject = subjects.find(s => s.id === subjectId);
             if (!subject) return;
+            const roomKeyForGate3 = roomAttKey_(subject.term, subject.year, subject.roomId);
+            if (!(roomKeyForGate3 in window.__loadedRoomLastModified)) {
+                document.getElementById('mainContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 sm:py-32"><i class="fas fa-spinner fa-spin text-4xl text-indigo-500 mb-4"></i><p class="text-slate-500 font-bold text-sm sm:text-base">กำลังโหลดข้อมูลห้อง ${formatRoomName(subject.roomId)}...</p></div>`;
+                ensureAttendanceLoadedForRoom(subject.term, subject.year, subject.roomId).then(() => openSubjectSummary(subjectId, fromTeacherDash));
+                return;
+            }
             const roomStudents = getRoomStudents(subject.roomId).sort((a, b) => parseInt(a.number) - parseInt(b.number));
             const subjectAtt = attendanceData.filter(a => a.subjectId === subjectId).sort((a, b) => new Date(a.date) - new Date(b.date) || parseInt(a.period || 0) - parseInt(b.period || 0));
             let uniqueCols = []; subjectAtt.forEach(att => { const key = `${att.date}_${att.period}`; if (!uniqueCols.find(c => c.key === key)) { uniqueCols.push({ key, date: att.date, period: att.period, data: att.records, subTeacher: att.substituteTeacher }); } });
@@ -1394,6 +1411,12 @@
             const isDarkNow = document.documentElement.classList.contains('dark');
             const student = students.find(s => s.id === studentId);
             if (!student) return;
+            const roomKeyForGate4 = roomAttKey_(adminTerm(), adminYear(), student.roomId);
+            if (!(roomKeyForGate4 in window.__loadedRoomLastModified)) {
+                document.getElementById('mainContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 sm:py-32"><i class="fas fa-spinner fa-spin text-4xl text-indigo-500 mb-4"></i><p class="text-slate-500 font-bold text-sm sm:text-base">กำลังโหลดข้อมูลห้อง ${formatRoomName(student.roomId)}...</p></div>`;
+                ensureAttendanceLoadedForRoom(adminTerm(), adminYear(), student.roomId).then(() => openStudentSummary(studentId, selectedMonth));
+                return;
+            }
             let currentDate = new Date(); if (!selectedMonth) { let month = (currentDate.getMonth() + 1).toString().padStart(2, '0');
                 selectedMonth = `${currentDate.getFullYear()}-${month}`; }
             const roomName = formatRoomName(student.roomId), roomSubjects = getRoomSubjects(student.roomId);
@@ -1424,6 +1447,13 @@
 
         function openRoomSummary(roomId, selectedMonth = null, tab = 'monthly') {
             const isDarkNow = document.documentElement.classList.contains('dark');
+            // ===== [ใหม่] เช็คก่อนว่าโหลดข้อมูลเช็คชื่อของห้องนี้มาแล้วหรือยัง ถ้ายัง โหลดก่อนแล้วค่อยวาดหน้าใหม่ =====
+            const roomKeyForGate2 = roomAttKey_(adminTerm(), adminYear(), roomId);
+            if (!(roomKeyForGate2 in window.__loadedRoomLastModified)) {
+                document.getElementById('mainContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 sm:py-32"><i class="fas fa-spinner fa-spin text-4xl text-indigo-500 mb-4"></i><p class="text-slate-500 font-bold text-sm sm:text-base">กำลังโหลดข้อมูลห้อง ${formatRoomName(roomId)}...</p></div>`;
+                ensureAttendanceLoadedForRoom(adminTerm(), adminYear(), roomId).then(() => openRoomSummary(roomId, selectedMonth, tab));
+                return;
+            }
             let currentDate = new Date();
             if (!selectedMonth) { let month = (currentDate.getMonth() + 1).toString().padStart(2, '0'); selectedMonth = `${currentDate.getFullYear()}-${month}`;
             }
@@ -1561,7 +1591,14 @@
             if (roomTotals) { const rSum = Object.values(roomTotals).reduce((a,b)=>a+b,0); if (rSum > 0) makeStatusDoughnutChart('roomMonthlyChart', roomTotals); }
         }
 
+        window.__adminTermRoomsLoaded = new Set(); // "term_year" ที่เคยโหลดข้อมูลเช็คชื่อทุกห้องมาแล้ว (สำหรับแท็บที่ต้องดูภาพรวมทั้งเทอม เช่น สำรองข้อมูล/ติดตามครู/ความพร้อมข้อมูล)
         function renderAdmin() {
+            const adminTermYearKey = String(adminTerm()) + '_' + String(adminYear());
+            if (!window.__adminTermRoomsLoaded.has(adminTermYearKey)) {
+                document.getElementById('mainContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 sm:py-32"><i class="fas fa-spinner fa-spin text-4xl text-indigo-500 mb-4"></i><p class="text-slate-500 font-bold text-sm sm:text-base">กำลังโหลดข้อมูลเช็คชื่อเทอม ${adminTerm()}/${adminYear()}...</p></div>`;
+                ensureAttendanceLoadedForAllRoomsInTerm(adminTerm(), adminYear()).then(() => { window.__adminTermRoomsLoaded.add(adminTermYearKey); renderAdmin(); });
+                return;
+            }
             const isSuperAdmin = currentUser && currentUser.role === 'super_admin';
             window.__pendingNotifs = computePendingNotifications();
             const notifCategoryLabels = { incomplete: 'ตารางเรียนไม่ครบ', duplicate: 'วิชาซ้ำกัน', nostudents: 'ยังไม่มีนักเรียน', noadvisor: 'ยังไม่มีครูที่ปรึกษา', nostaff: 'ยังไม่มีเจ้าหน้าที่ประจำห้อง', conflict: 'ตารางสอนชนกัน' };
@@ -1584,19 +1621,38 @@
         // ไม่บันทึก log และไม่ส่งข้อมูลขึ้นเซิร์ฟเวอร์ จึงไม่กระทบสิ่งที่ผู้ใช้ทั่วไปเห็นที่หน้าแรก และแอดมินแต่ละคนสลับเทอมกันได้อิสระ
         // ===== [ใหม่] โหลดข้อมูลเช็คชื่อของเทอม/ปีอื่น (นอกเหนือจากเทอม/ปีปัจจุบันที่โหลดมาตอนเปิดเว็บ) แบบ on-demand =====
         // ใช้ตอนแอดมินสลับไปดู/จัดการเทอม-ปีอื่นที่ไม่ใช่เทอมปัจจุบัน จะได้ไม่ต้องโหลดข้อมูลทุกเทอมทุกปีมาตั้งแต่ต้น (ทำให้เว็บช้า)
-        window.__loadedAttendanceTermYears = new Set();
-        async function ensureAttendanceLoadedForTerm(term, year) {
-            const key = String(term) + '_' + String(year);
-            if (window.__loadedAttendanceTermYears.has(key)) return; // โหลดไว้แล้ว ไม่ต้องโหลดซ้ำ
+        // ===== [ใหม่] โหลดข้อมูลเช็คชื่อแบบ on-demand ทีละ "ห้อง" (ไม่ใช่ทั้งเทอมเหมือนเดิม) - เบากว่ามาก =====
+        // เช็คก่อนด้วย endpoint เบาๆ (get_attendance_meta) ว่าไฟล์ห้องนี้มีการแก้ไขล่าสุดเมื่อไหร่ ถ้าตรงกับที่มีอยู่แล้วในเครื่อง ข้ามไปเลย ไม่โหลดซ้ำ
+        window.__loadedRoomLastModified = {}; // key: "term_year_roomId" -> timestamp ล่าสุดที่โหลดมา
+        window.__loadedRoomsList = []; // [{term, year, roomId}] - เก็บแยกไว้ต่างหาก (แม่นยำกว่าแกะจาก key string) ใช้ตอน realtime sync เช็คทุกห้องที่เคยโหลด
+        function roomAttKey_(term, year, roomId) { return String(term) + '_' + String(year) + '_' + String(roomId); }
+        async function ensureAttendanceLoadedForRoom(term, year, roomId, forceCheck = false) {
+            const key = roomAttKey_(term, year, roomId);
+            const alreadyLoaded = key in window.__loadedRoomLastModified;
+            if (alreadyLoaded && !forceCheck) return; // เคยโหลดแล้ว และไม่ได้บังคับให้เช็คซ้ำ - ข้ามเลย
             try {
-                const res = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=get_attendance&term=${encodeURIComponent(term)}&year=${encodeURIComponent(year)}`);
+                if (alreadyLoaded) {
+                    // เคยโหลดแล้ว แค่เช็คว่ามีการแก้ไขใหม่ไหม (payload เล็กมาก) ก่อนตัดสินใจโหลดเต็ม
+                    const metaRes = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=get_attendance_meta&term=${encodeURIComponent(term)}&year=${encodeURIComponent(year)}&room=${encodeURIComponent(roomId)}`);
+                    const meta = await metaRes.json();
+                    if (meta && meta.status === 'success' && meta.lastModified === window.__loadedRoomLastModified[key]) return; // ไม่มีอะไรเปลี่ยน - ไม่ต้องโหลดเต็ม
+                }
+                const res = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=get_attendance&term=${encodeURIComponent(term)}&year=${encodeURIComponent(year)}&room=${encodeURIComponent(roomId)}`);
                 const data = await res.json();
                 if (data && data.status === 'success' && Array.isArray(data.attendanceData)) {
-                    const existingKeys = new Set(attendanceData.map(a => a.subjectId + '|' + a.date + '|' + a.period));
-                    data.attendanceData.forEach(rec => { const k = rec.subjectId + '|' + rec.date + '|' + rec.period; if (!existingKeys.has(k)) attendanceData.push(rec); });
-                    window.__loadedAttendanceTermYears.add(key);
+                    // ล้างข้อมูลเก่าของห้องนี้ออกก่อน (เผื่อมีการลบ record ไปฝั่งเซิร์ฟเวอร์) แล้วแทนที่ด้วยชุดล่าสุด - ไม่กระทบข้อมูลห้องอื่นที่โหลดไว้อยู่แล้ว
+                    const roomSubjectIds = new Set(subjects.filter(s => s.roomId === roomId).map(s => s.id));
+                    attendanceData = attendanceData.filter(a => !roomSubjectIds.has(a.subjectId));
+                    attendanceData.push(...data.attendanceData);
+                    if (!alreadyLoaded) window.__loadedRoomsList.push({ term, year, roomId });
+                    window.__loadedRoomLastModified[key] = data.lastModified || Date.now();
                 }
-            } catch (e) { /* เน็ตมีปัญหา - ข้อมูลเทอมนี้อาจยังไม่ครบ แต่ไม่ทำให้ทั้งระบบล่ม ลองใหม่ได้ตอนสลับเทอมอีกครั้ง */ }
+            } catch (e) { /* เน็ตมีปัญหา - ข้อมูลห้องนี้อาจยังไม่ครบ แต่ไม่ทำให้ทั้งระบบล่ม ลองใหม่ได้ */ }
+        }
+        // ใช้เฉพาะหน้าแอดมินบางหน้าที่ต้องดูภาพรวม "ทุกห้อง" ของเทอมนั้น (เช่น ติดตามครู, ความพร้อมของข้อมูล) - โหลดทีละห้องแต่ยิงพร้อมกันได้ (Promise.all)
+        async function ensureAttendanceLoadedForAllRoomsInTerm(term, year) {
+            const roomIds = [...new Set(subjects.filter(s => String(s.term) === String(term) && String(s.year) === String(year)).map(s => s.roomId))];
+            await Promise.all(roomIds.map(r => ensureAttendanceLoadedForRoom(term, year, r)));
         }
         window.setAdminWorkingTerm = function(term) {
             term = String(term);
@@ -1604,7 +1660,8 @@
             showConfirm("ยืนยันการสลับเทอม", `ต้องการสลับไปจัดการข้อมูลเทอม ${term}/${adminYear()} ใช่หรือไม่? (มีผลเฉพาะหน้าจอของคุณเองเท่านั้น ไม่กระทบสิ่งที่ผู้ใช้ทั่วไปเห็นที่หน้าแรก)`, async () => {
                 adminWorkingTerm = term;
                 document.body.style.pointerEvents = 'none';
-                await ensureAttendanceLoadedForTerm(adminTerm(), adminYear());
+                await ensureAttendanceLoadedForAllRoomsInTerm(adminTerm(), adminYear());
+                window.__adminTermRoomsLoaded.add(String(adminTerm()) + '_' + String(adminYear()));
                 document.body.style.pointerEvents = 'auto';
                 renderAdmin();
             });
@@ -1617,7 +1674,8 @@
                 adminWorkingYear = year;
                 adminWorkingTerm = null; // เปลี่ยนปีแล้วรีเซ็ตกลับไปเทอม 1 ของปีนั้นเพื่อไม่ให้สับสน
                 document.body.style.pointerEvents = 'none';
-                await ensureAttendanceLoadedForTerm(adminTerm(), adminYear());
+                await ensureAttendanceLoadedForAllRoomsInTerm(adminTerm(), adminYear());
+                window.__adminTermRoomsLoaded.add(String(adminTerm()) + '_' + String(adminYear()));
                 document.body.style.pointerEvents = 'auto';
                 renderAdmin();
             });
