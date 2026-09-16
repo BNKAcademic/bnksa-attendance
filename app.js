@@ -1392,12 +1392,17 @@
             const existingRec = attendanceData.find(a => a.subjectId === currentSubjectId && a.date === date && String(a.period) === String(period));
             const payloadData = { id: (existingRec && existingRec.id) || generateId(), subjectId: currentSubjectId, date: date, period: period, records: records, createdAt: (existingRec && existingRec.createdAt) || new Date().toISOString(), checkedAt: new Date().toISOString(), checkedBy: currentUser ? currentUser.name : '' };
             if(isSub) payloadData.substituteTeacher = subTeacher;
-            showToast("กำลังบันทึกข้อมูล... (อัปเดตแบบเรียลไทม์)", "info"); document.body.style.pointerEvents = 'none';
-            await saveData('attendance', payloadData);
+            showProgressModal("กำลังบันทึกข้อมูล", "กำลังส่งข้อมูลไปยังเซิร์ฟเวอร์ กรุณารอสักครู่...");
+            updateProgressModal(45);
+            document.body.style.pointerEvents = 'none';
+            const saveSuccess = await saveData('attendance', payloadData);
             window.__lastAttendanceSaveAt = Date.now();
-            // ===== ดึงข้อมูลล่าสุดจากเซิร์ฟเวอร์ทันทีหลังบันทึก กันปัญหา realtime sync (โพลทุก 10 วิ) มาทับข้อมูลที่เพิ่งบันทึกไปแบบ optimistic ก่อนที่เซิร์ฟเวอร์จะยืนยันครบ =====
-            try { const freshRes = await fetch(GOOGLE_APP_SCRIPT_URL); const freshData = await freshRes.json(); if (freshData && freshData.attendanceData) attendanceData = freshData.attendanceData; } catch (e) { /* เน็ตมีปัญหา ใช้ข้อมูลในเครื่องที่บันทึกไปแล้วต่อไปก่อน */ }
-            document.body.style.pointerEvents = 'auto'; showToast("บันทึกข้อมูลสำเร็จ!");
+            window.closeProgressModal();
+            document.body.style.pointerEvents = 'auto';
+            if (!saveSuccess) return; // บันทึกไม่สำเร็จ - saveData แสดงป็อปอัพแจ้งเตือนพร้อมปุ่มรีเฟรชหน้าเว็บให้แล้วในตัว ไม่ต้องทำอะไรต่อจากตรงนี้
+            // ===== [แก้ไข] ดึงข้อมูลล่าสุดของ "ห้องนี้" โดยตรง (ของเดิมพึ่ง default doGet ซึ่งตอนนี้ไม่มีข้อมูลเช็คชื่อติดมาด้วยแล้วหลังแยกไฟล์ตามห้อง - ถ้าไม่แก้จะไปล้าง attendanceData ทิ้งโดยไม่ตั้งใจ) =====
+            await ensureAttendanceLoadedForRoom(subject.term, subject.year, subject.roomId, true);
+            showToast("บันทึกข้อมูลสำเร็จ!");
             if (fromTeacherDash) { navigate('teacher_dash', {teacherName: subject.teacher}); } else { navigate('classroom', {roomId: subject.roomId});
             }
         };
@@ -2190,7 +2195,7 @@ content.innerHTML = html;
                 const existingHolidayDates = new Set((settings.holidays || []).map(h => h.date));
                 const suggestedThisMonth = yearRefList.filter(h => h.date.startsWith(monthPrefix) && !existingHolidayDates.has(h.date));
                 if (yearRefList.length === 0) {
-                    html += `<div class="mb-4 bg-slate-50 border border-slate-200 rounded-xl p-3 text-[10px] sm:text-xs text-slate-400 font-medium"><i class="fas fa-info-circle"></i> ยังไม่มีข้อมูลวันหยุดราชการอ้างอิงสำหรับปี ${year + 543} ในระบบ (รองรับเฉพาะ พ.ศ. 2568-2569) กรุณาเพิ่มวันหยุดด้วยตนเองโดยคลิกที่วันในปฏิทิน</div>`;
+                    html += `<div class="mb-4 bg-slate-50 border border-slate-200 rounded-xl p-3 text-[10px] sm:text-xs text-slate-400 font-medium"><div class="flex flex-wrap items-center justify-between gap-2"><span><i class="fas fa-info-circle"></i> ยังไม่มีข้อมูลวันหยุดราชการอ้างอิงสำหรับปี ${year + 543} ในระบบ (มีให้พร้อมใช้เฉพาะ พ.ศ. 2568-2569)</span><button onclick="window.fetchExternalHolidaysForYear(${year})" id="fetchHolidayBtn" class="bg-slate-700 hover:bg-slate-800 text-white px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold shrink-0"><i class="fas fa-cloud-download-alt"></i> ดึงข้อมูลจากอินเทอร์เน็ต</button></div></div>`;
                 } else if (suggestedThisMonth.length > 0) {
                     html += `<div class="mb-4 bg-indigo-50 border border-indigo-200 rounded-xl p-3 sm:p-4"><div class="flex flex-wrap items-center justify-between gap-2 mb-2"><h4 class="text-xs sm:text-sm font-extrabold text-indigo-700 flex items-center gap-1.5"><i class="fas fa-magic"></i> แนะนำวันหยุดราชการไทยเดือนนี้ (${suggestedThisMonth.length} วัน)</h4><button onclick="window.confirmAllSuggestedHolidays('${monthPrefix}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors"><i class="fas fa-check-double"></i> ยืนยันทั้งหมด</button></div><div class="flex flex-wrap gap-1.5">${suggestedThisMonth.map(h => `<button onclick="window.confirmSuggestedHoliday('${h.date}', '${h.label.replace(/'/g,"\\'")}')" class="bg-white border border-indigo-200 hover:bg-indigo-100 text-indigo-700 px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-colors flex items-center gap-1"><i class="fas fa-plus-circle"></i> ${h.date.split('-')[2]} - ${h.label}</button>`).join('')}</div></div>`;
                 }
@@ -2320,6 +2325,38 @@ content.innerHTML = html;
             saveData('full'); showToast("บันทึกวันหยุดเรียบร้อย"); renderAdminTab(); closeHolidayModal();
         };
         // ===== [ใหม่] ยืนยันเพิ่มวันหยุดที่แนะนำ (จากตาราง THAI_HOLIDAYS_REFERENCE) เข้าปฏิทินจริง =====
+        // ===== [ใหม่] ตารางแปลชื่อวันหยุดจากภาษาอังกฤษ (ที่ได้จาก API ภายนอก) เป็นภาษาไทย - ถ้าไม่พบในตารางจะใช้ชื่อภาษาอังกฤษเดิมไปก่อน =====
+        const HOLIDAY_NAME_TRANSLATE = {
+            "New Year's Day": "วันขึ้นปีใหม่", "Makha Bucha": "วันมาฆบูชา", "Chakri Memorial Day": "วันจักรี",
+            "Songkran Festival": "วันสงกรานต์", "National Labor Day": "วันแรงงานแห่งชาติ", "Coronation Day": "วันฉัตรมงคล",
+            "Royal Ploughing Ceremony": "วันพืชมงคล", "Visakha Bucha": "วันวิสาขบูชา", "Asalha Bucha": "วันอาสาฬหบูชา",
+            "Buddhist Lent Day": "วันเข้าพรรษา", "Constitution Day": "วันรัฐธรรมนูญ", "New Year's Eve": "วันสิ้นปี",
+            "Chulalongkorn Memorial Day": "วันปิยมหาราช", "Awakening Day": "วันหยุดพิเศษ",
+        };
+        function translateHolidayName_(englishName) {
+            if (HOLIDAY_NAME_TRANSLATE[englishName]) return HOLIDAY_NAME_TRANSLATE[englishName];
+            const found = Object.keys(HOLIDAY_NAME_TRANSLATE).find(k => englishName.includes(k));
+            return found ? HOLIDAY_NAME_TRANSLATE[found] : englishName; // ไม่พบคำแปล - ใช้ชื่อเดิม (ยังกดยืนยันเพิ่มได้ปกติ)
+        }
+        window.fetchExternalHolidaysForYear = async function(year) {
+            const btn = document.getElementById('fetchHolidayBtn');
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังดึงข้อมูล...'; }
+            try {
+                const res = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=get_external_holidays&year=${year}`);
+                const data = await res.json();
+                if (data && data.status === 'success' && Array.isArray(data.holidays) && data.holidays.length > 0) {
+                    THAI_HOLIDAYS_REFERENCE[year] = data.holidays.map(h => ({ date: h.date, label: translateHolidayName_(h.label) }));
+                    showToast(`ดึงข้อมูลวันหยุดปี ${year + 543} มาแล้ว ${data.holidays.length} วัน`);
+                    renderAdminTab();
+                } else {
+                    showToast(data.message || "ไม่พบข้อมูลวันหยุดของปีนี้จากแหล่งข้อมูลภายนอก", "error");
+                    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-cloud-download-alt"></i> ดึงข้อมูลจากอินเทอร์เน็ต'; }
+                }
+            } catch (e) {
+                showToast("เชื่อมต่อแหล่งข้อมูลภายนอกไม่ได้", "error");
+                if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-cloud-download-alt"></i> ดึงข้อมูลจากอินเทอร์เน็ต'; }
+            }
+        };
         window.confirmSuggestedHoliday = function(dateStr, label) {
             if (!settings.holidays) settings.holidays = [];
             if (settings.holidays.find(h => h.date === dateStr)) { showToast("มีวันหยุดนี้อยู่แล้ว", "error"); return; }
