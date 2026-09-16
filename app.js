@@ -963,7 +963,21 @@
             document.getElementById('progressIcon').className = 'fas fa-exclamation-triangle';
             document.getElementById('progressCloseBtn').classList.remove('hidden');
         }
+        // ===== [ใหม่] เวอร์ชันสปินเนอร์ล้วนๆ ของ progressModal (ไม่มีหลอด % ปลอม) - ใช้กับงานเร็วๆ ที่ไม่มีความคืบหน้าจริงให้แสดง เช่น บันทึกเช็คชื่อ =====
+        function showLoadingSpinnerModal(title, message) {
+            document.getElementById('progressTitle').innerText = title;
+            document.getElementById('progressMessage').innerText = message || 'กรุณารอสักครู่...';
+            document.getElementById('progressIconWrap').className = 'w-16 h-16 sm:w-20 sm:h-20 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6 text-indigo-500 text-3xl sm:text-4xl shadow-inner';
+            document.getElementById('progressIcon').className = 'fas fa-spinner fa-spin';
+            document.getElementById('progressBarFill').parentElement.classList.add('hidden');
+            document.getElementById('progressPercentText').classList.add('hidden');
+            document.getElementById('progressCloseBtn').classList.add('hidden');
+            const modal = document.getElementById('progressModal'); const box = document.getElementById('progressModalBox');
+            modal.classList.remove('hidden'); setTimeout(() => { box.classList.remove('scale-95', 'opacity-0'); box.classList.add('scale-100', 'opacity-100'); }, 10);
+        }
         window.closeProgressModal = function() {
+            document.getElementById('progressBarFill').parentElement.classList.remove('hidden'); // คืนค่าให้แสดงหลอด % ตามปกติ เผื่อครั้งต่อไปเป็นงานที่มีความคืบหน้าจริง (เช่น สร้างสมุดทะเบียน)
+            document.getElementById('progressPercentText').classList.remove('hidden');
             const modal = document.getElementById('progressModal'); const box = document.getElementById('progressModalBox');
             box.classList.remove('scale-100', 'opacity-100'); box.classList.add('scale-95', 'opacity-0');
             setTimeout(() => { modal.classList.add('hidden'); }, 300);
@@ -1392,8 +1406,7 @@
             const existingRec = attendanceData.find(a => a.subjectId === currentSubjectId && a.date === date && String(a.period) === String(period));
             const payloadData = { id: (existingRec && existingRec.id) || generateId(), subjectId: currentSubjectId, date: date, period: period, records: records, createdAt: (existingRec && existingRec.createdAt) || new Date().toISOString(), checkedAt: new Date().toISOString(), checkedBy: currentUser ? currentUser.name : '' };
             if(isSub) payloadData.substituteTeacher = subTeacher;
-            showProgressModal("กำลังบันทึกข้อมูล", "กำลังส่งข้อมูลไปยังเซิร์ฟเวอร์ กรุณารอสักครู่...");
-            updateProgressModal(45);
+            showLoadingSpinnerModal("กำลังบันทึกข้อมูล", "กำลังส่งข้อมูลไปยังเซิร์ฟเวอร์ กรุณารอสักครู่...");
             document.body.style.pointerEvents = 'none';
             const saveSuccess = await saveData('attendance', payloadData);
             window.__lastAttendanceSaveAt = Date.now();
