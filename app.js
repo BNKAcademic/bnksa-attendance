@@ -1430,11 +1430,12 @@
             document.body.style.pointerEvents = 'none';
             const saveSuccess = await saveData('attendance', payloadData);
             window.__lastAttendanceSaveAt = Date.now();
+            if (!saveSuccess) { window.closeProgressModal(); document.body.style.pointerEvents = 'auto'; return; } // บันทึกไม่สำเร็จ - saveData แสดงป็อปอัพแจ้งเตือนพร้อมปุ่มบันทึกอีกครั้งให้แล้วในตัว ไม่ต้องทำอะไรต่อจากตรงนี้
+            // ===== [แก้ไข] ดึงข้อมูลล่าสุดของ "ห้องนี้" โดยตรง (ของเดิมพึ่ง default doGet ซึ่งตอนนี้ไม่มีข้อมูลเช็คชื่อติดมาด้วยแล้วหลังแยกไฟล์ตามห้อง - ถ้าไม่แก้จะไปล้าง attendanceData ทิ้งโดยไม่ตั้งใจ) =====
+            // [แก้ไข] ทำขั้นตอนนี้ก่อนปิดป็อปอัพ กันจังหวะที่หน้าจอค้างเฉยๆ ไม่มีอะไรบอกสถานะระหว่างรอ แล้วค่อยปิดป็อปอัพ+เปลี่ยนหน้าพร้อมกันทีเดียว จะได้ลื่นไหลกว่าเดิม
+            await ensureAttendanceLoadedForRoom(subject.term, subject.year, subject.roomId, true);
             window.closeProgressModal();
             document.body.style.pointerEvents = 'auto';
-            if (!saveSuccess) return; // บันทึกไม่สำเร็จ - saveData แสดงป็อปอัพแจ้งเตือนพร้อมปุ่มรีเฟรชหน้าเว็บให้แล้วในตัว ไม่ต้องทำอะไรต่อจากตรงนี้
-            // ===== [แก้ไข] ดึงข้อมูลล่าสุดของ "ห้องนี้" โดยตรง (ของเดิมพึ่ง default doGet ซึ่งตอนนี้ไม่มีข้อมูลเช็คชื่อติดมาด้วยแล้วหลังแยกไฟล์ตามห้อง - ถ้าไม่แก้จะไปล้าง attendanceData ทิ้งโดยไม่ตั้งใจ) =====
-            await ensureAttendanceLoadedForRoom(subject.term, subject.year, subject.roomId, true);
             showToast("บันทึกข้อมูลสำเร็จ!");
             if (fromTeacherDash) { navigate('teacher_dash', {teacherName: subject.teacher}); } else { navigate('classroom', {roomId: subject.roomId});
             }
