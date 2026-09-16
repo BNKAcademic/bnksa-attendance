@@ -651,6 +651,25 @@
         // (ล็อกการเขียนไว้ฝั่ง Apps Script ด้วย LockService กันข้อมูลชนกันเวลาเช็คชื่อพร้อมกันหลายห้อง/หลายวิชา)
         // คืนค่า true/false บอกว่าบันทึกสำเร็จจริงหรือไม่ (เดิมไม่คืนค่าอะไรเลย ทำให้ถ้าบันทึกล้มเหลว (เช่น เน็ตหลุด/เซิร์ฟเวอร์ error) หน้าเว็บจะไม่รู้ตัวและไม่แจ้งเตือนผู้ใช้เลย
         // เข้าใจผิดว่าบันทึกสำเร็จ พอโหลดหน้าใหม่ค่าที่เพิ่งเปลี่ยน (เช่น ปีการศึกษา) จะหายไปเพราะไม่เคยถูกบันทึกจริงบนเซิร์ฟเวอร์)
+        // ===== [ใหม่] ยิง fetch พร้อมลองใหม่อัตโนมัติเงียบๆ (ไม่ต้องให้ผู้ใช้เห็น) กันปัญหาคิวชั่วคราวตอนมีคนบันทึกพร้อมกันเยอะ - ก่อนจะถือว่า "ล้มเหลวจริง" =====
+        async function fetchWithRetry(url, options, maxAttempts = 3) {
+            let lastError = null;
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                try {
+                    const res = await fetch(url, options);
+                    if (!res.ok) { lastError = new Error('HTTP ' + res.status); if (attempt < maxAttempts) { await new Promise(r => setTimeout(r, 1200 * attempt)); continue; } return res; }
+                    let json = null; try { json = await res.clone().json(); } catch (e) {}
+                    if (json && json.status === 'error' && /คิว|busy|lock/i.test(json.message || '') && attempt < maxAttempts) {
+                        await new Promise(r => setTimeout(r, 1200 * attempt)); continue; // คิวไม่ว่างชั่วคราว - รอสั้นๆ แล้วลองใหม่เงียบๆ ไม่ต้องให้ผู้ใช้รู้ตัว
+                    }
+                    return res;
+                } catch (e) {
+                    lastError = e;
+                    if (attempt < maxAttempts) { await new Promise(r => setTimeout(r, 1200 * attempt)); continue; }
+                }
+            }
+            throw lastError;
+        }
         async function saveData(action = 'full', payload = null, prefetchedLatest = null) {
             try {
                 if (GOOGLE_APP_SCRIPT_URL === "YOUR_WEB_APP_URL_HERE") return false;
@@ -663,51 +682,52 @@
                     const attTerm = (subForAtt && subForAtt.term) || settings.term;
                     const attYear = (subForAtt && subForAtt.year) || settings.year;
                     const attRoom = subForAtt && subForAtt.roomId;
-                    res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'upsert_attendance', record: payload, term: attTerm, year: attYear, roomId: attRoom }) });
+                    if (!attRoom) { showToast("ไม่พบข้อมูลห้องของวิชานี้ ไม่สามารถบันทึกได้ กรุณารีเฟรชหน้าเว็บแล้วลองใหม่", "error"); return false; }
+                    res = await fetchWithRetry(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'upsert_attendance', record: payload, term: attTerm, year: attYear, roomId: attRoom }) });
                     if (attRoom) window.__loadedRoomLastModified[roomAttKey_(attTerm, attYear, attRoom)] = Date.now(); // เพิ่งเขียนเอง ไม่ต้องรอ meta-check รอบหน้า
                 } else if (action === 'followup' && payload) {
                     followUps.push(payload);
-                    res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'upsert_followup', record: payload }) });
+                    res = await fetchWithRetry(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'upsert_followup', record: payload }) });
                 } else if (action === 'reset_subject' && payload) {
                     attendanceData = attendanceData.filter(a => a.subjectId !== payload);
                     const subForReset = subjects.find(s => s.id === payload);
                     const resetTerm = (subForReset && subForReset.term) || adminTerm();
                     const resetYear = (subForReset && subForReset.year) || adminYear();
                     const resetRoom = subForReset && subForReset.roomId;
-                    res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_subject_attendance', subjectId: payload, term: resetTerm, year: resetYear, roomId: resetRoom }) });
+                    res = await fetchWithRetry(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_subject_attendance', subjectId: payload, term: resetTerm, year: resetYear, roomId: resetRoom }) });
                 } else if (action === 'reset_all') {
                     attendanceData = attendanceData.filter(a => { const s = subjects.find(x => x.id === a.subjectId); return !s || String(s.term) !== String(adminTerm()) || String(s.year) !== String(adminYear()); });
                     followUps = followUps.filter(f => f.term !== adminTerm() || f.year !== adminYear());
                     window.__loadedRoomLastModified = {}; window.__loadedRoomsList = []; // ล้างสถานะที่จำไว้ทั้งหมด กันเข้าใจผิดว่าห้องที่เพิ่งล้างไปแล้วยังเป็นข้อมูลเดิมที่เคยโหลดมา
-                    res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_all_attendance', term: adminTerm(), year: adminYear() }) });
+                    res = await fetchWithRetry(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_all_attendance', term: adminTerm(), year: adminYear() }) });
                 } else {
                     // 'full' - ใช้สำหรับตั้งค่า/ครู/วิชา/นักเรียน/ผู้ใช้งาน ฯลฯ
                     // [ใหม่] ไม่ต้องแนบ/ผสาน attendanceData อีกต่อไป เพราะแยกเก็บเป็นไฟล์รายเทอม/ปีต่างหากแล้ว (เขียนผ่าน action 'attendance' โดยตรง) ทำให้การบันทึกส่วนนี้เบาและเร็วขึ้นมาก
                     let dataToSave = { settings, teachers, subjects, students, followUps, logs };
                     let latestData = prefetchedLatest;
-                    if (!latestData) { const response = await fetch(GOOGLE_APP_SCRIPT_URL); latestData = await response.json(); }
+                    if (!latestData) { const response = await fetchWithRetry(GOOGLE_APP_SCRIPT_URL, undefined, 2); latestData = await response.json(); }
                     if (latestData) {
                         dataToSave.followUps = latestData.followUps || followUps; followUps = dataToSave.followUps;
                         dataToSave.logs = mergeLogsArrays(latestData.logs, logs); logs = dataToSave.logs;
                     }
-                    res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(dataToSave) });
+                    res = await fetchWithRetry(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(dataToSave) });
                 }
                 if (!res || !res.ok) {
                     showToast("บันทึกข้อมูลไม่สำเร็จ (เชื่อมต่อเซิร์ฟเวอร์ไม่ได้)", "error");
-                    showConfirm("บันทึกข้อมูลไม่สำเร็จ", "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ข้อมูลที่เพิ่งทำอาจยังไม่ถูกบันทึกจริง แนะนำให้รีเฟรชหน้าเว็บเพื่อดึงข้อมูลล่าสุดมาตรวจสอบก่อนทำต่อ กด \"ยืนยัน\" เพื่อรีเฟรชหน้าเว็บทันที", () => location.reload());
+                    showConfirm("บันทึกข้อมูลไม่สำเร็จ", "ลองส่งข้อมูลหลายครั้งแล้วแต่ยังเชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กด \"บันทึกอีกครั้ง\" เพื่อลองส่งข้อมูลชุดนี้ใหม่ (ถ้ายังไม่สำเร็จอีก แนะนำให้ลองสลับเน็ต หรือรีเฟรชหน้าเว็บ)", () => saveData(action, payload, prefetchedLatest), "บันทึกอีกครั้ง");
                     return false;
                 }
                 let resultJson = null; try { resultJson = await res.json(); } catch (e2) {}
                 if (resultJson && resultJson.status === 'error') {
                     showToast(`บันทึกข้อมูลไม่สำเร็จ: ${resultJson.message || 'เกิดข้อผิดพลาดที่เซิร์ฟเวอร์'}`, "error");
-                    showConfirm("บันทึกข้อมูลไม่สำเร็จ", `เซิร์ฟเวอร์ตอบกลับว่า: ${resultJson.message || 'เกิดข้อผิดพลาด'}\n\nข้อมูลที่เพิ่งทำอาจยังไม่ถูกบันทึกจริง แนะนำให้รีเฟรชหน้าเว็บเพื่อดึงข้อมูลล่าสุดมาตรวจสอบก่อนทำต่อ กด "ยืนยัน" เพื่อรีเฟรชหน้าเว็บทันที`, () => location.reload());
+                    showConfirm("บันทึกข้อมูลไม่สำเร็จ", `เซิร์ฟเวอร์ตอบกลับว่า: ${resultJson.message || 'เกิดข้อผิดพลาด'}\n\nกด "บันทึกอีกครั้ง" เพื่อลองส่งข้อมูลชุดนี้ใหม่ (ถ้ายังไม่สำเร็จอีก แนะนำให้ลองรีเฟรชหน้าเว็บ)`, () => saveData(action, payload, prefetchedLatest), "บันทึกอีกครั้ง");
                     return false;
                 }
                 return true;
             } catch (e) {
                 console.error("Save Error", e);
                 showToast("บันทึกข้อมูลไม่สำเร็จ (เชื่อมต่อเซิร์ฟเวอร์ไม่ได้)", "error");
-                showConfirm("บันทึกข้อมูลไม่สำเร็จ", "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ข้อมูลที่เพิ่งทำอาจยังไม่ถูกบันทึกจริง แนะนำให้รีเฟรชหน้าเว็บเพื่อดึงข้อมูลล่าสุดมาตรวจสอบก่อนทำต่อ กด \"ยืนยัน\" เพื่อรีเฟรชหน้าเว็บทันที", () => location.reload());
+                showConfirm("บันทึกข้อมูลไม่สำเร็จ", "ลองส่งข้อมูลหลายครั้งแล้วแต่ยังเชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กด \"บันทึกอีกครั้ง\" เพื่อลองส่งข้อมูลชุดนี้ใหม่ (ถ้ายังไม่สำเร็จอีก แนะนำให้ลองสลับเน็ต หรือรีเฟรชหน้าเว็บ)", () => saveData(action, payload, prefetchedLatest), "บันทึกอีกครั้ง");
                 return false;
             }
         }
@@ -916,7 +936,7 @@
         }
 
         let confirmCallback = null, promptCallback = null;
-        function showConfirm(title, message, callback) { document.getElementById('confirmTitle').innerText = title; document.getElementById('confirmMessage').innerText = message; confirmCallback = callback; const modal = document.getElementById('confirmModal');
+        function showConfirm(title, message, callback, confirmLabel) { document.getElementById('confirmTitle').innerText = title; document.getElementById('confirmMessage').innerText = message; document.getElementById('confirmBtn').innerText = confirmLabel || 'ยืนยัน'; confirmCallback = callback; const modal = document.getElementById('confirmModal');
             const box = document.getElementById('confirmModalBox'); modal.classList.remove('hidden'); setTimeout(() => { box.classList.remove('scale-95', 'opacity-0'); box.classList.add('scale-100', 'opacity-100'); }, 10);
         }
         function closeConfirm() { const modal = document.getElementById('confirmModal'); const box = document.getElementById('confirmModalBox');
