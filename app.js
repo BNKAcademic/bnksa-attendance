@@ -78,6 +78,61 @@
             return counts;
         }
         const timeSlots = [ { period: 0, time: '08.00-08.30', name: 'เข้าแถวเช้า' }, { period: 1, time: '08.30-09.20' }, { period: 2, time: '09.20-10.10' }, { period: 3, time: '10.20-11.10' }, { period: 4, time: '11.10-12.00' }, { period: -1, time: '12.00-13.00', name: 'พักกลางวัน' }, { period: 5, time: '13.00-13.50' }, { period: 6, time: '13.50-14.40' }, { period: 7, time: '14.40-15.30' }, { period: 8, time: '15.30-16.20' } ];
+        // ===== [ใหม่] รายการวันหยุดราชการไทยอย่างเป็นทางการ ไว้แนะนำให้แอดมินกดยืนยันเพิ่มในปฏิทินได้เลย (ไม่ต้องพิมพ์เอง) =====
+        // ครอบคลุม พ.ศ. 2568-2569 (ค.ศ. 2025-2026) เท่านั้น - ปีถัดไปต้องอัพเดตตารางนี้เพิ่มเอง (วันหยุดตามปฏิทินจันทรคติ เช่น มาฆบูชา/วิสาขบูชา/อาสาฬหบูชา เปลี่ยนวันที่ทุกปี ประกาศจาก ครม. ล่วงหน้าไม่กี่เดือน)
+        const THAI_HOLIDAYS_REFERENCE = {
+            2025: [
+                { date: '2025-01-01', label: 'วันขึ้นปีใหม่' },
+                { date: '2025-02-12', label: 'วันมาฆบูชา' },
+                { date: '2025-04-06', label: 'วันจักรี' },
+                { date: '2025-04-07', label: 'วันหยุดชดเชยวันจักรี' },
+                { date: '2025-04-13', label: 'วันสงกรานต์' },
+                { date: '2025-04-14', label: 'วันสงกรานต์' },
+                { date: '2025-04-15', label: 'วันสงกรานต์' },
+                { date: '2025-04-16', label: 'วันหยุดชดเชยวันสงกรานต์' },
+                { date: '2025-05-01', label: 'วันแรงงานแห่งชาติ' },
+                { date: '2025-05-04', label: 'วันฉัตรมงคล' },
+                { date: '2025-05-05', label: 'วันหยุดชดเชยวันฉัตรมงคล' },
+                { date: '2025-05-09', label: 'วันพืชมงคล (เฉพาะราชการ)' },
+                { date: '2025-05-11', label: 'วันวิสาขบูชา' },
+                { date: '2025-05-12', label: 'วันหยุดชดเชยวันวิสาขบูชา' },
+                { date: '2025-06-02', label: 'วันหยุดพิเศษ (มติ ครม.)' },
+                { date: '2025-06-03', label: 'วันเฉลิมพระชนมพรรษาสมเด็จพระราชินี' },
+                { date: '2025-07-10', label: 'วันอาสาฬหบูชา' },
+                { date: '2025-07-11', label: 'วันเข้าพรรษา' },
+                { date: '2025-07-28', label: 'วันเฉลิมพระชนมพรรษา ร.10' },
+                { date: '2025-08-12', label: 'วันแม่แห่งชาติ' },
+                { date: '2025-10-13', label: 'วันคล้ายวันสวรรคต ร.9' },
+                { date: '2025-10-23', label: 'วันปิยมหาราช' },
+                { date: '2025-12-05', label: 'วันพ่อแห่งชาติ' },
+                { date: '2025-12-10', label: 'วันรัฐธรรมนูญ' },
+                { date: '2025-12-31', label: 'วันสิ้นปี' },
+            ],
+            2026: [
+                { date: '2026-01-01', label: 'วันขึ้นปีใหม่' },
+                { date: '2026-01-02', label: 'วันหยุดพิเศษ (มติ ครม.)' },
+                { date: '2026-03-03', label: 'วันมาฆบูชา' },
+                { date: '2026-04-06', label: 'วันจักรี' },
+                { date: '2026-04-13', label: 'วันสงกรานต์' },
+                { date: '2026-04-14', label: 'วันสงกรานต์' },
+                { date: '2026-04-15', label: 'วันสงกรานต์' },
+                { date: '2026-05-01', label: 'วันแรงงานแห่งชาติ' },
+                { date: '2026-05-04', label: 'วันฉัตรมงคล' },
+                { date: '2026-05-11', label: 'วันพืชมงคล (เฉพาะราชการ)' },
+                { date: '2026-05-31', label: 'วันวิสาขบูชา' },
+                { date: '2026-06-03', label: 'วันเฉลิมพระชนมพรรษาสมเด็จพระราชินี' },
+                { date: '2026-07-28', label: 'วันเฉลิมพระชนมพรรษา ร.10' },
+                { date: '2026-07-29', label: 'วันอาสาฬหบูชา' },
+                { date: '2026-07-30', label: 'วันเข้าพรรษา' },
+                { date: '2026-08-12', label: 'วันแม่แห่งชาติ' },
+                { date: '2026-10-13', label: 'วันคล้ายวันสวรรคต ร.9' },
+                { date: '2026-10-23', label: 'วันปิยมหาราช' },
+                { date: '2026-12-05', label: 'วันพ่อแห่งชาติ' },
+                { date: '2026-12-07', label: 'วันหยุดชดเชยวันพ่อแห่งชาติ' },
+                { date: '2026-12-10', label: 'วันรัฐธรรมนูญ' },
+                { date: '2026-12-31', label: 'วันสิ้นปี' },
+            ],
+        };
         const daysLabel = ['วันจันทร์', 'วันอังคาร', 'วันพุธ', 'วันพฤหัสบดี', 'วันศุกร์'];
         const SUBJECT_DAY_MAP = { 'จันทร์': 1, 'จ': 1, 'อังคาร': 2, 'อ': 2, 'พุธ': 3, 'พ': 3, 'พฤหัสบดี': 4, 'พฤหัส': 4, 'พฤ': 4, 'ศุกร์': 5, 'ศ': 5 };
         function parseScheduleString(str) {
@@ -637,11 +692,24 @@
                     }
                     res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(dataToSave) });
                 }
-                if (!res || !res.ok) { showToast("บันทึกข้อมูลไม่สำเร็จ (เชื่อมต่อเซิร์ฟเวอร์ไม่ได้) กรุณาลองใหม่อีกครั้ง อย่าเพิ่งรีเฟรชหน้าเว็บ", "error"); return false; }
+                if (!res || !res.ok) {
+                    showToast("บันทึกข้อมูลไม่สำเร็จ (เชื่อมต่อเซิร์ฟเวอร์ไม่ได้)", "error");
+                    showConfirm("บันทึกข้อมูลไม่สำเร็จ", "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ข้อมูลที่เพิ่งทำอาจยังไม่ถูกบันทึกจริง แนะนำให้รีเฟรชหน้าเว็บเพื่อดึงข้อมูลล่าสุดมาตรวจสอบก่อนทำต่อ กด \"ยืนยัน\" เพื่อรีเฟรชหน้าเว็บทันที", () => location.reload());
+                    return false;
+                }
                 let resultJson = null; try { resultJson = await res.json(); } catch (e2) {}
-                if (resultJson && resultJson.status === 'error') { showToast(`บันทึกข้อมูลไม่สำเร็จ: ${resultJson.message || 'เกิดข้อผิดพลาดที่เซิร์ฟเวอร์'}`, "error"); return false; }
+                if (resultJson && resultJson.status === 'error') {
+                    showToast(`บันทึกข้อมูลไม่สำเร็จ: ${resultJson.message || 'เกิดข้อผิดพลาดที่เซิร์ฟเวอร์'}`, "error");
+                    showConfirm("บันทึกข้อมูลไม่สำเร็จ", `เซิร์ฟเวอร์ตอบกลับว่า: ${resultJson.message || 'เกิดข้อผิดพลาด'}\n\nข้อมูลที่เพิ่งทำอาจยังไม่ถูกบันทึกจริง แนะนำให้รีเฟรชหน้าเว็บเพื่อดึงข้อมูลล่าสุดมาตรวจสอบก่อนทำต่อ กด "ยืนยัน" เพื่อรีเฟรชหน้าเว็บทันที`, () => location.reload());
+                    return false;
+                }
                 return true;
-            } catch (e) { console.error("Save Error", e); showToast("บันทึกข้อมูลไม่สำเร็จ (เชื่อมต่อเซิร์ฟเวอร์ไม่ได้) กรุณาลองใหม่อีกครั้ง อย่าเพิ่งรีเฟรชหน้าเว็บ", "error"); return false; }
+            } catch (e) {
+                console.error("Save Error", e);
+                showToast("บันทึกข้อมูลไม่สำเร็จ (เชื่อมต่อเซิร์ฟเวอร์ไม่ได้)", "error");
+                showConfirm("บันทึกข้อมูลไม่สำเร็จ", "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ข้อมูลที่เพิ่งทำอาจยังไม่ถูกบันทึกจริง แนะนำให้รีเฟรชหน้าเว็บเพื่อดึงข้อมูลล่าสุดมาตรวจสอบก่อนทำต่อ กด \"ยืนยัน\" เพื่อรีเฟรชหน้าเว็บทันที", () => location.reload());
+                return false;
+            }
         }
 
         // บันทึก Log การแก้ไขของผู้ใช้แต่ละคน (เก็บย้อนหลังสูงสุด 500 รายการล่าสุด)
@@ -1747,6 +1815,11 @@
 
                     html += `<h4 class="text-xs sm:text-sm font-black text-slate-500 uppercase tracking-wider mb-2 mt-4"><i class="fas fa-file-alt"></i> ไฟล์หลัก (ตั้งค่า/ครู/วิชา/นักเรียน/log)</h4>`;
                     html += info.mainFile ? renderFileBar('SchoolAttendanceDB.json', 'fa-database', 'bg-indigo-400', info.mainFile.sizeBytes) : `<p class="text-xs text-slate-400 mb-4">ยังไม่พบไฟล์หลัก</p>`;
+                    if (info.mainFile) {
+                        html += info.mainFileHasLeftoverAttendance
+                            ? `<div class="flex flex-wrap items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 -mt-1 mb-3"><span class="text-[10px] sm:text-xs font-bold text-amber-700"><i class="fas fa-exclamation-triangle"></i> พบข้อมูลเช็คชื่อค้างอยู่ในไฟล์หลัก (ระบบจะล้างให้อัตโนมัติเมื่อมีการใช้งานครั้งถัดไป)</span>${isSuperAdminDS ? `<button onclick="window.forceCleanMainFile()" class="bg-amber-600 hover:bg-amber-700 text-white px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold shrink-0"><i class="fas fa-broom"></i> ล้างทันที</button>` : ''}</div>`
+                            : `<div class="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 -mt-1 mb-3"><span class="text-[10px] sm:text-xs font-bold text-emerald-700"><i class="fas fa-check-circle"></i> ไฟล์หลักสะอาด ไม่มีข้อมูลเช็คชื่อตกค้าง</span></div>`;
+                    }
 
                     const currentTermYearKey = String(adminTerm()) + '/' + String(adminYear());
                     // แอดมินทั่วไปเห็นแค่เทอม/ปีที่กำลังดูอยู่ (เบากว่า ไม่ต้องแสดงทุกเทอม) - Super Admin เห็นครบทุกเทอม/ปี พร้อมย่อ/ขยายได้
@@ -1780,6 +1853,9 @@
                         });
                     }
 
+                    if (isSuperAdminDS) {
+                        html += `<div class="flex flex-wrap items-center justify-between gap-2 bg-teal-50 border border-teal-200 rounded-lg px-3 py-2.5 mt-2 mb-2"><span class="text-[10px] sm:text-xs font-bold text-teal-700"><i class="fas fa-folder-plus"></i> สร้างไฟล์เช็คชื่อล่วงหน้าให้ครบทุกห้องของเทอม ${adminTerm()}/${adminYear()} (ไม่บังคับ - ไฟล์จะถูกสร้างอัตโนมัติอยู่แล้วตอนเช็คชื่อจริงครั้งแรก)</span><button onclick="window.ensureRoomFilesForCurrentTerm()" class="bg-teal-600 hover:bg-teal-700 text-white px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold shrink-0"><i class="fas fa-plus"></i> สร้างไฟล์ล่วงหน้า</button></div>`;
+                    }
                     html += isSuperAdminDS ? `<div class="flex flex-wrap items-end gap-2 mt-4 pt-4 border-t border-slate-200"><div class="flex-1 min-w-[160px]"><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ตั้งขีดจำกัดพื้นที่ต่อไฟล์ (ตัวอักษร)</label><input type="number" id="setStorageLimit" value="${limitChars}" min="1000" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"></div><button onclick="window.saveStorageLimit()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกขีดจำกัด</button></div><p class="text-[10px] sm:text-xs text-slate-400 font-medium mt-2"><i class="fas fa-info-circle"></i> ขีดจำกัดนี้ใช้ประเมิน % ของแต่ละไฟล์แยกกัน (ไม่ใช่รวมกัน) อ้างอิงขีดจำกัดจริงของ DriveApp.createFile() ที่ประมาณ 10MB ต่อไฟล์ เผื่อระยะปลอดภัยไว้ที่ 8,000,000 ตัวอักษร</p>` : `<p class="text-[10px] sm:text-xs text-slate-400 font-medium mt-3"><i class="fas fa-lock"></i> เฉพาะ Super Admin เท่านั้นที่ตั้งขีดจำกัดพื้นที่จัดเก็บได้</p>`;
                 }
 
@@ -2108,6 +2184,17 @@ content.innerHTML = html;
 
                 html += `<div class="flex items-center justify-between mb-4 bg-slate-50 rounded-xl border border-slate-100 p-2 sm:p-3"><button onclick="window.changeHolidayMonth(-1)" class="w-9 h-9 sm:w-10 sm:h-10 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg flex items-center justify-center text-slate-600 shadow-sm transition-colors"><i class="fas fa-chevron-left"></i></button><span class="font-extrabold text-sm sm:text-lg text-slate-800">${monthNamesFull[month]} ${year + 543}</span><button onclick="window.changeHolidayMonth(1)" class="w-9 h-9 sm:w-10 sm:h-10 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg flex items-center justify-center text-slate-600 shadow-sm transition-colors"><i class="fas fa-chevron-right"></i></button></div>`;
 
+                // ===== [ใหม่] แนะนำวันหยุดราชการไทยของเดือนที่กำลังดูอยู่ - กดยืนยันทีเดียวเพิ่มเข้าปฏิทินได้เลย ไม่ต้องพิมพ์เอง =====
+                const yearRefList = THAI_HOLIDAYS_REFERENCE[year] || [];
+                const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}-`;
+                const existingHolidayDates = new Set((settings.holidays || []).map(h => h.date));
+                const suggestedThisMonth = yearRefList.filter(h => h.date.startsWith(monthPrefix) && !existingHolidayDates.has(h.date));
+                if (yearRefList.length === 0) {
+                    html += `<div class="mb-4 bg-slate-50 border border-slate-200 rounded-xl p-3 text-[10px] sm:text-xs text-slate-400 font-medium"><i class="fas fa-info-circle"></i> ยังไม่มีข้อมูลวันหยุดราชการอ้างอิงสำหรับปี ${year + 543} ในระบบ (รองรับเฉพาะ พ.ศ. 2568-2569) กรุณาเพิ่มวันหยุดด้วยตนเองโดยคลิกที่วันในปฏิทิน</div>`;
+                } else if (suggestedThisMonth.length > 0) {
+                    html += `<div class="mb-4 bg-indigo-50 border border-indigo-200 rounded-xl p-3 sm:p-4"><div class="flex flex-wrap items-center justify-between gap-2 mb-2"><h4 class="text-xs sm:text-sm font-extrabold text-indigo-700 flex items-center gap-1.5"><i class="fas fa-magic"></i> แนะนำวันหยุดราชการไทยเดือนนี้ (${suggestedThisMonth.length} วัน)</h4><button onclick="window.confirmAllSuggestedHolidays('${monthPrefix}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors"><i class="fas fa-check-double"></i> ยืนยันทั้งหมด</button></div><div class="flex flex-wrap gap-1.5">${suggestedThisMonth.map(h => `<button onclick="window.confirmSuggestedHoliday('${h.date}', '${h.label.replace(/'/g,"\\'")}')" class="bg-white border border-indigo-200 hover:bg-indigo-100 text-indigo-700 px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-colors flex items-center gap-1"><i class="fas fa-plus-circle"></i> ${h.date.split('-')[2]} - ${h.label}</button>`).join('')}</div></div>`;
+                }
+
                 html += `<div class="grid grid-cols-7 gap-1 sm:gap-1.5 mb-8">`;
                 dayNamesShort.forEach(d => { html += `<div class="text-center text-[9px] sm:text-xs font-black text-slate-400 py-1">${d}</div>`; });
                 for (let i = 0; i < startWeekday; i++) html += `<div></div>`;
@@ -2231,6 +2318,29 @@ content.innerHTML = html;
             logAction('เพิ่ม/แก้ไขวันหยุด', `${dateStr.split('-').reverse().join('/')} - ${label}`, 'settings');
             updateHolidayBar();
             saveData('full'); showToast("บันทึกวันหยุดเรียบร้อย"); renderAdminTab(); closeHolidayModal();
+        };
+        // ===== [ใหม่] ยืนยันเพิ่มวันหยุดที่แนะนำ (จากตาราง THAI_HOLIDAYS_REFERENCE) เข้าปฏิทินจริง =====
+        window.confirmSuggestedHoliday = function(dateStr, label) {
+            if (!settings.holidays) settings.holidays = [];
+            if (settings.holidays.find(h => h.date === dateStr)) { showToast("มีวันหยุดนี้อยู่แล้ว", "error"); return; }
+            settings.holidays.push({ date: dateStr, label });
+            logAction('เพิ่มวันหยุด (แนะนำอัตโนมัติ)', `${dateStr.split('-').reverse().join('/')} - ${label}`, 'settings');
+            updateHolidayBar();
+            saveData('full'); showToast(`เพิ่มวันหยุด "${label}" เรียบร้อย`); renderAdminTab();
+        };
+        window.confirmAllSuggestedHolidays = function(monthPrefix) {
+            const yearNum = parseInt(monthPrefix.split('-')[0]);
+            const yearRefList = THAI_HOLIDAYS_REFERENCE[yearNum] || [];
+            const existingHolidayDates = new Set((settings.holidays || []).map(h => h.date));
+            const toAdd = yearRefList.filter(h => h.date.startsWith(monthPrefix) && !existingHolidayDates.has(h.date));
+            if (toAdd.length === 0) return;
+            showConfirm("ยืนยันเพิ่มวันหยุดทั้งหมด", `ต้องการเพิ่มวันหยุดที่แนะนำทั้ง ${toAdd.length} วันของเดือนนี้เข้าปฏิทินเลยใช่หรือไม่?`, () => {
+                if (!settings.holidays) settings.holidays = [];
+                toAdd.forEach(h => settings.holidays.push({ date: h.date, label: h.label }));
+                logAction('เพิ่มวันหยุดทั้งเดือน (แนะนำอัตโนมัติ)', `${toAdd.length} วัน (${monthPrefix.slice(0,7)})`, 'settings');
+                updateHolidayBar();
+                saveData('full'); showToast(`เพิ่มวันหยุด ${toAdd.length} วันเรียบร้อย`); renderAdminTab();
+            });
         };
         window.deleteHoliday = function(dateStr) {
             const holiday = getHolidayForDate(dateStr);
@@ -2491,6 +2601,34 @@ content.innerHTML = html;
             };
             logAction('แก้ไขเกณฑ์การแจ้งเตือนติดตาม', `สาย ${settings.thresholds.late} / ขาด ${settings.thresholds.absent} วัน, เข้าเรียนไม่ครบ ${settings.thresholds.incompletePeriods} คาบ x ${settings.thresholds.incompleteDays} วัน, ลาป่วย/ลากิจชนะสาย-ขาดที่ ${settings.thresholds.leaveOverride} คาบ`, 'settings');
             saveData('full'); showToast("บันทึกเกณฑ์แจ้งเตือนเรียบร้อย"); renderAdminTab();
+        };
+        // ===== [ใหม่] บังคับล้างข้อมูลเช็คชื่อค้างในไฟล์หลักทันที (ปกติล้างอัตโนมัติอยู่แล้วทุกครั้งที่มีการใช้งาน) =====
+        window.forceCleanMainFile = async function() {
+            showToast("กำลังล้างข้อมูล...", "info");
+            try {
+                const res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'force_clean_main_file' }) });
+                const data = await res.json();
+                if (data && data.status === 'success') {
+                    showToast(data.cleaned ? "ล้างข้อมูลค้างในไฟล์หลักเรียบร้อย" : "ไฟล์หลักสะอาดอยู่แล้ว ไม่มีอะไรให้ล้าง");
+                    window.__storageInfo = null; // บังคับให้ดึงขนาดไฟล์ใหม่มาแสดง
+                    renderAdminTab();
+                } else { showToast("ล้างข้อมูลไม่สำเร็จ", "error"); }
+            } catch (e) { showToast("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้", "error"); }
+        };
+        // ===== [ใหม่] สร้างไฟล์เช็คชื่อล่วงหน้าให้ครบทุกห้องของเทอม/ปีที่แอดมินกำลังจัดการอยู่ (ไม่บังคับ - แค่เพื่อความสะดวกในการดู/จัดระเบียบ) =====
+        window.ensureRoomFilesForCurrentTerm = async function() {
+            const roomIds = [...new Set(subjects.filter(s => String(s.term) === String(adminTerm()) && String(s.year) === String(adminYear())).map(s => s.roomId))];
+            if (roomIds.length === 0) { showToast("ยังไม่มีวิชาลงไว้ในเทอมนี้ ไม่ทราบว่ามีห้องอะไรบ้าง", "error"); return; }
+            showToast(`กำลังสร้างไฟล์ล่วงหน้าให้ ${roomIds.length} ห้อง...`, "info");
+            try {
+                const res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'ensure_room_files', term: adminTerm(), year: adminYear(), roomIds }) });
+                const data = await res.json();
+                if (data && data.status === 'success') {
+                    showToast(data.createdRooms.length > 0 ? `สร้างไฟล์ใหม่ ${data.createdRooms.length} ห้องเรียบร้อย` : "มีไฟล์ครบทุกห้องอยู่แล้ว");
+                    window.__storageInfo = null;
+                    renderAdminTab();
+                } else { showToast("สร้างไฟล์ไม่สำเร็จ", "error"); }
+            } catch (e) { showToast("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้", "error"); }
         };
         window.saveStorageLimit = function() {
             if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้", "error"); return; }
