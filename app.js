@@ -1856,13 +1856,16 @@
                         return `<div class="bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 mb-2"><div class="flex justify-between items-center mb-1.5"><span class="text-xs sm:text-sm font-bold text-slate-700 flex items-center gap-1.5"><i class="fas ${icon} ${color.replace('bg-','text-')}"></i> ${label}</span><span class="text-xs sm:text-sm font-black ${usagePct >= 90 ? 'text-rose-500' : (usagePct >= 70 ? 'text-amber-500' : 'text-emerald-600')}">${fmtSize(bytes)} (${usagePct}%)</span></div><div class="w-full h-2.5 sm:h-3 bg-slate-200 rounded-full overflow-hidden"><div class="${barColor} h-full rounded-full transition-all duration-700" style="width: ${usagePct}%"></div></div></div>`;
                     };
 
-                    html += `<h4 class="text-xs sm:text-sm font-black text-slate-500 uppercase tracking-wider mb-2 mt-4"><i class="fas fa-file-alt"></i> ไฟล์หลัก (ตั้งค่า/ครู/วิชา/นักเรียน/log)</h4>`;
+                    html += `<h4 class="text-xs sm:text-sm font-black text-slate-500 uppercase tracking-wider mb-2 mt-4"><i class="fas fa-file-alt"></i> ไฟล์หลัก (ตั้งค่า/ครู/วิชา/นักเรียน)</h4>`;
                     html += info.mainFile ? renderFileBar('SchoolAttendanceDB.json', 'fa-database', 'bg-indigo-400', info.mainFile.sizeBytes) : `<p class="text-xs text-slate-400 mb-4">ยังไม่พบไฟล์หลัก</p>`;
                     if (info.mainFile) {
                         html += info.mainFileHasLeftoverAttendance
                             ? `<div class="flex flex-wrap items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 -mt-1 mb-3"><span class="text-[10px] sm:text-xs font-bold text-amber-700"><i class="fas fa-exclamation-triangle"></i> พบข้อมูลเช็คชื่อค้างอยู่ในไฟล์หลัก (ระบบจะล้างให้อัตโนมัติเมื่อมีการใช้งานครั้งถัดไป)</span>${isSuperAdminDS ? `<button onclick="window.forceCleanMainFile()" class="bg-amber-600 hover:bg-amber-700 text-white px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold shrink-0"><i class="fas fa-broom"></i> ล้างทันที</button>` : ''}</div>`
                             : `<div class="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 -mt-1 mb-3"><span class="text-[10px] sm:text-xs font-bold text-emerald-700"><i class="fas fa-check-circle"></i> ไฟล์หลักสะอาด ไม่มีข้อมูลเช็คชื่อตกค้าง</span></div>`;
                     }
+
+                    html += `<h4 class="text-xs sm:text-sm font-black text-slate-500 uppercase tracking-wider mb-2 mt-4"><i class="fas fa-history"></i> ไฟล์ประวัติการแก้ไข (แยกต่างหาก)</h4>`;
+                    html += info.logsFile ? renderFileBar('ActivityLogs.json', 'fa-history', 'bg-slate-400', info.logsFile.sizeBytes) : `<p class="text-xs text-slate-400 mb-4">ยังไม่มีไฟล์ log (จะสร้างอัตโนมัติเมื่อมีการใช้งานครั้งแรก)</p>`;
 
                     const currentTermYearKey = String(adminTerm()) + '/' + String(adminYear());
                     // แอดมินทั่วไปเห็นแค่เทอม/ปีที่กำลังดูอยู่ (เบากว่า ไม่ต้องแสดงทุกเทอม) - Super Admin เห็นครบทุกเทอม/ปี พร้อมย่อ/ขยายได้
