@@ -702,13 +702,12 @@
                     res = await fetchWithRetry(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_all_attendance', term: adminTerm(), year: adminYear() }) });
                 } else {
                     // 'full' - ใช้สำหรับตั้งค่า/ครู/วิชา/นักเรียน/ผู้ใช้งาน ฯลฯ
-                    // [ใหม่] ไม่ต้องแนบ/ผสาน attendanceData อีกต่อไป เพราะแยกเก็บเป็นไฟล์รายเทอม/ปีต่างหากแล้ว (เขียนผ่าน action 'attendance' โดยตรง) ทำให้การบันทึกส่วนนี้เบาและเร็วขึ้นมาก
-                    let dataToSave = { settings, teachers, subjects, students, followUps, logs };
+                    // [ใหม่] ไม่ต้องแนบ/ผสาน attendanceData และ logs อีกต่อไป (attendanceData แยกเก็บเป็นไฟล์รายห้อง, logs บันทึกผ่าน action 'log' โดยตรงทันทีที่เกิดขึ้นแล้ว) ทำให้การบันทึกส่วนนี้เบาและเร็วขึ้นมาก
+                    let dataToSave = { settings, teachers, subjects, students, followUps };
                     let latestData = prefetchedLatest;
                     if (!latestData) { const response = await fetchWithRetry(GOOGLE_APP_SCRIPT_URL, undefined, 2); latestData = await response.json(); }
                     if (latestData) {
                         dataToSave.followUps = latestData.followUps || followUps; followUps = dataToSave.followUps;
-                        dataToSave.logs = mergeLogsArrays(latestData.logs, logs); logs = dataToSave.logs;
                     }
                     res = await fetchWithRetry(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(dataToSave) });
                 }
@@ -735,8 +734,13 @@
         // บันทึก Log การแก้ไขของผู้ใช้แต่ละคน (เก็บย้อนหลังสูงสุด 500 รายการล่าสุด)
         // category: 'settings' = ปรับตั้งค่าระบบ, 'data' = ลงข้อมูลต่างๆ, 'account' = บัญชีผู้ใช้/เข้าออกระบบ
         function logAction(action, details = '', category = 'data') {
-            logs.push({ id: generateId(), timestamp: new Date().toISOString(), username: currentUser ? currentUser.username : 'system', name: currentUser ? currentUser.name : 'ระบบ', action, details, category });
+            const logRecord = { id: generateId(), timestamp: new Date().toISOString(), username: currentUser ? currentUser.username : 'system', name: currentUser ? currentUser.name : 'ระบบ', action, details, category };
+            logs.push(logRecord);
             if (logs.length > 500) logs = logs.slice(logs.length - 500);
+            // ===== [ใหม่] บันทึก log แยกต่างหากทันที ไม่ต้องรอ/พ่วงไปกับการบันทึกแบบ 'full' อีกต่อไป (เบากว่าเดิมมาก ไม่ต้องส่ง log ทั้ง 500 รายการไปมาทุกครั้งที่แก้ตั้งค่า/ครู/วิชา/นักเรียน) - แบบ fire-and-forget ไม่บล็อกการทำงานอื่น
+            if (GOOGLE_APP_SCRIPT_URL !== "YOUR_WEB_APP_URL_HERE") {
+                fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'append_log', record: logRecord }) }).catch(() => { /* log พลาดไม่ใช่เรื่องใหญ่ ไม่ต้องแจ้งเตือนผู้ใช้ */ });
+            }
         }
 
         function seedSampleData() {
@@ -2268,6 +2272,16 @@ content.innerHTML = html;
                 content.innerHTML = html;
             }
             else if (currentAdminTab === 'logs') {
+                // ===== [ใหม่] log ไม่ได้ถูกส่งมาตอนโหลดหน้าแรกอีกต่อไป (เบากว่าเดิม) - โหลดแยกตอนเปิดแท็บนี้เท่านั้น =====
+                if (!window.__logsLoaded) {
+                    content.innerHTML = `<div class="flex items-center justify-center py-10 text-slate-400 gap-2"><i class="fas fa-spinner fa-spin"></i> กำลังโหลดประวัติการแก้ไข...</div>`;
+                    fetch(`${GOOGLE_APP_SCRIPT_URL}?action=get_logs`).then(r => r.json()).then(data => {
+                        if (data && data.status === 'success' && Array.isArray(data.logs)) logs = data.logs;
+                        window.__logsLoaded = true;
+                        if (currentAdminTab === 'logs') renderAdminTab();
+                    }).catch(() => { showToast("โหลดประวัติการแก้ไขไม่สำเร็จ", "error"); });
+                    return;
+                }
                 if (!window.logFilterCategory) window.logFilterCategory = 'all';
                 if (!window.logFilterUser) window.logFilterUser = 'all';
                 const catMeta = {
