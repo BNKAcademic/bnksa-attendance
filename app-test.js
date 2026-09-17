@@ -1,0 +1,4080 @@
+// ==========================================================
+// ระบบเช็คชื่อนักเรียนอัจฉริยะ - Application Logic
+// แยกออกมาจาก index.html เพื่อให้ดูแลและแก้ไขโค้ดง่ายขึ้น
+// หมายเหตุ: ไฟล์นี้ต้องถูกโหลดคู่กับ index.html เท่านั้น
+// เพราะอ้างอิง element id ต่างๆ ที่อยู่ใน index.html โดยตรง
+// ==========================================================
+
+        // 🚨 นำ Web App URL ของคุณจาก Google Apps Script มาใส่ในบรรทัดด้านล่างนี้
+        const GOOGLE_APP_SCRIPT_URL = "https://bnksa-attendance-api.tear-jeerasak.workers.dev"; // [ไฟล์ทดสอบ] ชี้ไป Cloudflare Worker แทน Apps Script เดิม - ไฟล์นี้ใช้ทดสอบเท่านั้น ไม่ใช่ของจริง 
+
+        let isAdmin = false, isDbInitialized = false, currentAdminTab = 'settings', currentRoomId = null, currentSubjectId = null;
+        let editingTeacherId = null, editingSubjectId = null, editingStudentId = null, editingUserId = null;
+        // Data models
+        let settings = { title: "ระบบเช็คชื่อนักเรียนอัจฉริยะ", faviconDataUrl: "", logoDataUrl: "", announcement: "", announcementStart: "", announcementEnd: "", announcements: [], term: "1", year: "2567", academicYears: [{ year: "2567", status: "active" }], roomCounts: { m1: 4, m2: 4, m3: 4, m4: 3, m5: 3, m6: 3 }, advisors: {}, staffs: {}, thresholds: { late: 4, absent: 4 }, storageLimitChars: 8000000, holidays: [], serverOnline: true, termLocks: {}, termCount: 2, users: [{ id: 'super_admin_root', username: 'BNKAdmin', password: '042499078', name: 'ผู้ดูแลระบบหลัก', role: 'super_admin', createdAt: new Date().toISOString() }] };
+        let teachers = [], subjects = [], students = [], attendanceData = [], followUps = [], logs = [];
+        let currentUser = null;
+        const statuses = {
+            'มา': { color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200', activeBg: 'bg-emerald-500', icon: 'fa-check' },
+            'ร่วมกิจกรรม': { color: 'text-cyan-700', bg: 'bg-cyan-50', border: 'border-cyan-200', activeBg: 'bg-cyan-500', icon: 'fa-running' },
+            'สาย': { color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200', activeBg: 'bg-amber-500', icon: 'fa-clock' },
+            'ลากิจ': { color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-200', activeBg: 'bg-indigo-500', icon: 'fa-envelope-open-text' },
+            'ลาป่วย': { color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-200', activeBg: 'bg-blue-500', icon: 'fa-procedures' },
+            'ขาด': { color: 'text-rose-600', bg: 'bg-rose-50', border: 'border-rose-200', activeBg: 'bg-rose-500', icon: 'fa-times' },
+            'โดดเรียน': { color: 'text-purple-700', bg: 'bg-purple-50', border: 'border-purple-200', activeBg: 'bg-purple-600', icon: 'fa-walking' }
+        };
+        const STATUS_HEX = { 'มา': '#10b981', 'ร่วมกิจกรรม': '#06b6d4', 'สาย': '#f59e0b', 'ลาป่วย': '#3b82f6', 'ลากิจ': '#6366f1', 'ขาด': '#f43f5e', 'โดดเรียน': '#9333ea' };
+        if (typeof Chart !== 'undefined' && typeof ChartDataLabels !== 'undefined') { Chart.register(ChartDataLabels); }
+        // ===== เครื่องมือสร้างกราฟ (Chart.js) รองรับ Dark Mode และมือถือ พร้อมเปอร์เซ็นต์บนกราฟ =====
+        function percentLabelFormatter(value, context) {
+            const data = context.chart.data.datasets[context.datasetIndex].data;
+            const total = data.reduce((a, b) => a + (Number(b) || 0), 0);
+            if (!value || total === 0) return '';
+            const pct = Math.round((value / total) * 100);
+            return `${value} (${pct}%)`;
+        }
+        function chartTextColor() { return document.documentElement.classList.contains('dark') ? '#cbd5e1' : '#475569'; }
+        function chartGridColor() { return document.documentElement.classList.contains('dark') ? 'rgba(148,163,184,0.12)' : 'rgba(100,116,139,0.12)'; }
+        function chartBorderBg() { return document.documentElement.classList.contains('dark') ? '#141e33' : '#ffffff'; }
+        function isMobileView() { return window.innerWidth < 640; }
+        function makeStatusBarChart(canvasId, totals) {
+            const el = document.getElementById(canvasId); if (!el || typeof Chart === 'undefined') return;
+            const labels = Object.keys(totals);
+            new Chart(el, { type: 'bar', data: { labels, datasets: [{ label: 'จำนวน (ครั้ง)', data: labels.map(l => totals[l] || 0), backgroundColor: labels.map(l => STATUS_HEX[l]), borderRadius: 8, maxBarThickness: 46 }] },
+                options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 24 } }, plugins: { legend: { display: false }, tooltip: { titleFont: { size: 12 }, bodyFont: { size: 12 } },
+                    datalabels: { display: (ctx) => ctx.dataset.data[ctx.dataIndex] > 0, color: chartTextColor(), anchor: 'end', align: 'top', offset: 2, font: { weight: 'bold', size: isMobileView() ? 9 : 11 }, formatter: percentLabelFormatter } },
+                    scales: { x: { ticks: { color: chartTextColor(), font: { weight: 'bold', size: isMobileView() ? 9 : 11 }, maxRotation: isMobileView() ? 60 : 0, minRotation: isMobileView() ? 60 : 0 }, grid: { display: false } }, y: { beginAtZero: true, ticks: { color: chartTextColor(), precision: 0, font: { size: 10 } }, grid: { color: chartGridColor() } } } } });
+        }
+        function makeStatusDoughnutChart(canvasId, totals) {
+            const el = document.getElementById(canvasId); if (!el || typeof Chart === 'undefined') return;
+            const legendEl = document.getElementById(canvasId + 'Legend');
+            const labels = Object.keys(totals).filter(l => (totals[l] || 0) > 0);
+            if (labels.length === 0) { const ctx = el.getContext('2d'); ctx.font = '13px Sarabun'; ctx.fillStyle = chartTextColor(); ctx.textAlign = 'center'; ctx.fillText('ยังไม่มีข้อมูลในเดือนนี้', el.width / 2, el.height / 2); if (legendEl) legendEl.innerHTML = ''; return; }
+            const total = labels.reduce((a, l) => a + (totals[l] || 0), 0);
+            new Chart(el, { type: 'doughnut', data: { labels, datasets: [{ data: labels.map(l => totals[l]), backgroundColor: labels.map(l => STATUS_HEX[l]), borderWidth: 2, borderColor: chartBorderBg() }] },
+                options: { responsive: true, maintainAspectRatio: false, cutout: '60%', plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => { const pct = total > 0 ? Math.round((ctx.parsed / total) * 100) : 0; return ` ${ctx.label}: ${ctx.parsed} ครั้ง (${pct}%)`; } } } } } });
+            if (legendEl) {
+                legendEl.innerHTML = `<div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2">${labels.map(l => { const count = totals[l] || 0; const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+                    return `<div class="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5 sm:px-3 sm:py-2"><span class="w-3 h-3 rounded-full shrink-0" style="background-color:${STATUS_HEX[l]}"></span><span class="font-bold text-slate-700 text-xs sm:text-sm flex-1 truncate">${l}</span><span class="font-black text-slate-800 text-xs sm:text-sm">${pct}%</span><span class="text-slate-400 text-[10px] sm:text-xs">(${count})</span></div>`; }).join('')}</div>`;
+            }
+        }
+        function computeSchoolMonthlyStats(month) {
+            let raw = {}; students.forEach(st => raw[st.id] = {});
+            attendanceData.forEach(record => {
+                if (!record.date || !record.date.startsWith(month)) return;
+                const sub = subjects.find(s => s.id === record.subjectId); if (!sub) return;
+                Object.keys(record.records || {}).forEach(stId => {
+                    if (!raw[stId]) return; const status = record.records[stId]; if (!status) return;
+                    if (!raw[stId][record.date]) raw[stId][record.date] = []; raw[stId][record.date].push({ period: record.period || 1, status });
+                });
+            });
+            let totals = { 'มา': 0, 'ร่วมกิจกรรม': 0, 'สาย': 0, 'ลาป่วย': 0, 'ลากิจ': 0, 'ขาด': 0, 'โดดเรียน': 0 };
+            Object.keys(raw).forEach(stId => { Object.keys(raw[stId]).forEach(date => { const dayResult = calculateDailyStatus(raw[stId][date]); if (dayResult.status && totals[dayResult.status] !== undefined) totals[dayResult.status]++; }); });
+            return totals;
+        }
+        function computeLevelCounts() {
+            let counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+            students.forEach(st => { if (st.status === 'resigned') return; const level = parseInt((st.roomId || '').split('_')[0].replace('m', '')); if (counts[level] !== undefined) counts[level]++; });
+            return counts;
+        }
+        const timeSlots = [ { period: 0, time: '08.00-08.30', name: 'เข้าแถวเช้า' }, { period: 1, time: '08.30-09.20' }, { period: 2, time: '09.20-10.10' }, { period: 3, time: '10.20-11.10' }, { period: 4, time: '11.10-12.00' }, { period: -1, time: '12.00-13.00', name: 'พักกลางวัน' }, { period: 5, time: '13.00-13.50' }, { period: 6, time: '13.50-14.40' }, { period: 7, time: '14.40-15.30' }, { period: 8, time: '15.30-16.20' } ];
+        // ===== [ใหม่] รายการวันหยุดราชการไทยอย่างเป็นทางการ ไว้แนะนำให้แอดมินกดยืนยันเพิ่มในปฏิทินได้เลย (ไม่ต้องพิมพ์เอง) =====
+        // ครอบคลุม พ.ศ. 2568-2569 (ค.ศ. 2025-2026) เท่านั้น - ปีถัดไปต้องอัพเดตตารางนี้เพิ่มเอง (วันหยุดตามปฏิทินจันทรคติ เช่น มาฆบูชา/วิสาขบูชา/อาสาฬหบูชา เปลี่ยนวันที่ทุกปี ประกาศจาก ครม. ล่วงหน้าไม่กี่เดือน)
+        const THAI_HOLIDAYS_REFERENCE = {
+            2025: [
+                { date: '2025-01-01', label: 'วันขึ้นปีใหม่' },
+                { date: '2025-02-12', label: 'วันมาฆบูชา' },
+                { date: '2025-04-06', label: 'วันจักรี' },
+                { date: '2025-04-07', label: 'วันหยุดชดเชยวันจักรี' },
+                { date: '2025-04-13', label: 'วันสงกรานต์' },
+                { date: '2025-04-14', label: 'วันสงกรานต์' },
+                { date: '2025-04-15', label: 'วันสงกรานต์' },
+                { date: '2025-04-16', label: 'วันหยุดชดเชยวันสงกรานต์' },
+                { date: '2025-05-01', label: 'วันแรงงานแห่งชาติ' },
+                { date: '2025-05-04', label: 'วันฉัตรมงคล' },
+                { date: '2025-05-05', label: 'วันหยุดชดเชยวันฉัตรมงคล' },
+                { date: '2025-05-09', label: 'วันพืชมงคล (เฉพาะราชการ)' },
+                { date: '2025-05-11', label: 'วันวิสาขบูชา' },
+                { date: '2025-05-12', label: 'วันหยุดชดเชยวันวิสาขบูชา' },
+                { date: '2025-06-02', label: 'วันหยุดพิเศษ (มติ ครม.)' },
+                { date: '2025-06-03', label: 'วันเฉลิมพระชนมพรรษาสมเด็จพระราชินี' },
+                { date: '2025-07-10', label: 'วันอาสาฬหบูชา' },
+                { date: '2025-07-11', label: 'วันเข้าพรรษา' },
+                { date: '2025-07-28', label: 'วันเฉลิมพระชนมพรรษา ร.10' },
+                { date: '2025-08-12', label: 'วันแม่แห่งชาติ' },
+                { date: '2025-10-13', label: 'วันคล้ายวันสวรรคต ร.9' },
+                { date: '2025-10-23', label: 'วันปิยมหาราช' },
+                { date: '2025-12-05', label: 'วันพ่อแห่งชาติ' },
+                { date: '2025-12-10', label: 'วันรัฐธรรมนูญ' },
+                { date: '2025-12-31', label: 'วันสิ้นปี' },
+            ],
+            2026: [
+                { date: '2026-01-01', label: 'วันขึ้นปีใหม่' },
+                { date: '2026-01-02', label: 'วันหยุดพิเศษ (มติ ครม.)' },
+                { date: '2026-03-03', label: 'วันมาฆบูชา' },
+                { date: '2026-04-06', label: 'วันจักรี' },
+                { date: '2026-04-13', label: 'วันสงกรานต์' },
+                { date: '2026-04-14', label: 'วันสงกรานต์' },
+                { date: '2026-04-15', label: 'วันสงกรานต์' },
+                { date: '2026-05-01', label: 'วันแรงงานแห่งชาติ' },
+                { date: '2026-05-04', label: 'วันฉัตรมงคล' },
+                { date: '2026-05-11', label: 'วันพืชมงคล (เฉพาะราชการ)' },
+                { date: '2026-05-31', label: 'วันวิสาขบูชา' },
+                { date: '2026-06-03', label: 'วันเฉลิมพระชนมพรรษาสมเด็จพระราชินี' },
+                { date: '2026-07-28', label: 'วันเฉลิมพระชนมพรรษา ร.10' },
+                { date: '2026-07-29', label: 'วันอาสาฬหบูชา' },
+                { date: '2026-07-30', label: 'วันเข้าพรรษา' },
+                { date: '2026-08-12', label: 'วันแม่แห่งชาติ' },
+                { date: '2026-10-13', label: 'วันคล้ายวันสวรรคต ร.9' },
+                { date: '2026-10-23', label: 'วันปิยมหาราช' },
+                { date: '2026-12-05', label: 'วันพ่อแห่งชาติ' },
+                { date: '2026-12-07', label: 'วันหยุดชดเชยวันพ่อแห่งชาติ' },
+                { date: '2026-12-10', label: 'วันรัฐธรรมนูญ' },
+                { date: '2026-12-31', label: 'วันสิ้นปี' },
+            ],
+        };
+        const daysLabel = ['วันจันทร์', 'วันอังคาร', 'วันพุธ', 'วันพฤหัสบดี', 'วันศุกร์'];
+        const SUBJECT_DAY_MAP = { 'จันทร์': 1, 'จ': 1, 'อังคาร': 2, 'อ': 2, 'พุธ': 3, 'พ': 3, 'พฤหัสบดี': 4, 'พฤหัส': 4, 'พฤ': 4, 'ศุกร์': 5, 'ศ': 5 };
+        function parseScheduleString(str) {
+            if (!str) return [];
+            const schedules = [];
+            String(str).split(',').forEach(part => {
+                const seg = part.trim(); if (!seg) return;
+                const m = seg.split('-'); if (m.length < 2) return;
+                const dayKey = m[0].trim().replace(/^วัน/, '');
+                const day = SUBJECT_DAY_MAP[dayKey];
+                const period = parseInt(m[1].trim());
+                if (day && !isNaN(period) && period >= 0 && period <= 8) schedules.push({ day, period });
+            });
+            return schedules;
+        }
+
+        // Department Configuration
+        const deptConfig = {
+            "คณิตศาสตร์": { bg: "bg-blue-100", text: "text-blue-600", border: "border-blue-200", hover: "hover:bg-blue-50", icon: "fa-calculator" },
+            "วิทยาศาสตร์และเทคโนโลยี": { bg: "bg-emerald-100", text: "text-emerald-600", border: "border-emerald-200", hover: "hover:bg-emerald-50", icon: "fa-flask" },
+            "ภาษาไทย": { bg: "bg-amber-100", text: "text-amber-600", border: "border-amber-200", hover: "hover:bg-amber-50", icon: "fa-book" },
+            "ภาษาต่างประเทศ": { bg: "bg-rose-100", text: "text-rose-600", border: "border-rose-200", hover: "hover:bg-rose-50", icon: "fa-language" },
+            "สังคมศึกษา ศาสนา และวัฒนธรรม": { bg: "bg-orange-100", text: "text-orange-600", border: "border-orange-200", hover: "hover:bg-orange-50", icon: "fa-globe-asia" },
+            "สุขศึกษาและพลศึกษา": { bg: "bg-cyan-100", text: "text-cyan-600", border: "border-cyan-200", hover: "hover:bg-cyan-50", icon: "fa-running" },
+            "ศิลปะ": { bg: "bg-purple-100", text: "text-purple-600", border: "border-purple-200", hover: "hover:bg-purple-50", icon: "fa-palette" },
+            "การงานอาชีพ": { bg: "bg-teal-100", text: "text-teal-600", border: "border-teal-200", hover: "hover:bg-teal-50", icon: "fa-tools" },
+            "ระบบ/อื่นๆ": { bg: "bg-slate-100", text: "text-slate-600", border: "border-slate-200", hover: "hover:bg-slate-50", icon: "fa-cog" }
+        };
+        const departmentsList = Object.keys(deptConfig);
+
+        function generateId() { return Math.random().toString(36).substr(2, 9); }
+        function formatRoomName(roomId) { const match = roomId?.match(/m(\d+)_(\d+)/); return match ? `ม.${match[1]}/${match[2]}` : (roomId || '-'); }
+        function getRoomList() { let rooms = []; for (let i = 1; i <= 6; i++) { let count = settings.roomCounts[`m${i}`] || 0; for (let j = 1; j <= count; j++) { rooms.push(`m${i}_${j}`); } } return rooms; }
+
+        // ===== Term/Year scoping helpers (เทอม/ปีการศึกษา) =====
+        const WEEKLY_SLOTS_TOTAL = 45; // 5 วัน x 9 คาบ (0-8 ไม่รวมพักเที่ยง)
+        // เทอมที่แอดมินกำลังจัดการข้อมูลอยู่ในหน้าแอดมิน — เก็บไว้เฉพาะ session/เครื่องของแอดมินคนนั้น
+        // ไม่ถูกบันทึกลงเซิร์ฟเวอร์ และไม่กระทบสิ่งที่ผู้ใช้ทั่วไปเห็นที่หน้าแรก ทำให้แอดมินหลายคนจัดการคนละเทอมพร้อมกันได้อย่างอิสระ
+        let adminWorkingTerm = null;
+        let adminWorkingYear = null;
+        function adminTerm() { return adminWorkingTerm || settings.term; }
+        function adminYear() { return adminWorkingYear || settings.year; } // ปีที่แอดมินกำลังจัดการอยู่ - แยกอิสระจากปีที่แสดงผลหน้าแรก (settings.year) เพื่อให้เตรียมข้อมูลปีใหม่ล่วงหน้าได้โดยไม่กระทบผู้ใช้ทั่วไป
+        // ===== ทะเบียนปีการศึกษา (settings.academicYears) — แต่ละปีมีสถานะ 'active' (พร้อมใช้งาน) หรือ 'archived' (ถูกจัดเก็บแล้ว/ล็อค) =====
+        function getYearStatus(year) {
+            if (!settings.academicYears) return 'active';
+            const entry = settings.academicYears.find(y => String(y.year) === String(year));
+            return entry ? entry.status : 'active';
+        }
+        function sortedAcademicYears() {
+            const isSuperAdminNow = currentUser && currentUser.role === 'super_admin';
+            let list = (settings.academicYears || []).slice();
+            if (!isSuperAdminNow) list = list.filter(y => !y.hidden); // ซ่อนปีที่ Super Admin ปิดไว้จากแอดมินทั่วไปทุกจุดที่ใช้ฟังก์ชันนี้ (ตัวเลือกเทอม/ปีในแถบแอดมิน, แท็บตั้งค่าภาคเรียน, แท็บสำรองข้อมูล ฯลฯ)
+            return list.sort((a, b) => String(b.year).localeCompare(String(a.year)));
+        }
+        // เทอมที่ผู้ใช้ทั่วไป/แอดมินเลือก "ดูตัวอย่าง" ชั่วคราวที่หน้าแรก — ไม่บันทึกลงเซิร์ฟเวอร์ รีเฟรชหน้าเว็บแล้วจะรีเซ็ตกลับไปเทอมที่แอดมินตั้งไว้ (settings.term) เสมอ
+        let guestPreviewTerm = null;
+        function viewTerm() { return guestPreviewTerm || settings.term; } // เทอมที่ใช้แสดงผล/เรียกดูข้อมูลฝั่งผู้ใช้ทั่วไป (หน้าแรก, ห้องเรียน, รายงาน)
+        function termKeyOf(term, year) { return `${term ?? settings.term}_${year ?? settings.year}`; }
+        // สถานะเทอม 3 แบบ: 'open' เปิดใช้งานปกติ, 'not_opened' ยังไม่เปิดใช้งาน (ผู้ใช้ทั่วไปสลับเข้ามาไม่ได้), 'locked' ล็อคข้อมูล (ปิดแล้ว แต่ดูย้อนหลังได้)
+        function getTermStatus(term, year) {
+            const v = settings.termLocks && settings.termLocks[termKeyOf(term, year)];
+            if (v === true) return 'locked'; // ข้อมูลเก่า (boolean) แปลงเป็นสถานะล็อค
+            if (v === 'open' || v === 'not_opened' || v === 'locked' || v === 'maintenance') return v;
+            return 'open';
+        }
+        function publicTermStatus() { return getTermStatus(settings.term, settings.year); } // สถานะของเทอมที่บังคับแสดงผลหน้าแรกสำหรับผู้ใช้ทั่วไป
+        function adminTermStatus() { return getTermStatus(adminTerm(), adminYear()); } // สถานะของเทอมที่แอดมินกำลังจัดการอยู่ในหน้าแอดมิน
+        function currentTermStatus() { return publicTermStatus(); } // ใช้ที่หน้าแรกเท่านั้น (คงชื่อเดิมไว้เพื่อความเข้ากันได้)
+        function currentTermLocked() { return publicTermStatus() === 'locked'; }
+        // ล็อคเฉพาะสถานะ "locked" (เก็บถาวร) เท่านั้นที่ห้ามแก้ไขข้อมูลวิชา ส่วน "not_opened"/"maintenance" แอดมินยังแก้ไขข้อมูลได้ตามปกติ (ล็อคแค่การเช็คชื่อ) - อ้างอิงจากเทอมที่แอดมินกำลังจัดการอยู่
+        function guardTermLock(actionLabel) { if (adminTermStatus() === 'locked') { showToast(`เทอม ${adminTerm()}/${adminYear()} ถูกล็อคข้อมูลไว้ (เก็บถาวร) ไม่สามารถ${actionLabel || 'แก้ไขข้อมูล'}ได้`, "error"); return true; } return false; }
+        // การเช็คชื่ออนุญาตเฉพาะเมื่อเทอมนั้น "เปิดใช้งาน" (open) เท่านั้น
+        function guardAttendanceLock(term, year) {
+            const status = getTermStatus(term, year);
+            if (status === 'open') return false;
+            const msg = status === 'not_opened' ? `เทอม ${term}/${year} ยังไม่เปิดใช้งาน ไม่สามารถเช็คชื่อได้`
+                : status === 'maintenance' ? `เทอม ${term}/${year} ปิดปรับปรุงชั่วคราว ไม่สามารถเช็คชื่อได้ในขณะนี้ (ข้อมูลอื่นยังดูได้ตามปกติ)`
+                : `เทอม ${term}/${year} ถูกล็อคข้อมูลไว้แล้ว ไม่สามารถเช็คชื่อได้ (ดูข้อมูลย้อนหลังได้)`;
+            showToast(msg, "error"); return true;
+        }
+        // ใช้เช็คว่าควรล็อค "ปุ่มเช็คชื่อ" (ทั้งปุ่มเข้าไปเช็คชื่อ และปุ่มบันทึกในหน้าเช็คชื่อ) หรือไม่
+        // ต่างจาก guardTermLock ตรงที่ maintenance ก็ล็อคปุ่มนี้ด้วย แม้ข้อมูล/การแก้ไขวิชาอื่นๆ จะยังใช้งานได้ตามปกติ
+        function isAttendanceEntryLocked(term, year) {
+            const status = getTermStatus(term, year);
+            return status === 'locked' || status === 'maintenance' || status === 'not_opened';
+        }
+        function termStatusCardConfig(status) {
+            if (status === 'open') return { wrap: 'bg-emerald-50 border-emerald-300', dot: 'bg-emerald-500 animate-pulse', icon: 'fa-wifi', iconCls: 'text-emerald-600', text: 'ระบบเปิดให้ใช้งานสำหรับเทอมนี้', textCls: 'text-emerald-800' };
+            if (status === 'not_opened') return { wrap: 'bg-slate-100 border-slate-300', dot: 'bg-slate-400', icon: 'fa-power-off', iconCls: 'text-slate-500', text: 'ระบบยังไม่เปิดให้ใช้งานสำหรับเทอมนี้', textCls: 'text-slate-600' };
+            if (status === 'maintenance') return { wrap: 'bg-amber-50 border-amber-300', dot: 'bg-amber-500 animate-pulse', icon: 'fa-tools', iconCls: 'text-amber-600', text: 'ปิดปรับปรุงชั่วคราว - ดูข้อมูลได้ตามปกติ แต่เช็คชื่อไม่ได้ในขณะนี้', textCls: 'text-amber-800' };
+            return { wrap: 'bg-blue-50 border-blue-300', dot: 'bg-blue-400', icon: 'fa-box-archive', iconCls: 'text-blue-600', text: 'ระบบปิดให้ใช้งานสำหรับเทอมนี้แล้ว แต่สามารถดูข้อมูลได้', textCls: 'text-blue-800' };
+        }
+        // วิชาที่ยังไม่มี term/year (ข้อมูลเก่า) ให้ถือว่าอยู่ในเทอม/ปีที่ระบุเสมอ (ป้องกันข้อมูลหาย)
+        // ค่าเริ่มต้น (ไม่ระบุ term/year) จะอ้างอิงตาม viewTerm() เพื่อให้รองรับการดูตัวอย่างเทอมอื่นชั่วคราวที่หน้าแรก
+        function isActiveSubject(s, term, year) { term = term ?? viewTerm(); year = year ?? settings.year; return String(s.term ?? settings.term) === String(term) && String(s.year ?? settings.year) === String(year); }
+        function activeSubjects(term, year) { return subjects.filter(s => isActiveSubject(s, term, year)); }
+        function getRoomSubjects(roomId, term, year) { return activeSubjects(term, year).filter(s => s.roomId === roomId); }
+        // นักเรียนที่ไม่มีปีระบุ (ข้อมูลเก่าก่อนรองรับการเลื่อนชั้น) ถือว่าอยู่ได้ทุกปีการศึกษา (ไม่กระทบข้อมูลเดิม)
+        // นักเรียนที่ถูกเลื่อนชั้นแล้วจะมีปีระบุชัดเจน และแสดงเฉพาะปีการศึกษานั้นๆ
+        function getRoomStudents(roomId, year) { year = year ?? settings.year; return students.filter(s => s.roomId === roomId && (s.year === undefined || s.year === null || String(s.year) === String(year))); }
+        // ครูที่ปรึกษา/เจ้าหน้าที่ประจำห้อง แยกเก็บตามเทอม - รองรับข้อมูลเก่า (ก่อนแยกเทอม) เป็นค่าสำรอง
+        // หาข้อมูล (ครูที่ปรึกษา/เจ้าหน้าที่) ของห้องนี้จากเทอม/ปีอื่นที่มีอยู่ ใกล้เคียงเป้าหมายที่สุดตามเวลา (ปีเดียวกันก่อน แล้วค่อยปีก่อนหน้า)
+        // ใช้สำหรับ "คัดลอกข้อมูลเดิมมาก่อน" เวลาเปลี่ยนเทอม/ปีที่ยังไม่เคยมีการตั้งค่าไว้ แอดมินจะได้ไม่ต้องเริ่มกรอกใหม่จากศูนย์
+        function findNearestPersonnelData(registry, roomId, term, year) {
+            if (!registry) return null;
+            const targetYearNum = parseInt(year), targetTermNum = parseInt(term);
+            const keys = Object.keys(registry).filter(k => registry[k] && registry[k][roomId]);
+            if (keys.length === 0) return null;
+            keys.sort((a, b) => {
+                const [aTerm, aYear] = a.split('_'); const [bTerm, bYear] = b.split('_');
+                const aYearDiff = Math.abs(parseInt(aYear) - targetYearNum), bYearDiff = Math.abs(parseInt(bYear) - targetYearNum);
+                if (aYearDiff !== bYearDiff) return aYearDiff - bYearDiff;
+                return Math.abs(parseInt(aTerm) - targetTermNum) - Math.abs(parseInt(bTerm) - targetTermNum);
+            });
+            return registry[keys[0]][roomId];
+        }
+        function getRoomAdvisors(roomId, term, year) {
+            term = term ?? viewTerm(); year = year ?? settings.year;
+            const key = termKeyOf(term, year);
+            if (settings.advisors && settings.advisors[key] && settings.advisors[key][roomId]) return settings.advisors[key][roomId];
+            if (settings.advisors && Array.isArray(settings.advisors[roomId])) return settings.advisors[roomId]; // ข้อมูลเก่าก่อนแยกเทอม
+            const nearest = findNearestPersonnelData(settings.advisors, roomId, term, year);
+            if (nearest) return nearest;
+            return ["", ""];
+        }
+        // ===== [ใหม่] สร้างคาบระบบอัตโนมัติต่อห้อง: "เข้าแถวเช้า" (คาบ 0) และ "โฮมรูม" - ครูที่ปรึกษาเป็นผู้สอน ลบไม่ได้ แต่แก้ไขหน่วยกิต/ตารางได้ =====
+        function ensureSystemSubjectsForRoom(roomId, term, year) {
+            const existing = getRoomSubjects(roomId, term, year);
+            const advisors = getRoomAdvisors(roomId, term, year).filter(Boolean);
+            const advisorName = advisors[0] || '';
+            let changed = false;
+            if (!existing.some(s => s.systemType === 'morning')) {
+                subjects.push({ id: generateId(), roomId, name: 'เข้าแถวเช้า', code: '', teacher: advisorName, teacher2: advisors[1] || '', credits: 0.5, schedules: [{ day: 1, period: 0 }], term, year, locked: true, systemType: 'morning' });
+                changed = true;
+            }
+            if (!existing.some(s => s.systemType === 'homeroom')) {
+                subjects.push({ id: generateId(), roomId, name: 'โฮมรูม', code: '', teacher: advisorName, teacher2: advisors[1] || '', credits: 0.5, schedules: [{ day: 5, period: 0 }], term, year, locked: true, systemType: 'homeroom' });
+                changed = true;
+            } else {
+                // ซิงก์ชื่อคาบระบบเดิมที่เคยสร้างไว้แล้วให้ตรงกับชื่อปัจจุบัน (ชื่อคาบระบบแก้เองไม่ได้อยู่แล้ว จึงซิงก์ให้ตรงเสมอได้อย่างปลอดภัย)
+                const hr = existing.find(s => s.systemType === 'homeroom');
+                if (hr && hr.name !== 'โฮมรูม') { hr.name = 'โฮมรูม'; changed = true; }
+            }
+            return changed;
+        }
+        function getRoomStaff(roomId, term, year) {
+            term = term ?? viewTerm(); year = year ?? settings.year;
+            const key = termKeyOf(term, year);
+            if (settings.staffs && settings.staffs[key] && settings.staffs[key][roomId]) return settings.staffs[key][roomId];
+            if (settings.staffs && typeof settings.staffs[roomId] === 'string' && settings.staffs[roomId]) return settings.staffs[roomId]; // ข้อมูลเก่าก่อนแยกเทอม
+            const nearest = findNearestPersonnelData(settings.staffs, roomId, term, year);
+            if (nearest) return nearest;
+            return '';
+        }
+        // true = ค่าที่ได้จาก getRoomAdvisors/getRoomStaff เป็นการคัดลอกมาจากเทอม/ปีอื่น (ยังไม่เคยบันทึกไว้จริงสำหรับเทอม/ปีนี้)
+        function isPersonnelDataCopied(roomId, term, year) {
+            const key = termKeyOf(term, year);
+            const hasAdv = settings.advisors && settings.advisors[key] && settings.advisors[key][roomId];
+            const hasStaff = settings.staffs && settings.staffs[key] && settings.staffs[key][roomId];
+            return !hasAdv && !hasStaff;
+        }
+        function computeRoomScheduleStatus(roomId, term, year) { const list = getRoomSubjects(roomId, term, year); const filled = new Set(); list.forEach(s => (s.schedules || []).forEach(sch => filled.add(sch.day + '-' + sch.period))); return { filled: filled.size, total: WEEKLY_SLOTS_TOTAL, done: filled.size >= WEEKLY_SLOTS_TOTAL, count: list.length }; }
+        function findDuplicateSubjectsInRoom(roomId, term, year) {
+            const list = getRoomSubjects(roomId, term, year); const dupIds = new Set();
+            for (let i = 0; i < list.length; i++) { for (let j = i + 1; j < list.length; j++) {
+                const a = list[i], b = list[j];
+                if (a.systemType === 'homeroom' || b.systemType === 'homeroom') continue; // โฮมรูมไม่นับว่าซ้ำกับวิชาใดๆ
+                const sameTeacher = (a.teacher || '').trim() === (b.teacher || '').trim();
+                const sameCode = (a.code || '').trim() === (b.code || '').trim();
+                const sameName = (a.name || '').trim() === (b.name || '').trim();
+                // แจ้งเตือนเฉพาะเมื่อซ้ำครบทั้ง 3 อย่าง (ครูผู้สอน + รหัสวิชา + ชื่อวิชา) เท่านั้น
+                if (sameTeacher && sameCode && sameName) { dupIds.add(a.id); dupIds.add(b.id); }
+            } }
+            return dupIds;
+        }
+        function getTeacherDept(name) { const t = teachers.find(x => x.name === name); return t ? (t.department || 'ระบบ/อื่นๆ') : ''; }
+        // หาคาบสอนที่ชนกันของครูคนเดียวกัน (ยกเว้นกลุ่มสาระ "ระบบ/อื่นๆ" ที่ให้ซ้ำได้ และวิชาโฮมรูมซึ่งไม่นับว่าชนกับวิชาใดๆ)
+        function findTeacherConflicts(term, year) {
+            const map = {};
+            activeSubjects(term, year).forEach(s => {
+                if (s.systemType === 'homeroom') return; // โฮมรูมไม่นับว่าซ้ำ/ชนกับวิชาใดๆ
+                ['teacher', 'teacher2'].forEach(field => {
+                    const tname = s[field]; if (!tname) return;
+                    if (getTeacherDept(tname) === 'ระบบ/อื่นๆ') return;
+                    (s.schedules || []).forEach(sch => {
+                        const key = tname + '|' + sch.day + '|' + sch.period;
+                        if (!map[key]) map[key] = [];
+                        map[key].push({ subjectId: s.id, roomId: s.roomId, name: s.name, teacher: tname, day: sch.day, period: sch.period });
+                    });
+                });
+            });
+            return Object.values(map).filter(arr => arr.length > 1);
+        }
+        function subjectHasConflict(subjectId, term, year) { return findTeacherConflicts(term, year).some(group => group.some(g => g.subjectId === subjectId)); }
+        function computePendingNotifications() {
+            // แถบแจ้งเตือนนี้แสดงเฉพาะในหน้าแอดมิน จึงอ้างอิงจากเทอมที่แอดมินกำลังจัดการข้อมูลอยู่
+            const term = adminTerm(), year = adminYear();
+            const items = []; const roomList = getRoomList();
+            roomList.forEach(r => {
+                const st = computeRoomScheduleStatus(r, term, year);
+                if (!st.done) items.push({ type: 'incomplete', text: `ห้อง ${formatRoomName(r)} ยังลงวิชาไม่ครบตาราง (${st.filled}/${st.total} คาบ)`, action: () => { window.adminSelectedSubjectRoom = r; window.navigate('admin', { tab: 'subjects' }); } });
+                const dupes = findDuplicateSubjectsInRoom(r, term, year);
+                if (dupes.size > 0) items.push({ type: 'duplicate', text: `ห้อง ${formatRoomName(r)} มีรายวิชาซ้ำกัน ${dupes.size} รายการ`, action: () => { window.adminSelectedSubjectRoom = r; window.navigate('admin', { tab: 'subjects' }); } });
+                const activeStu = getRoomStudents(r).filter(s => s.status !== 'resigned');
+                if (activeStu.length === 0) items.push({ type: 'nostudents', text: `ห้อง ${formatRoomName(r)} ยังไม่มีรายชื่อนักเรียน`, action: () => { window.adminSelectedRoom = r; window.navigate('admin', { tab: 'students' }); } });
+                const advisorsChk = getRoomAdvisors(r, term, year);
+                const hasAdvisor = Array.isArray(advisorsChk) && advisorsChk.some(a => a && String(a).trim());
+                if (!hasAdvisor) items.push({ type: 'noadvisor', text: `ห้อง ${formatRoomName(r)} ยังไม่มีครูที่ปรึกษา`, action: () => { window.navigate('admin', { tab: 'advisors' }); } });
+                const staffChk = getRoomStaff(r, term, year);
+                if (!staffChk || !String(staffChk).trim()) items.push({ type: 'nostaff', text: `ห้อง ${formatRoomName(r)} ยังไม่มีเจ้าหน้าที่ประจำห้อง`, action: () => { window.navigate('admin', { tab: 'advisors' }); } });
+            });
+            findTeacherConflicts(term, year).forEach(group => {
+                const t = group[0].teacher;
+                const daysTxt = group.map(g => `${daysLabel[g.day - 1].replace('วัน', '')} คาบ ${g.period} (${formatRoomName(g.roomId)} · ${g.name})`).join(', ');
+                items.push({ type: 'conflict', text: `ครู ${t} มีวิชาสอนชนกัน: ${daysTxt}`, action: () => { window.navigate('admin', { tab: 'subjects' }); } });
+            });
+            return items;
+        }
+
+        // สรุปสถานะ "ทั้งวัน" ของนักเรียน 1 คน จากรายการเช็คชื่อทุกคาบในวันนั้น
+        // อัลกอริทึมตามที่ตกลงกัน:
+        //   1) ถ้าคาบ 0 (เข้าแถว) = ขาด แต่มีคาบอื่นในวันเดียวกัน = มา/ร่วมกิจกรรม/สาย -> ถือคาบ 0 เป็น "สาย" (มาโรงเรียนแต่ไม่ทันเข้าแถว)
+        //   2) ไล่ลำดับความสำคัญ: มา/ร่วมกิจกรรม > (ลาป่วย/ลากิจ ถ้าถึงเกณฑ์ leaveOverride ให้ชนะสาย/ขาด) > สาย > (ลาป่วย/ลากิจ ไม่ถึงเกณฑ์) > ขาด > โดดเรียน
+        //      [เหตุผล: ถ้าคาบ 0 เช็คว่าสาย/ขาดไว้ก่อน (ยังไม่รู้เหตุผล) แต่พอถึงเวลาเรียนจริงมีคาบลาป่วย/ลากิจยืนยันมากพอ ควรถือว่าทั้งวันเป็นลาป่วย/ลากิจ ไม่ใช่สาย/ขาด]
+        //   3) ถ้าผลสรุป = มา/สาย แต่มีคาบที่ไม่ใช่มา/ร่วมกิจกรรม/สาย ตั้งแต่ 4 คาบขึ้นไป -> ติดธง "เข้าเรียนไม่ครบ"
+        // คืนค่าเป็น object {status, incomplete, missingCount} เสมอ (ไม่ใช่ string เปล่าๆ แบบเดิม)
+        function calculateDailyStatus(recordsArray) {
+            if (!recordsArray || recordsArray.length === 0) return { status: null, incomplete: false, missingCount: 0 };
+            const p0Record = recordsArray.find(r => parseInt(r.period) === 0);
+            const otherRecords = recordsArray.filter(r => parseInt(r.period) !== 0);
+            const otherHasPresence = otherRecords.some(r => r.status === 'มา' || r.status === 'ร่วมกิจกรรม' || r.status === 'สาย');
+            let effectiveRecords = recordsArray;
+            if (p0Record && p0Record.status === 'ขาด' && otherHasPresence) {
+                effectiveRecords = recordsArray.map(r => (parseInt(r.period) === 0) ? { ...r, status: 'สาย' } : r);
+            }
+            let hasPresent = false, hasLate = false, sickCount = 0, leaveCount = 0, hasAbsent = false, hasSkip = false, missingCount = 0;
+            effectiveRecords.forEach(r => {
+                const s = r.status;
+                if (s === 'มา' || s === 'ร่วมกิจกรรม') hasPresent = true;
+                else if (s === 'สาย') hasLate = true;
+                else if (s === 'ลาป่วย') { sickCount++; missingCount++; }
+                else if (s === 'ลากิจ') { leaveCount++; missingCount++; }
+                else if (s === 'ขาด') { hasAbsent = true; missingCount++; }
+                else if (s === 'โดดเรียน') { hasSkip = true; missingCount++; }
+            });
+            const LEAVE_OVERRIDE_THRESHOLD = (settings.thresholds && settings.thresholds.leaveOverride) || 4;
+            const leaveWinsOverLateAbsent = (sickCount + leaveCount) >= LEAVE_OVERRIDE_THRESHOLD;
+            let status;
+            if (hasPresent) status = 'มา';
+            else if (hasLate && leaveWinsOverLateAbsent) status = (leaveCount > sickCount) ? 'ลากิจ' : 'ลาป่วย';
+            else if (hasLate) status = 'สาย';
+            else if (hasAbsent) status = 'ขาด'; // เช็คขาดคือขาดไปเลย - ลาป่วย/ลากิจ (แจ้งทีหลัง) ไม่สามารถชนะขาดได้ เพราะลาป่วยต้องแจ้งก่อน 8.00 น.
+            else if (sickCount > 0 || leaveCount > 0) status = (leaveCount > sickCount) ? 'ลากิจ' : 'ลาป่วย';
+            else if (hasSkip) status = 'โดดเรียน';
+            else status = null;
+            const INCOMPLETE_PERIOD_THRESHOLD = (settings.thresholds && settings.thresholds.incompletePeriods) || 4;
+            const incomplete = (status === 'มา' || status === 'สาย') && missingCount >= INCOMPLETE_PERIOD_THRESHOLD;
+            return { status, incomplete, missingCount };
+        }
+
+
+        function navigate(view, params = {}) {
+            closeAllModals();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            const state = { view, ...params };
+            try {
+                // ป้องกันการ push ซ้ำหน้าเดิม และเก็บ state ไว้ให้ปุ่ม Back ของเบราว์เซอร์/Android ย้อนกลับมาได้ถูกต้อง
+                history.pushState(state, '', location.pathname + location.search);
+            } catch (e) { /* เบราว์เซอร์บางตัวอาจไม่รองรับ ไม่กระทบการทำงานหลัก */ }
+            safeRenderState(state);
+        }
+
+        // เรนเดอร์แบบปลอดภัย: ถ้าเกิดข้อผิดพลาดใดๆ จะไม่ปล่อยให้หน้าจอว่างเปล่า (white screen)
+        // แต่จะ fallback กลับไปหน้าแรกเสมอ
+        function safeRenderState(state) {
+            try {
+                renderViewFromState(state);
+            } catch (err) {
+                console.error('Render error, falling back to dashboard:', err);
+                try { renderDashboard(); } catch (err2) { location.reload(); }
+                return;
+            }
+            // เช็คเผื่อกรณีเรนเดอร์แล้วเนื้อหาว่างเปล่าโดยไม่มี exception
+            const mc = document.getElementById('mainContent');
+            if (mc && isDbInitialized && mc.innerHTML.trim() === '') {
+                try { renderDashboard(); } catch (err3) { location.reload(); }
+            }
+        }
+
+        // จัดการปุ่ม Back ของเบราว์เซอร์และปุ่ม Back ฮาร์ดแวร์ของ Android
+        window.addEventListener('popstate', (event) => {
+            closeAllModals();
+            const state = event.state || { view: 'dashboard' };
+            safeRenderState(state);
+        });
+
+        // ตาข่ายนิรภัยสุดท้าย: ถ้ามี error ที่ไม่ถูกดักจับเกิดขึ้นระหว่างการทำงาน และทำให้เนื้อหาหลักว่างเปล่า
+        // ให้ดึงกลับมาที่หน้า dashboard แทนที่จะปล่อยให้จอขาวค้าง
+        window.addEventListener('error', function() {
+            const mc = document.getElementById('mainContent');
+            if (mc && isDbInitialized && mc.innerHTML.trim() === '') {
+                try { renderDashboard(); } catch (e) {}
+            }
+        });
+        
+        function closeAllModals() {
+            ['subjectModal', 'studentModal', 'teacherModal', 'confirmModal', 'promptModal'].forEach(id => {
+                const el = document.getElementById(id);
+                if(el) { const box = el.querySelector('div[id$="Box"]'); if(box) { box.classList.remove('scale-100', 'opacity-100'); box.classList.add('scale-95', 'opacity-0'); } setTimeout(() => el.classList.add('hidden'), 100); }
+            });
+        }
+
+        function renderViewFromState(state) {
+            if (!isDbInitialized) return;
+            if (!state || !state.view) { renderDashboard(); return; }
+            if (state.view.startsWith('admin') && !isAdmin && state.view !== 'admin_login') { renderAdminLogin(); return; }
+            try {
+                switch(state.view) {
+                    case 'dashboard': renderDashboard(); break;
+                    case 'admin_login': renderAdminLogin(); break;
+                    case 'admin': if(state.tab) currentAdminTab = state.tab; renderAdmin(); break;
+                    case 'teacher_dash': openTeacherDashboard(state.teacherName); break;
+                    case 'classroom': openClassroom(state.roomId, state.dayIndex); break;
+                    case 'attendance': openAttendance(state.subjectId, state.period, state.fromTeacherDash, state.date); break;
+                    case 'subject_summary': openSubjectSummary(state.subjectId, state.fromTeacherDash); break;
+                    case 'student_summary': openStudentSummary(state.studentId, state.month); break;
+                    case 'room_summary': openRoomSummary(state.roomId, state.month, state.tab); break;
+                    case 'school_summary': renderSchoolSummary(state.month); break;
+                    default: renderDashboard();
+                }
+            } catch (error) { renderDashboard(); }
+        }
+
+        let pollingInterval = null;
+        function startRealtimeSync() {
+            if (pollingInterval) clearInterval(pollingInterval);
+            pollingInterval = setInterval(async () => {
+                if (!isDbInitialized || GOOGLE_APP_SCRIPT_URL === "YOUR_WEB_APP_URL_HERE") return;
+                try {
+                    const response = await fetch(GOOGLE_APP_SCRIPT_URL); const data = await response.json();
+                    if (data) {
+                        // ===== [ใหม่] ไฟล์หลัก (doGet ค่าเริ่มต้น) ไม่มีข้อมูลเช็คชื่อติดมาด้วยแล้ว (แยกไฟล์ตามห้องแล้ว) - เช็คเฉพาะห้องที่เคยโหลดไว้แล้วเท่านั้นว่ามีอะไรเปลี่ยนไหม (ใช้ endpoint meta เบาๆ ก่อนเสมอ ไม่โหลดเต็มถ้าไม่มีอะไรเปลี่ยน) =====
+                        (window.__loadedRoomsList || []).forEach(r => ensureAttendanceLoadedForRoom(r.term, r.year, r.roomId, true));
+                        followUps = data.followUps || [];
+                        if (!isAdmin) {
+                            teachers = data.teachers || []; subjects = data.subjects || []; students = data.students || [];
+                            students = students.map(st => { if (st.title) { st.name = (st.title + (st.name || '')).trim(); st.title = ''; } return st; });
+                            if (data.settings) {
+                                if (data.settings.title && data.settings.title !== settings.title) {
+                                    settings.title = data.settings.title;
+                                    document.getElementById('navTitle').innerText = settings.title;
+                                    document.title = settings.title;
+                                }
+                                if (data.settings.faviconDataUrl && data.settings.faviconDataUrl !== settings.faviconDataUrl) {
+                                    settings.faviconDataUrl = data.settings.faviconDataUrl;
+                                    applyFavicon();
+                                }
+                                if (data.settings.logoDataUrl !== undefined && data.settings.logoDataUrl !== settings.logoDataUrl) {
+                                    settings.logoDataUrl = data.settings.logoDataUrl;
+                                    applyHeaderLogo();
+                                }
+                                if (JSON.stringify(data.settings.announcements || []) !== JSON.stringify(settings.announcements || [])) {
+                                    settings.announcements = data.settings.announcements || [];
+                                    updateAnnouncementBar();
+                                }
+                                if (JSON.stringify(data.settings.holidays || []) !== JSON.stringify(settings.holidays || [])) {
+                                    settings.holidays = data.settings.holidays || [];
+                                    updateHolidayBar();
+                                }
+                                if (data.settings.serverOnline !== undefined && data.settings.serverOnline !== settings.serverOnline) {
+                                    settings.serverOnline = data.settings.serverOnline;
+                                    applyServerStatusBadge();
+                                }
+                                if (data.settings.termLocks && JSON.stringify(data.settings.termLocks) !== JSON.stringify(settings.termLocks || {})) {
+                                    settings.termLocks = data.settings.termLocks;
+                                    applyServerStatusBadge();
+                                }
+                                if (data.settings.termCount !== undefined && data.settings.termCount !== settings.termCount) {
+                                    settings.termCount = data.settings.termCount;
+                                }
+                                if (data.settings.academicYears && JSON.stringify(data.settings.academicYears) !== JSON.stringify(settings.academicYears || [])) {
+                                    settings.academicYears = data.settings.academicYears;
+                                }
+                                if (data.settings.term !== undefined && (data.settings.term !== settings.term || data.settings.year !== settings.year)) {
+                                    settings.term = data.settings.term; settings.year = data.settings.year;
+                                    document.getElementById('navSubtitle').innerText = `ปีการศึกษา ${settings.year}`;
+                                    window.__justSwitchedTerm = true; // แสดงเอฟเฟคเตือนตอนเทอมที่แสดงผลถูกเปลี่ยนจากแอดมิน
+                                    applyServerStatusBadge();
+                                    const st = history.state;
+                                    if (st && (st.view === 'dashboard' || st.view === 'classroom' || st.view === 'teacher_dash')) { try { safeRenderState(st); } catch (e) {} }
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {}
+            }, 20000);
+        }
+
+        window.onload = async () => {
+            document.getElementById('mainContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 sm:py-32"><i class="fas fa-cloud-download-alt text-5xl sm:text-6xl text-indigo-500 mb-6 animate-bounce"></i><h2 class="text-xl sm:text-2xl font-extrabold text-slate-800 text-center">กำลังซิงค์ข้อมูล...</h2><p class="text-sm sm:text-base text-slate-500 mt-2 font-medium text-center">โปรดรอสักครู่ ระบบกำลังโหลดข้อมูล</p></div>`;
+            if (GOOGLE_APP_SCRIPT_URL === "YOUR_WEB_APP_URL_HERE") { document.getElementById('mainContent').innerHTML = '<div class="text-center p-6 sm:p-20 text-rose-500 font-bold text-base sm:text-2xl bg-white rounded-3xl shadow-sm border border-rose-200 mt-10"><i class="fas fa-exclamation-triangle mb-4 text-4xl sm:text-6xl"></i><br>กรุณาใส่ URL ของ Google Apps Script</div>'; return; }
+            // ===== ดึงข้อมูลเริ่มต้นพร้อมลองใหม่อัตโนมัติ (กันปัญหาเชื่อมต่อสะดุดชั่วคราว/เซิร์ฟเวอร์ตื่นช้า) และจำกัดเวลาแต่ละครั้งไม่ให้ค้างรอไม่มีที่สิ้นสุด =====
+            async function fetchInitialDataWithRetry(maxAttempts = 3, timeoutMs = 20000) {
+                for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                    if (attempt > 1) {
+                        document.getElementById('mainContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 sm:py-32"><i class="fas fa-cloud-download-alt text-5xl sm:text-6xl text-indigo-500 mb-6 animate-bounce"></i><h2 class="text-xl sm:text-2xl font-extrabold text-slate-800 text-center">กำลังซิงค์ข้อมูล... (ลองใหม่ครั้งที่ ${attempt}/${maxAttempts})</h2><p class="text-sm sm:text-base text-slate-500 mt-2 font-medium text-center">การเชื่อมต่อครั้งก่อนไม่สำเร็จ กำลังลองใหม่ โปรดรอสักครู่</p></div>`;
+                    }
+                    const controller = new AbortController();
+                    const timer = setTimeout(() => controller.abort(), timeoutMs);
+                    try {
+                        const response = await fetch(GOOGLE_APP_SCRIPT_URL, { signal: controller.signal });
+                        const data = await response.json();
+                        clearTimeout(timer);
+                        return data;
+                    } catch (e) {
+                        clearTimeout(timer);
+                        if (attempt === maxAttempts) throw e;
+                        await new Promise(r => setTimeout(r, 1500)); // เว้นจังหวะสั้นๆ ก่อนลองรอบถัดไป
+                    }
+                }
+            }
+            try {
+                const data = await fetchInitialDataWithRetry();
+                if (data.settings && Object.keys(data.settings).length > 0) {
+                    settings = data.settings;
+                    settings.thresholds = settings.thresholds || { late: 4, absent: 4 };
+                    if (!settings.staffs) settings.staffs = {};
+                    if (!settings.advisors) settings.advisors = {};
+                    if (!settings.title) settings.title = "ระบบเช็คชื่อนักเรียนอัจฉริยะ";
+                    if (!settings.faviconDataUrl) settings.faviconDataUrl = "";
+                    if (!settings.logoDataUrl) settings.logoDataUrl = "";
+                    if (!settings.announcement) settings.announcement = "";
+                    if (!settings.announcementStart) settings.announcementStart = "";
+                    if (!settings.announcementEnd) settings.announcementEnd = "";
+                    ensureAnnouncementsArray();
+                    if (!settings.users || settings.users.length === 0) {
+                        settings.users = [{ id: 'super_admin_root', username: 'BNKAdmin', password: '042499078', name: 'ผู้ดูแลระบบหลัก', role: 'super_admin', createdAt: new Date().toISOString() }];
+                    }
+                    // แก้ไขค่าเริ่มต้นเดิมที่อ้างอิงผิด (Google Sheets cell) ให้ตรงกับความจริง (Drive file ผ่าน DriveApp.createFile ซึ่งจำกัดที่ 10MB)
+                    if (!settings.storageLimitChars || settings.storageLimitChars === 50000) settings.storageLimitChars = 8000000;
+                    if (!settings.holidays) settings.holidays = [];
+                    if (settings.serverOnline === undefined) settings.serverOnline = true;
+                    if (!settings.termLocks) settings.termLocks = {};
+                    Object.keys(settings.termLocks).forEach(k => { if (settings.termLocks[k] === true) settings.termLocks[k] = 'locked'; else if (settings.termLocks[k] === false) delete settings.termLocks[k]; });
+                    if (![1, 2, 3].includes(settings.termCount)) settings.termCount = 2;
+                    if (!settings.academicYears || !Array.isArray(settings.academicYears) || settings.academicYears.length === 0) {
+                        settings.academicYears = [{ year: settings.year, status: 'active' }];
+                    } else if (!settings.academicYears.some(y => String(y.year) === String(settings.year))) {
+                        settings.academicYears.push({ year: settings.year, status: 'active' }); // ปีที่กำลังใช้แสดงผลอยู่ต้องอยู่ในทะเบียนเสมอ
+                    }
+                    teachers = data.teachers || [];
+                    subjects = data.subjects || []; students = data.students || []; attendanceData = []; followUps = data.followUps || []; logs = data.logs || [];
+                    // [ใหม่] ไม่โหลดข้อมูลเช็คชื่อของห้องไหนมาตอนเปิดเว็บอีกต่อไป - จะโหลดเฉพาะห้องที่เปิดดูจริงแบบ on-demand (ดู ensureAttendanceLoadedForRoom)
+                    subjects = subjects.map(s => { if (s.day !== undefined && s.period !== undefined && !s.schedules) { s.credits = 0.5; s.schedules = [{ day: s.day, period: s.period }]; delete s.day; delete s.period; } if (s.term === undefined) s.term = settings.term; if (s.year === undefined) s.year = settings.year; if (s.locked === undefined) s.locked = false; return s; });
+                    students = students.map(st => { if (!st.status) st.status = 'active'; if (st.title) { st.name = (st.title + (st.name || '')).trim(); st.title = ''; } return st; });
+                } else {
+                    document.getElementById('mainContent').innerHTML = `<div class="max-w-lg mx-auto mt-10 sm:mt-20 bg-white rounded-3xl shadow-sm border border-rose-200 p-6 sm:p-10 text-center"><div class="w-16 h-16 sm:w-20 sm:h-20 bg-rose-100 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6 text-rose-500 text-3xl sm:text-4xl"><i class="fas fa-exclamation-triangle"></i></div><h2 class="text-lg sm:text-2xl font-extrabold text-slate-800 mb-2">ไม่สามารถโหลดข้อมูลจากเซิร์ฟเวอร์ได้ตามปกติ</h2><p class="text-xs sm:text-sm text-slate-500 font-medium mb-6 leading-relaxed">ระบบไม่พบข้อมูลการตั้งค่าที่ถูกต้องจากเซิร์ฟเวอร์ อาจเกิดจากการเชื่อมต่อขัดข้องชั่วคราว เพื่อความปลอดภัยของข้อมูล ระบบจะไม่สร้างฐานข้อมูลใหม่ทับข้อมูลเดิมโดยอัตโนมัติ กรุณาลองรีเฟรชหน้านี้อีกครั้งก่อน</p><button onclick="location.reload()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-3 rounded-xl font-bold text-sm shadow-sm transition-colors mb-3"><i class="fas fa-sync-alt"></i> ลองโหลดใหม่อีกครั้ง</button><button onclick="window.__confirmFreshInstall()" class="w-full bg-white border border-rose-200 hover:bg-rose-50 text-rose-500 px-4 py-3 rounded-xl font-bold text-xs shadow-sm transition-colors">นี่คือการติดตั้งระบบครั้งแรก ยังไม่เคยมีข้อมูลใดๆ เลย - เริ่มต้นฐานข้อมูลใหม่</button></div>`;
+                    isDbInitialized = false;
+                    return;
+                }
+                isDbInitialized = true;
+                document.getElementById('navTitle').innerText = settings.title;
+                document.title = settings.title;
+                document.getElementById('navSubtitle').innerText = `ปีการศึกษา ${settings.year}`;
+                applyFavicon();
+                applyHeaderLogo();
+                updateAnnouncementBar();
+                updateHolidayBar();
+                applyServerStatusBadge();
+                setInterval(updateAnnouncementBar, 60000);
+                setInterval(updateHolidayBar, 60000);
+                applyDarkModePreference();
+                initInactivityTracking();
+                // ตั้งค่าจุดเริ่มต้นของ history ให้เป็นหน้า dashboard เพื่อให้ปุ่ม Back ทำงานถูกต้องตั้งแต่แรก
+                try { history.replaceState({ view: 'dashboard' }, '', location.pathname + location.search); } catch (e) {}
+                showToast("พร้อมใช้งาน!", "success"); renderDashboard(); startRealtimeSync();
+            } catch (error) { document.getElementById('mainContent').innerHTML = `<div class="max-w-lg mx-auto mt-10 sm:mt-20 bg-white rounded-3xl shadow-sm border border-rose-200 p-6 sm:p-10 text-center"><div class="w-16 h-16 sm:w-20 sm:h-20 bg-rose-100 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6 text-rose-500 text-3xl sm:text-4xl"><i class="fas fa-exclamation-triangle"></i></div><h2 class="text-lg sm:text-2xl font-extrabold text-slate-800 mb-2">ไม่สามารถเชื่อมต่อฐานข้อมูลได้</h2><p class="text-xs sm:text-sm text-slate-500 font-medium mb-6 leading-relaxed">ลองเชื่อมต่อหลายครั้งแล้วแต่ไม่สำเร็จ อาจเกิดจากอินเทอร์เน็ต/Wi-Fi ของอุปกรณ์นี้ไม่เสถียร หรือเครือข่ายที่ใช้อยู่ (เช่น Wi-Fi โรงเรียน) บล็อกการเชื่อมต่อไปยัง script.google.com ลองสลับไปใช้เน็ตมือถือ (4G/5G) เพื่อทดสอบ หรือลองรีเฟรชอีกครั้ง</p><button onclick="location.reload()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-3 rounded-xl font-bold text-sm shadow-sm transition-colors"><i class="fas fa-sync-alt"></i> ลองโหลดใหม่อีกครั้ง</button></div>`; }
+        };
+
+        // รวม log ของเครื่องนี้ (local) เข้ากับ log ล่าสุดบนเซิร์ฟเวอร์ (remote) แบบไม่ทับกัน
+        function mergeLogsArrays(remote, local) {
+            const map = new Map();
+            (remote || []).forEach(l => map.set(l.id, l));
+            (local || []).forEach(l => map.set(l.id, l));
+            let merged = Array.from(map.values());
+            merged.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            if (merged.length > 500) merged = merged.slice(merged.length - 500);
+            return merged;
+        }
+
+        // ===== ป้องกันข้อมูลชนกันเมื่อแอดมินหลายคนแก้ไข วิชา/นักเรียน/ครู พร้อมกัน =====
+        // ก่อนแก้ไข ให้ดึงข้อมูลล่าสุดจากเซิร์ฟเวอร์มาแทนที่อาร์เรย์ในเครื่องก่อนเสมอ แล้วค่อยแก้ไข "รายการเดียว" ที่ต้องการทับลงไป
+        // เพื่อไม่ให้การบันทึกแบบ 'full' (เขียนทับทั้งอาร์เรย์) ไปลบงานที่แอดมินอีกคนเพิ่งบันทึกไปพร้อมกัน
+        async function refreshBeforeEdit(fields) {
+            try {
+                const response = await fetch(GOOGLE_APP_SCRIPT_URL);
+                const latest = await response.json();
+                if (!latest) return null;
+                if (fields.includes('subjects') && latest.subjects) {
+                    subjects = latest.subjects.map(s => {
+                        if (s.day !== undefined && s.period !== undefined && !s.schedules) { s.credits = 0.5; s.schedules = [{ day: s.day, period: s.period }]; delete s.day; delete s.period; }
+                        if (s.term === undefined) s.term = settings.term; if (s.year === undefined) s.year = settings.year; if (s.locked === undefined) s.locked = false;
+                        return s;
+                    });
+                }
+                if (fields.includes('students') && latest.students) {
+                    students = latest.students.map(st => { if (!st.status) st.status = 'active'; if (st.title) { st.name = (st.title + (st.name || '')).trim(); st.title = ''; } return st; });
+                }
+                if (fields.includes('teachers') && latest.teachers) teachers = latest.teachers;
+                return latest; // คืนข้อมูลที่ดึงมาให้ผู้เรียกใช้ต่อได้ - ป้องกัน saveData('full') ต้อง fetch DB ทั้งก้อนซ้ำอีกรอบทันที (ตัวการที่ทำให้บันทึกช้า/หน่วง)
+            } catch (e) { /* เครือข่ายมีปัญหา ใช้ข้อมูลปัจจุบันในเครื่องแทนไปก่อน */ return null; }
+        }
+
+        // ===== บันทึกข้อมูลแบบ Real-time รองรับการบันทึกพร้อมกันจากหลายอุปกรณ์ =====
+        // การเช็คชื่อ/ติดตามนักเรียน/ล้างข้อมูล จะส่งเฉพาะ "รายการที่เปลี่ยนแปลง" ไปให้ฝั่งเซิร์ฟเวอร์ผสานเข้ากับข้อมูลล่าสุดเองแบบอะตอมมิก
+        // (ล็อกการเขียนไว้ฝั่ง Apps Script ด้วย LockService กันข้อมูลชนกันเวลาเช็คชื่อพร้อมกันหลายห้อง/หลายวิชา)
+        // คืนค่า true/false บอกว่าบันทึกสำเร็จจริงหรือไม่ (เดิมไม่คืนค่าอะไรเลย ทำให้ถ้าบันทึกล้มเหลว (เช่น เน็ตหลุด/เซิร์ฟเวอร์ error) หน้าเว็บจะไม่รู้ตัวและไม่แจ้งเตือนผู้ใช้เลย
+        // เข้าใจผิดว่าบันทึกสำเร็จ พอโหลดหน้าใหม่ค่าที่เพิ่งเปลี่ยน (เช่น ปีการศึกษา) จะหายไปเพราะไม่เคยถูกบันทึกจริงบนเซิร์ฟเวอร์)
+        // ===== [ใหม่] ยิง fetch พร้อมลองใหม่อัตโนมัติเงียบๆ (ไม่ต้องให้ผู้ใช้เห็น) กันปัญหาคิวชั่วคราวตอนมีคนบันทึกพร้อมกันเยอะ - ก่อนจะถือว่า "ล้มเหลวจริง" =====
+        async function fetchWithRetry(url, options, maxAttempts = 3) {
+            let lastError = null;
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                try {
+                    const res = await fetch(url, options);
+                    if (!res.ok) { lastError = new Error('HTTP ' + res.status); if (attempt < maxAttempts) { await new Promise(r => setTimeout(r, 1200 * attempt)); continue; } return res; }
+                    let json = null; try { json = await res.clone().json(); } catch (e) {}
+                    if (json && json.status === 'error' && /คิว|busy|lock/i.test(json.message || '') && attempt < maxAttempts) {
+                        await new Promise(r => setTimeout(r, 1200 * attempt)); continue; // คิวไม่ว่างชั่วคราว - รอสั้นๆ แล้วลองใหม่เงียบๆ ไม่ต้องให้ผู้ใช้รู้ตัว
+                    }
+                    return res;
+                } catch (e) {
+                    lastError = e;
+                    if (attempt < maxAttempts) { await new Promise(r => setTimeout(r, 1200 * attempt)); continue; }
+                }
+            }
+            throw lastError;
+        }
+        async function saveData(action = 'full', payload = null, prefetchedLatest = null) {
+            try {
+                if (GOOGLE_APP_SCRIPT_URL === "YOUR_WEB_APP_URL_HERE") return false;
+                let res;
+                if (action === 'attendance' && payload) {
+                    const idx = attendanceData.findIndex(a => a.subjectId === payload.subjectId && a.date === payload.date && String(a.period) === String(payload.period));
+                    if (idx >= 0) attendanceData[idx] = payload; else attendanceData.push(payload);
+                    // ===== [ใหม่] หา term/year/roomId ของวิชานี้ ส่งแนบไปด้วย เพื่อให้เซิร์ฟเวอร์เขียนลงไฟล์เช็คชื่อของห้อง/เทอม/ปีที่ถูกต้องโดยตรง (ไม่ต้องอ่านไฟล์หลักอีก) =====
+                    const subForAtt = subjects.find(s => s.id === payload.subjectId);
+                    const attTerm = (subForAtt && subForAtt.term) || settings.term;
+                    const attYear = (subForAtt && subForAtt.year) || settings.year;
+                    const attRoom = subForAtt && subForAtt.roomId;
+                    if (!attRoom) { showToast("ไม่พบข้อมูลห้องของวิชานี้ ไม่สามารถบันทึกได้ กรุณารีเฟรชหน้าเว็บแล้วลองใหม่", "error"); return false; }
+                    res = await fetchWithRetry(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'upsert_attendance', record: payload, term: attTerm, year: attYear, roomId: attRoom }) });
+                    if (attRoom) window.__loadedRoomLastModified[roomAttKey_(attTerm, attYear, attRoom)] = Date.now(); // เพิ่งเขียนเอง ไม่ต้องรอ meta-check รอบหน้า
+                } else if (action === 'followup' && payload) {
+                    followUps.push(payload);
+                    res = await fetchWithRetry(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'upsert_followup', record: payload }) });
+                } else if (action === 'reset_subject' && payload) {
+                    attendanceData = attendanceData.filter(a => a.subjectId !== payload);
+                    const subForReset = subjects.find(s => s.id === payload);
+                    const resetTerm = (subForReset && subForReset.term) || adminTerm();
+                    const resetYear = (subForReset && subForReset.year) || adminYear();
+                    const resetRoom = subForReset && subForReset.roomId;
+                    res = await fetchWithRetry(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_subject_attendance', subjectId: payload, term: resetTerm, year: resetYear, roomId: resetRoom }) });
+                } else if (action === 'reset_all') {
+                    attendanceData = attendanceData.filter(a => { const s = subjects.find(x => x.id === a.subjectId); return !s || String(s.term) !== String(adminTerm()) || String(s.year) !== String(adminYear()); });
+                    followUps = followUps.filter(f => f.term !== adminTerm() || f.year !== adminYear());
+                    window.__loadedRoomLastModified = {}; window.__loadedRoomsList = []; // ล้างสถานะที่จำไว้ทั้งหมด กันเข้าใจผิดว่าห้องที่เพิ่งล้างไปแล้วยังเป็นข้อมูลเดิมที่เคยโหลดมา
+                    res = await fetchWithRetry(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_all_attendance', term: adminTerm(), year: adminYear() }) });
+                } else {
+                    // 'full' - ใช้สำหรับตั้งค่า/ครู/วิชา/นักเรียน/ผู้ใช้งาน ฯลฯ
+                    // [ใหม่] ไม่ต้องแนบ/ผสาน attendanceData และ logs อีกต่อไป (attendanceData แยกเก็บเป็นไฟล์รายห้อง, logs บันทึกผ่าน action 'log' โดยตรงทันทีที่เกิดขึ้นแล้ว) ทำให้การบันทึกส่วนนี้เบาและเร็วขึ้นมาก
+                    let dataToSave = { settings, teachers, subjects, students, followUps };
+                    let latestData = prefetchedLatest;
+                    if (!latestData) { const response = await fetchWithRetry(GOOGLE_APP_SCRIPT_URL, undefined, 2); latestData = await response.json(); }
+                    if (latestData) {
+                        dataToSave.followUps = latestData.followUps || followUps; followUps = dataToSave.followUps;
+                    }
+                    res = await fetchWithRetry(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(dataToSave) });
+                }
+                if (!res || !res.ok) {
+                    showToast("บันทึกข้อมูลไม่สำเร็จ (เชื่อมต่อเซิร์ฟเวอร์ไม่ได้)", "error");
+                    showConfirm("บันทึกข้อมูลไม่สำเร็จ", "ลองส่งข้อมูลหลายครั้งแล้วแต่ยังเชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กด \"บันทึกอีกครั้ง\" เพื่อลองส่งข้อมูลชุดนี้ใหม่ (ถ้ายังไม่สำเร็จอีก แนะนำให้ลองสลับเน็ต หรือรีเฟรชหน้าเว็บ)", () => saveData(action, payload, prefetchedLatest), "บันทึกอีกครั้ง");
+                    return false;
+                }
+                let resultJson = null; try { resultJson = await res.json(); } catch (e2) {}
+                if (resultJson && resultJson.status === 'error') {
+                    showToast(`บันทึกข้อมูลไม่สำเร็จ: ${resultJson.message || 'เกิดข้อผิดพลาดที่เซิร์ฟเวอร์'}`, "error");
+                    showConfirm("บันทึกข้อมูลไม่สำเร็จ", `เซิร์ฟเวอร์ตอบกลับว่า: ${resultJson.message || 'เกิดข้อผิดพลาด'}\n\nกด "บันทึกอีกครั้ง" เพื่อลองส่งข้อมูลชุดนี้ใหม่ (ถ้ายังไม่สำเร็จอีก แนะนำให้ลองรีเฟรชหน้าเว็บ)`, () => saveData(action, payload, prefetchedLatest), "บันทึกอีกครั้ง");
+                    return false;
+                }
+                return true;
+            } catch (e) {
+                console.error("Save Error", e);
+                showToast("บันทึกข้อมูลไม่สำเร็จ (เชื่อมต่อเซิร์ฟเวอร์ไม่ได้)", "error");
+                showConfirm("บันทึกข้อมูลไม่สำเร็จ", "ลองส่งข้อมูลหลายครั้งแล้วแต่ยังเชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กด \"บันทึกอีกครั้ง\" เพื่อลองส่งข้อมูลชุดนี้ใหม่ (ถ้ายังไม่สำเร็จอีก แนะนำให้ลองสลับเน็ต หรือรีเฟรชหน้าเว็บ)", () => saveData(action, payload, prefetchedLatest), "บันทึกอีกครั้ง");
+                return false;
+            }
+        }
+
+        // บันทึก Log การแก้ไขของผู้ใช้แต่ละคน (เก็บย้อนหลังสูงสุด 500 รายการล่าสุด)
+        // category: 'settings' = ปรับตั้งค่าระบบ, 'data' = ลงข้อมูลต่างๆ, 'account' = บัญชีผู้ใช้/เข้าออกระบบ
+        function logAction(action, details = '', category = 'data') {
+            const logRecord = { id: generateId(), timestamp: new Date().toISOString(), username: currentUser ? currentUser.username : 'system', name: currentUser ? currentUser.name : 'ระบบ', action, details, category };
+            logs.push(logRecord);
+            if (logs.length > 500) logs = logs.slice(logs.length - 500);
+            // ===== [ใหม่] บันทึก log แยกต่างหากทันที ไม่ต้องรอ/พ่วงไปกับการบันทึกแบบ 'full' อีกต่อไป (เบากว่าเดิมมาก ไม่ต้องส่ง log ทั้ง 500 รายการไปมาทุกครั้งที่แก้ตั้งค่า/ครู/วิชา/นักเรียน) - แบบ fire-and-forget ไม่บล็อกการทำงานอื่น
+            if (GOOGLE_APP_SCRIPT_URL !== "YOUR_WEB_APP_URL_HERE") {
+                fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'append_log', record: logRecord }) }).catch(() => { /* log พลาดไม่ใช่เรื่องใหญ่ ไม่ต้องแจ้งเตือนผู้ใช้ */ });
+            }
+        }
+
+        function seedSampleData() {
+            const sampleTeacher = "ครูสมใจ รักเรียน";
+            teachers.push({ id: generateId(), name: sampleTeacher, department: "ระบบ/อื่นๆ" });
+            students.push({ id: generateId(), roomId: 'm1_1', number: '1', name: 'ด.ช.รักเรียน เพียรศึกษา', status: 'active' });
+            subjects.push({ id: generateId(), roomId: 'm1_1', name: 'เช็คแถวเช้า', code: '', teacher: sampleTeacher, teacher2: '', credits: 0.5, schedules: [{day: 1, period: 0}] }); saveData('full');
+        }
+        // ปุ่มยืนยันชัดเจนก่อนเริ่มฐานข้อมูลใหม่ (เรียกจากหน้าจอ error ตอนโหลดข้อมูลล้มเหลวเท่านั้น) - ป้องกันการ seed ทับข้อมูลจริงโดยไม่ตั้งใจ
+        window.__confirmFreshInstall = function() {
+            showConfirm("ยืนยันเริ่มต้นฐานข้อมูลใหม่", "คำเตือน: การกดยืนยันจะสร้างฐานข้อมูลตัวอย่างใหม่และเขียนทับข้อมูลทั้งหมดที่มีอยู่บนเซิร์ฟเวอร์ (ถ้ามี) อย่างถาวร ใช้เฉพาะกรณีติดตั้งระบบครั้งแรกจริงๆ เท่านั้น หากไม่แน่ใจให้กด \"ยกเลิก\" แล้วลองรีเฟรชหน้าใหม่แทน", () => {
+                isDbInitialized = true;
+                seedSampleData();
+                showToast("สร้างฐานข้อมูลใหม่แล้ว"); renderDashboard(); startRealtimeSync();
+            });
+        };
+
+        function applyFavicon() {
+            const link = document.getElementById('faviconLink');
+            if (link) link.href = settings.faviconDataUrl && settings.faviconDataUrl.length > 0 ? settings.faviconDataUrl : 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/graduation-cap.svg';
+        }
+
+        function updateCurrentUserBadge() {
+            const badge = document.getElementById('currentUserBadge');
+            const nameEl = document.getElementById('currentUserBadgeName');
+            const roleEl = document.getElementById('currentUserBadgeRole');
+            if (!badge || !nameEl || !roleEl) return;
+            if (isAdmin && currentUser) {
+                nameEl.innerText = currentUser.name;
+                const isSuper = currentUser.role === 'super_admin';
+                roleEl.innerText = isSuper ? 'Super Admin' : 'เจ้าหน้าที่';
+                roleEl.className = `hidden sm:inline-block px-1.5 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black ${isSuper ? 'bg-purple-100 text-purple-700' : 'bg-indigo-100 text-indigo-700'}`;
+                badge.classList.remove('hidden'); badge.classList.add('flex');
+            } else {
+                badge.classList.add('hidden'); badge.classList.remove('flex');
+            }
+        }
+        window.showUserBadgeInfo = function() {
+            if (!isAdmin || !currentUser) return;
+            const roleLabel = currentUser.role === 'super_admin' ? 'Super Admin' : 'เจ้าหน้าที่';
+            showToast(`เข้าสู่ระบบในชื่อ: ${currentUser.name} (${roleLabel})`, "success");
+        };
+
+        function applyHeaderLogo() {
+            const icon = document.getElementById('navLogoIcon'), img = document.getElementById('navLogoImg');
+            if (!icon || !img) return;
+            if (settings.logoDataUrl && settings.logoDataUrl.length > 0) {
+                img.src = settings.logoDataUrl; img.classList.remove('hidden'); icon.classList.add('hidden');
+            } else {
+                img.classList.add('hidden'); img.src = ''; icon.classList.remove('hidden');
+            }
+        }
+
+        // ===== Dark Mode =====
+        function applyDarkModePreference() {
+            let pref = 'light';
+            try { pref = localStorage.getItem('bnksa_theme') || 'light'; } catch (e) {}
+            setDarkMode(pref === 'dark', false);
+        }
+        function setDarkMode(isDark, persist = true) {
+            document.documentElement.classList.toggle('dark', isDark);
+            const icon = document.getElementById('darkModeIcon');
+            if (icon) { icon.classList.toggle('fa-moon', !isDark); icon.classList.toggle('fa-sun', isDark); }
+            if (persist) { try { localStorage.setItem('bnksa_theme', isDark ? 'dark' : 'light'); } catch (e) {} }
+        }
+        window.toggleDarkMode = function() {
+            const isDark = !document.documentElement.classList.contains('dark');
+            setDarkMode(isDark, true);
+            try { safeRenderState(history.state || { view: 'dashboard' }); } catch (e) {}
+        };
+
+        // ===== รีเฟรชข้อมูล (ใช้ได้ทุกหน้า) =====
+        window.refreshData = async function() {
+            const icon = document.getElementById('refreshIcon');
+            if (icon) icon.classList.add('fa-spin');
+            if (GOOGLE_APP_SCRIPT_URL === "YOUR_WEB_APP_URL_HERE") { if (icon) icon.classList.remove('fa-spin'); return; }
+            try {
+                const response = await fetch(GOOGLE_APP_SCRIPT_URL); const data = await response.json();
+                if (data) {
+                    attendanceData = data.attendanceData || attendanceData; followUps = data.followUps || followUps;
+                    if (!isAdmin) {
+                        teachers = data.teachers || teachers; subjects = data.subjects || subjects;
+                        students = (data.students || students).map(st => { if (st.title) { st.name = (st.title + (st.name || '')).trim(); st.title = ''; } return st; });
+                        if (data.settings) {
+                            if (data.settings.title) { settings.title = data.settings.title; document.getElementById('navTitle').innerText = settings.title; document.title = settings.title; }
+                            if (data.settings.faviconDataUrl !== undefined) { settings.faviconDataUrl = data.settings.faviconDataUrl; applyFavicon(); }
+                            if (data.settings.logoDataUrl !== undefined) { settings.logoDataUrl = data.settings.logoDataUrl; applyHeaderLogo(); }
+                            settings.announcements = data.settings.announcements || []; updateAnnouncementBar();
+                            settings.holidays = data.settings.holidays || []; updateHolidayBar();
+                            if (data.settings.serverOnline !== undefined) { settings.serverOnline = data.settings.serverOnline; applyServerStatusBadge(); }
+                        }
+                    }
+                }
+                safeRenderState(history.state || { view: 'dashboard' });
+                showToast("รีเฟรชข้อมูลสำเร็จ");
+            } catch (e) { showToast("รีเฟรชข้อมูลไม่สำเร็จ ลองอีกครั้ง", "error"); }
+            if (icon) icon.classList.remove('fa-spin');
+        };
+
+        // ===== ประกาศแจ้งเตือน (รองรับหลายรายการพร้อมลำดับความสำคัญ) =====
+        function ensureAnnouncementsArray() {
+            if (!Array.isArray(settings.announcements)) settings.announcements = [];
+            // ย้ายข้อมูลประกาศเดี่ยวแบบเก่ามาไว้ในลิสต์ใหม่ครั้งเดียว (เผื่อยังมีข้อมูลเก่าค้างอยู่)
+            if ((settings.announcement || '').trim() && settings.announcements.length === 0) {
+                settings.announcements.push({ id: generateId(), text: settings.announcement.trim(), start: settings.announcementStart || '', end: settings.announcementEnd || '', priority: 'normal' });
+                settings.announcement = ''; settings.announcementStart = ''; settings.announcementEnd = '';
+            }
+        }
+        function isAnnouncementItemActive(a) {
+            if (!a || !(a.text || '').trim()) return false;
+            const now = new Date();
+            if (a.start) { const start = new Date(a.start); if (!isNaN(start) && now < start) return false; }
+            if (a.end) { const end = new Date(a.end); if (!isNaN(end) && now > end) return false; }
+            return true;
+        }
+        const ANNOUNCEMENT_PRIORITY_ORDER = { high: 0, normal: 1, low: 2 };
+        const ANNOUNCEMENT_PRIORITY_META = {
+            high: { label: 'ด่วนมาก', icon: 'fa-triangle-exclamation', light: { bg: '#fef2f2', bgTo: '#fee2e2', border: '#fca5a5', text: '#991b1b', iconBg: '#ef4444' }, dark: { bg: 'rgba(76,29,39,0.5)', bgTo: 'rgba(69,10,10,0.5)', border: 'rgba(248,113,113,0.4)', text: '#fecaca', iconBg: '#ef4444' } },
+            normal: { label: 'ทั่วไป', icon: 'fa-bullhorn', light: { bg: '#fffbeb', bgTo: '#fff7ed', border: '#fcd34d', text: '#78350f', iconBg: '#fbbf24' }, dark: { bg: 'rgba(69,39,9,0.5)', bgTo: 'rgba(67,20,7,0.5)', border: 'rgba(251,191,36,0.35)', text: '#fde68a', iconBg: '#f59e0b' } },
+            low: { label: 'แจ้งเพื่อทราบ', icon: 'fa-circle-info', light: { bg: '#eff6ff', bgTo: '#f0f9ff', border: '#93c5fd', text: '#1e3a8a', iconBg: '#3b82f6' }, dark: { bg: 'rgba(23,37,84,0.5)', bgTo: 'rgba(12,74,110,0.4)', border: 'rgba(96,165,250,0.35)', text: '#bfdbfe', iconBg: '#3b82f6' } },
+        };
+        function getActiveAnnouncements() {
+            ensureAnnouncementsArray();
+            return settings.announcements.filter(isAnnouncementItemActive).sort((a, b) => (ANNOUNCEMENT_PRIORITY_ORDER[a.priority] ?? 1) - (ANNOUNCEMENT_PRIORITY_ORDER[b.priority] ?? 1));
+        }
+        function updateAnnouncementBar() {
+            const container = document.getElementById('announcementBarContainer');
+            if (!container) return;
+            const active = getActiveAnnouncements();
+            if (active.length === 0) { container.innerHTML = ''; container.classList.add('hidden'); return; }
+            const dark = document.documentElement.classList.contains('dark');
+            container.innerHTML = active.map(a => {
+                const meta = ANNOUNCEMENT_PRIORITY_META[a.priority] || ANNOUNCEMENT_PRIORITY_META.normal;
+                const c = dark ? meta.dark : meta.light;
+                return `<div class="border-b-2 shadow-sm" style="background: linear-gradient(to right, ${c.bg}, ${c.bgTo}); border-color: ${c.border};"><div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2 sm:py-3 flex items-start sm:items-center gap-2 sm:gap-3"><div class="w-6 h-6 sm:w-8 sm:h-8 text-white rounded-full flex items-center justify-center text-[10px] sm:text-sm shrink-0 shadow-sm" style="background-color: ${c.iconBg};"><i class="fas ${meta.icon}"></i></div><span class="flex-1 min-w-0 text-[11px] sm:text-sm font-bold leading-snug break-words" style="color: ${c.text};">${(a.text || '').replace(/</g,'&lt;')}</span></div></div>`;
+            }).join('');
+            container.classList.remove('hidden');
+        }
+
+        // ===== ระบบวันหยุด =====
+        function getHolidayForDate(dateStr) {
+            return (settings.holidays || []).find(h => h.date === dateStr) || null;
+        }
+        function todayDateStr() {
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        }
+        function updateHolidayBar() {
+            const bar = document.getElementById('holidayBar');
+            const textEl = document.getElementById('holidayBarText');
+            if (!bar || !textEl) return;
+            const todayHoliday = getHolidayForDate(todayDateStr());
+            if (todayHoliday) { textEl.innerText = `วันนี้เป็นวันหยุด: ${todayHoliday.label}`; bar.classList.remove('hidden'); }
+            else { bar.classList.add('hidden'); textEl.innerText = ''; }
+        }
+
+        // ===== สถานะเซิร์ฟเวอร์ (ออนไลน์/ปิดปรับปรุง) =====
+        function applyServerStatusBadge() {
+            const badge = document.getElementById('serverStatusBadge');
+            const dot = document.getElementById('serverStatusDot');
+            const text = document.getElementById('serverStatusText');
+            if (!badge || !dot || !text) return;
+            const manualOnline = settings.serverOnline !== false;
+            const termMaintenance = publicTermStatus() === 'maintenance';
+            const online = manualOnline && !termMaintenance;
+            badge.classList.remove('hidden'); badge.classList.add('inline-flex');
+            if (online) {
+                badge.className = 'inline-flex items-center gap-1 text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full border bg-emerald-50 border-emerald-200 text-emerald-700';
+                dot.className = 'w-1.5 h-1.5 rounded-full bg-emerald-500';
+                text.innerText = 'ออนไลน์';
+            } else {
+                badge.className = 'inline-flex items-center gap-1 text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full border bg-rose-50 border-rose-200 text-rose-600';
+                dot.className = 'w-1.5 h-1.5 rounded-full bg-rose-500';
+                text.innerText = (!manualOnline) ? 'ปิดปรับปรุง' : 'ปิดปรับปรุงชั่วคราว (เทอมนี้)';
+            }
+        }
+        window.toggleServerOnline = function() {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่เปลี่ยนสถานะนี้ได้", "error"); return; }
+            const newVal = !(settings.serverOnline !== false);
+            showConfirm(newVal ? "เปิดสถานะออนไลน์" : "ปิดสถานะออนไลน์ (ปรับปรุงเว็บไซต์)", newVal ? "ต้องการเปลี่ยนสถานะเว็บไซต์กลับเป็นออนไลน์ใช่หรือไม่?" : "ต้องการตั้งสถานะเว็บไซต์เป็น 'ปิดปรับปรุง' ใช่หรือไม่? (ผู้ใช้ทุกคนจะเห็นสถานะนี้)", () => {
+                settings.serverOnline = newVal;
+                applyServerStatusBadge();
+                logAction(newVal ? 'เปิดสถานะเว็บไซต์เป็นออนไลน์' : 'ปิดสถานะเว็บไซต์ (ปรับปรุง)', '', 'settings');
+                saveData('full'); showToast(newVal ? "ตั้งสถานะเป็นออนไลน์แล้ว" : "ตั้งสถานะเป็นปิดปรับปรุงแล้ว"); renderAdminTab();
+            });
+        };
+
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            let icon = type === 'success' ? '<i class="fas fa-check-circle text-emerald-500 text-xl sm:text-2xl"></i>' : (type === 'info' ? '<i class="fas fa-sync fa-spin text-blue-500 text-xl sm:text-2xl"></i>' : '<i class="fas fa-exclamation-circle text-rose-500 text-xl sm:text-2xl"></i>');
+            let bg = type === 'success' ? 'bg-white border-emerald-100' : (type === 'info' ? 'bg-white border-blue-100' : 'bg-white border-rose-100');
+            toast.className = `flex items-center gap-3 sm:gap-4 p-3 sm:p-4 rounded-2xl shadow-xl border ${bg} pointer-events-auto toast-enter mx-4 sm:mx-0`;
+            toast.innerHTML = `${icon} <span class="font-bold text-slate-700 text-sm sm:text-base">${message}</span>`;
+            container.appendChild(toast); setTimeout(() => { toast.classList.remove('toast-enter'); toast.classList.add('toast-enter-active'); }, 10);
+            setTimeout(() => { toast.classList.remove('toast-enter-active'); toast.classList.add('toast-exit-active'); setTimeout(() => { container.removeChild(toast); }, 3000); }, 3000);
+        }
+
+        let confirmCallback = null, promptCallback = null;
+        function showConfirm(title, message, callback, confirmLabel) { document.getElementById('confirmTitle').innerText = title; document.getElementById('confirmMessage').innerText = message; document.getElementById('confirmBtn').innerText = confirmLabel || 'ยืนยัน'; confirmCallback = callback; const modal = document.getElementById('confirmModal');
+            const box = document.getElementById('confirmModalBox'); modal.classList.remove('hidden'); setTimeout(() => { box.classList.remove('scale-95', 'opacity-0'); box.classList.add('scale-100', 'opacity-100'); }, 10);
+        }
+        function closeConfirm() { const modal = document.getElementById('confirmModal'); const box = document.getElementById('confirmModalBox');
+            box.classList.remove('scale-100', 'opacity-100'); box.classList.add('scale-95', 'opacity-0'); setTimeout(() => { modal.classList.add('hidden'); confirmCallback = null; }, 300);
+        }
+        document.getElementById('confirmBtn').addEventListener('click', () => { if (confirmCallback) confirmCallback(); closeConfirm(); });
+        function showPrompt(title, message, defaultValue, callback) { document.getElementById('promptTitle').innerText = title; document.getElementById('promptMessage').innerText = message; document.getElementById('promptInput').value = defaultValue; promptCallback = callback;
+            const modal = document.getElementById('promptModal'); const box = document.getElementById('promptModalBox'); modal.classList.remove('hidden'); setTimeout(() => { box.classList.remove('scale-95', 'opacity-0'); box.classList.add('scale-100', 'opacity-100'); document.getElementById('promptInput').focus(); }, 10);
+        }
+        function closePrompt() { const modal = document.getElementById('promptModal'); const box = document.getElementById('promptModalBox');
+            box.classList.remove('scale-100', 'opacity-100'); box.classList.add('scale-95', 'opacity-0'); setTimeout(() => { modal.classList.add('hidden'); promptCallback = null; }, 300);
+        }
+        document.getElementById('promptBtn').addEventListener('click', () => { const val = document.getElementById('promptInput').value.trim(); if (promptCallback) promptCallback(val); closePrompt(); });
+        // ===== ป็อปอัพแสดง Progress Bar สำหรับงานที่ใช้เวลานาน (เช่น สร้างสมุดทะเบียนหลายสิบหน้า) =====
+        function showProgressModal(title, message) {
+            document.getElementById('progressTitle').innerText = title;
+            document.getElementById('progressMessage').innerText = message || 'กรุณารอสักครู่...';
+            document.getElementById('progressBarFill').style.width = '0%';
+            document.getElementById('progressPercentText').innerText = '0%';
+            document.getElementById('progressIconWrap').className = 'w-16 h-16 sm:w-20 sm:h-20 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6 text-indigo-500 text-3xl sm:text-4xl shadow-inner';
+            document.getElementById('progressIcon').className = 'fas fa-cog fa-spin';
+            document.getElementById('progressCloseBtn').classList.add('hidden');
+            const modal = document.getElementById('progressModal'); const box = document.getElementById('progressModalBox');
+            modal.classList.remove('hidden'); setTimeout(() => { box.classList.remove('scale-95', 'opacity-0'); box.classList.add('scale-100', 'opacity-100'); }, 10);
+        }
+        function updateProgressModal(percent, message) {
+            document.getElementById('progressBarFill').style.width = Math.min(100, Math.max(0, percent)) + '%';
+            document.getElementById('progressPercentText').innerText = Math.round(percent) + '%';
+            if (message) document.getElementById('progressMessage').innerText = message;
+        }
+        function completeProgressModal(title, message) {
+            document.getElementById('progressBarFill').style.width = '100%';
+            document.getElementById('progressPercentText').innerText = '100%';
+            document.getElementById('progressTitle').innerText = title || 'ดำเนินการเสร็จสิ้น';
+            document.getElementById('progressMessage').innerText = message || '';
+            document.getElementById('progressIconWrap').className = 'w-16 h-16 sm:w-20 sm:h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6 text-emerald-500 text-3xl sm:text-4xl shadow-inner';
+            document.getElementById('progressIcon').className = 'fas fa-check';
+            document.getElementById('progressCloseBtn').classList.remove('hidden');
+        }
+        function errorProgressModal(message) {
+            document.getElementById('progressTitle').innerText = 'เกิดข้อผิดพลาด';
+            document.getElementById('progressMessage').innerText = message || 'กรุณาลองใหม่อีกครั้ง';
+            document.getElementById('progressIconWrap').className = 'w-16 h-16 sm:w-20 sm:h-20 bg-rose-100 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6 text-rose-500 text-3xl sm:text-4xl shadow-inner';
+            document.getElementById('progressIcon').className = 'fas fa-exclamation-triangle';
+            document.getElementById('progressCloseBtn').classList.remove('hidden');
+        }
+        // ===== [ใหม่] เวอร์ชันสปินเนอร์ล้วนๆ ของ progressModal (ไม่มีหลอด % ปลอม) - ใช้กับงานเร็วๆ ที่ไม่มีความคืบหน้าจริงให้แสดง เช่น บันทึกเช็คชื่อ =====
+        function showLoadingSpinnerModal(title, message) {
+            document.getElementById('progressTitle').innerText = title;
+            document.getElementById('progressMessage').innerText = message || 'กรุณารอสักครู่...';
+            document.getElementById('progressIconWrap').className = 'w-16 h-16 sm:w-20 sm:h-20 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6 text-indigo-500 text-3xl sm:text-4xl shadow-inner';
+            document.getElementById('progressIcon').className = 'fas fa-spinner fa-spin';
+            document.getElementById('progressBarFill').parentElement.classList.add('hidden');
+            document.getElementById('progressPercentText').classList.add('hidden');
+            document.getElementById('progressCloseBtn').classList.add('hidden');
+            const modal = document.getElementById('progressModal'); const box = document.getElementById('progressModalBox');
+            modal.classList.remove('hidden'); setTimeout(() => { box.classList.remove('scale-95', 'opacity-0'); box.classList.add('scale-100', 'opacity-100'); }, 10);
+        }
+        window.closeProgressModal = function() {
+            document.getElementById('progressBarFill').parentElement.classList.remove('hidden'); // คืนค่าให้แสดงหลอด % ตามปกติ เผื่อครั้งต่อไปเป็นงานที่มีความคืบหน้าจริง (เช่น สร้างสมุดทะเบียน)
+            document.getElementById('progressPercentText').classList.remove('hidden');
+            const modal = document.getElementById('progressModal'); const box = document.getElementById('progressModalBox');
+            box.classList.remove('scale-100', 'opacity-100'); box.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => { modal.classList.add('hidden'); }, 300);
+        };
+        function renderAdminLogin() {
+            if (isAdmin) { navigate('admin'); return; }
+            let rememberedUser = ''; let rememberedPass = ''; let rememberedChecked = false;
+            try {
+                const saved = localStorage.getItem('bnksa_remember_login');
+                if (saved) { const parsed = JSON.parse(saved); rememberedUser = parsed.u || ''; rememberedPass = parsed.p || ''; rememberedChecked = true; }
+            } catch (e) {}
+            document.getElementById('mainContent').innerHTML = `<div class="max-w-md mx-auto mt-8 sm:mt-16 bg-white rounded-[2rem] shadow-xl border border-slate-100 p-6 sm:p-10 transform transition-all mx-2 sm:mx-auto"><div class="text-center mb-8 sm:mb-10"><div class="w-16 h-16 sm:w-20 sm:h-20 bg-indigo-50 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6 text-indigo-600 text-2xl sm:text-3xl shadow-inner border border-indigo-100"><i class="fas fa-user-shield"></i></div><h2 class="text-2xl sm:text-3xl font-extrabold text-slate-800">ผู้ดูแลระบบ</h2><p class="text-sm sm:text-base text-slate-500 mt-2 font-medium">จัดการระบบเช็คชื่อนักเรียน</p></div><div class="space-y-4 sm:space-y-5"><div><label class="block text-xs sm:text-sm font-bold text-slate-700 mb-2 ml-1">ชื่อผู้ใช้งาน</label><input type="text" id="adminUser" value="${rememberedUser}" class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5 text-base focus:outline-none focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 font-medium text-slate-700" placeholder="Username" autocapitalize="off" autocorrect="off"></div><div><label class="block text-xs sm:text-sm font-bold text-slate-700 mb-2 ml-1">รหัสผ่าน</label><div class="relative"><input type="password" id="adminPass" value="${rememberedPass}" class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5 pr-12 text-base focus:outline-none focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 font-medium text-slate-700" placeholder="••••••••" onkeyup="if(event.key === 'Enter') window.processLogin()"><button type="button" onclick="window.toggleLoginPasswordVisibility()" tabindex="-1" class="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600 transition-colors"><i class="fas fa-eye" id="loginPassToggleIcon"></i></button></div></div><label class="flex items-center gap-2 pl-1 cursor-pointer select-none"><input type="checkbox" id="rememberLoginCheck" ${rememberedChecked ? 'checked' : ''} class="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"><span class="text-xs sm:text-sm font-bold text-slate-600">จดจำการเข้าสู่ระบบ</span></label><div class="pt-2 sm:pt-4 space-y-3"><button onclick="window.processLogin()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl py-3 sm:py-4 font-bold text-base sm:text-lg transition-all shadow-lg shadow-indigo-200 flex items-center justify-center gap-2"><i class="fas fa-sign-in-alt"></i> เข้าสู่ระบบ</button><button onclick="window.navigate('dashboard')" class="w-full bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 rounded-2xl py-3 sm:py-3.5 font-bold text-sm sm:text-base transition-colors">กลับหน้าหลัก</button></div></div></div>`;
+        }
+
+        window.toggleLoginPasswordVisibility = function() {
+            const input = document.getElementById('adminPass');
+            const icon = document.getElementById('loginPassToggleIcon');
+            if (!input || !icon) return;
+            const showing = input.type === 'text';
+            input.type = showing ? 'password' : 'text';
+            icon.classList.toggle('fa-eye', showing);
+            icon.classList.toggle('fa-eye-slash', !showing);
+        };
+
+        function processLogin() {
+            const uname = document.getElementById('adminUser').value.trim();
+            const pass = document.getElementById('adminPass').value;
+            // ล็อกอินด้วยชื่อผู้ใช้ตัวพิมพ์เล็ก-ใหญ่แบบไหนก็ได้ (ไม่สนตัวพิมพ์ใหญ่-เล็ก) ส่วนรหัสผ่านยังคงตรวจสอบตามตัวพิมพ์จริง
+            const found = (settings.users || []).find(u => u.username.toLowerCase() === uname.toLowerCase() && u.password === pass);
+            if (found) {
+                isAdmin = true; currentUser = { id: found.id, username: found.username, name: found.name, role: found.role };
+                const remember = document.getElementById('rememberLoginCheck').checked;
+                try {
+                    if (remember) localStorage.setItem('bnksa_remember_login', JSON.stringify({ u: uname, p: pass }));
+                    else localStorage.removeItem('bnksa_remember_login');
+                } catch (e) {}
+                document.getElementById('btnAdminLogin').classList.add('hidden'); document.getElementById('btnAdminPanel').classList.remove('hidden'); document.getElementById('btnAdminLogout').classList.remove('hidden'); updateCurrentUserBadge(); showToast("เข้าสู่ระบบสำเร็จ");
+                logAction('เข้าสู่ระบบ', `เข้าสู่ระบบด้วยบัญชี ${found.username}`, 'account'); saveData('full');
+                navigate('admin');
+            } else showToast("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง", "error");
+        }
+        function logoutAdmin() {
+            showConfirm("ออกจากระบบ", "คุณต้องการออกจากระบบผู้ดูแลใช่หรือไม่?", () => {
+                if (currentUser) { logAction('ออกจากระบบ', `ออกจากระบบบัญชี ${currentUser.username}`, 'account'); saveData('full'); }
+                isAdmin = false; currentUser = null; adminWorkingTerm = null;
+                document.getElementById('btnAdminLogin').classList.remove('hidden'); document.getElementById('btnAdminPanel').classList.add('hidden'); document.getElementById('btnAdminLogout').classList.add('hidden'); updateCurrentUserBadge(); showToast("ออกจากระบบแล้ว"); navigate('dashboard');
+            });
+        }
+
+        // ===== ออกจากระบบอัตโนมัติเมื่อไม่มีการใช้งานเกิน 30 นาที =====
+        let lastActivityTime = Date.now();
+        const INACTIVITY_LIMIT_MS = 30 * 60 * 1000;
+        function initInactivityTracking() {
+            ['click', 'keydown', 'touchstart', 'mousemove', 'scroll'].forEach(evt => {
+                window.addEventListener(evt, () => { lastActivityTime = Date.now(); }, { passive: true });
+            });
+            setInterval(() => {
+                if (isAdmin && (Date.now() - lastActivityTime > INACTIVITY_LIMIT_MS)) {
+                    autoLogoutDueToInactivity();
+                }
+            }, 60000);
+        }
+        function autoLogoutDueToInactivity() {
+            if (!isAdmin) return;
+            const uname = currentUser ? currentUser.username : '';
+            if (currentUser) { logAction('ออกจากระบบอัตโนมัติ (หมดเวลา)', `ไม่มีการใช้งานเกิน 30 นาที บัญชี ${uname}`, 'account'); saveData('full'); }
+            isAdmin = false; currentUser = null;
+            document.getElementById('btnAdminLogin').classList.remove('hidden'); document.getElementById('btnAdminPanel').classList.add('hidden'); document.getElementById('btnAdminLogout').classList.add('hidden'); updateCurrentUserBadge();
+            showToast("ออกจากระบบอัตโนมัติ เนื่องจากไม่มีการใช้งานเกิน 30 นาที", "error");
+            navigate('dashboard');
+        }
+
+        function renderDashboard() {
+            if(isAdmin) { document.getElementById('btnAdminLogin').classList.add('hidden');
+                document.getElementById('btnAdminPanel').classList.remove('hidden'); document.getElementById('btnAdminLogout').classList.remove('hidden'); }
+            const isDarkNow = document.documentElement.classList.contains('dark'); // เช็คโหมดมืดตรงๆ ตอนวาดหน้า กันปัญหาการไล่สีพาสเทลไม่ยอมเปลี่ยนเป็นสีเข้ม (แก้ตรงจุดแทนพึ่ง CSS override ที่อาจโดนแคช/ลำดับชนกัน)
+            // หน้าแรกแสดงเทอมเริ่มต้นตามที่แอดมินกำหนดไว้เสมอเมื่อเข้าเว็บ/รีเฟรช (settings.term)
+            // แต่สามารถกดปุ่มด้านล่างเพื่อ "ดูตัวอย่าง" เทอมอื่นชั่วคราวได้ - การเลือกนี้ไม่ถูกบันทึก รีเฟรชหน้าเว็บแล้วจะกลับไปเทอมเริ่มต้นเสมอ
+            const termCount = settings.termCount || 2;
+            const previewButtonsHtml = termCount >= 2 ? `<div class="flex items-center justify-center gap-1.5 bg-slate-100 p-1 rounded-xl w-max mx-auto mt-4">${Array.from({length: termCount}, (_, i) => i + 1).map(tn => {
+                const st = getTermStatus(tn, settings.year);
+                const isActiveBtn = String(viewTerm()) === String(tn);
+                const guestLocked = st === 'not_opened' && !isAdmin;
+                if (guestLocked) {
+                    return `<button disabled title="เทอมนี้ยังไม่เปิดใช้งาน" class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg font-bold text-xs sm:text-sm flex items-center gap-1.5 bg-slate-200 text-slate-400 cursor-not-allowed"><i class="fas fa-lock"></i> เทอม ${tn}</button>`;
+                }
+                const activeCls = isActiveBtn ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white active:scale-95';
+                return `<button onclick="window.previewSwitchTerm('${tn}')" class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg font-bold text-xs sm:text-sm transition-all flex items-center gap-1.5 ${activeCls}">${isActiveBtn ? '<i class="fas fa-check-circle"></i>' : ''} เทอม ${tn}</button>`;
+            }).join('')}</div>` : '';
+            const stCfg = termStatusCardConfig(getTermStatus(viewTerm(), settings.year));
+            const justSwitched = !!window.__justSwitchedTerm; window.__justSwitchedTerm = false;
+            let html = `<div id="termStatusCard" class="mb-6 sm:mb-8 ${stCfg.wrap} border-2 rounded-2xl sm:rounded-3xl p-4 sm:p-6 transition-all ${justSwitched ? 'term-switch-flash term-switch-ring' : ''}"><div class="flex flex-col items-center text-center gap-1.5"><div class="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-white shadow-sm flex items-center justify-center relative"><span class="absolute top-0 right-0 inline-flex h-3 w-3 rounded-full ${stCfg.dot}"></span><i class="fas ${stCfg.icon} ${stCfg.iconCls} text-xl sm:text-2xl"></i></div><p class="font-extrabold text-sm sm:text-lg ${stCfg.textCls}">${stCfg.text}</p><p class="text-[10px] sm:text-xs text-slate-500 font-bold"><i class="fas fa-calendar-alt"></i> ภาคเรียนที่ ${viewTerm()} ปีการศึกษา ${settings.year}</p></div>${previewButtonsHtml}</div>`;
+            html += `<div class="text-center mb-8 sm:mb-12"><h2 class="text-2xl sm:text-4xl font-extrabold text-slate-800 tracking-tight">เลือกห้องเรียน</h2><p class="text-sm sm:text-lg text-slate-500 mt-2 sm:mt-3">เลือกระดับชั้นเพื่อดำเนินการเช็คชื่อหรือดูรายงาน</p></div><div class="grid grid-cols-1 gap-6 sm:gap-10">`;
+            const levelColors = {
+                1: { gradient: 'from-blue-500 to-indigo-600', icon: 'text-blue-500', cardBg: 'bg-blue-50/70', cardBorder: 'border-blue-200', cardHoverBorder: 'hover:border-blue-400', cardText: 'text-blue-800', cardHoverText: 'group-hover:text-blue-600', cardShadow: 'hover:shadow-blue-200/60', arrow: 'text-blue-400' },
+                2: { gradient: 'from-emerald-500 to-teal-600', icon: 'text-emerald-500', cardBg: 'bg-emerald-50/70', cardBorder: 'border-emerald-200', cardHoverBorder: 'hover:border-emerald-400', cardText: 'text-emerald-800', cardHoverText: 'group-hover:text-emerald-600', cardShadow: 'hover:shadow-emerald-200/60', arrow: 'text-emerald-400' },
+                3: { gradient: 'from-amber-500 to-orange-600', icon: 'text-amber-500', cardBg: 'bg-amber-50/70', cardBorder: 'border-amber-200', cardHoverBorder: 'hover:border-amber-400', cardText: 'text-amber-800', cardHoverText: 'group-hover:text-amber-600', cardShadow: 'hover:shadow-amber-200/60', arrow: 'text-amber-400' },
+                4: { gradient: 'from-rose-500 to-pink-600', icon: 'text-rose-500', cardBg: 'bg-rose-50/70', cardBorder: 'border-rose-200', cardHoverBorder: 'hover:border-rose-400', cardText: 'text-rose-800', cardHoverText: 'group-hover:text-rose-600', cardShadow: 'hover:shadow-rose-200/60', arrow: 'text-rose-400' },
+                5: { gradient: 'from-purple-500 to-violet-600', icon: 'text-purple-500', cardBg: 'bg-purple-50/70', cardBorder: 'border-purple-200', cardHoverBorder: 'hover:border-purple-400', cardText: 'text-purple-800', cardHoverText: 'group-hover:text-purple-600', cardShadow: 'hover:shadow-purple-200/60', arrow: 'text-purple-400' },
+                6: { gradient: 'from-cyan-500 to-sky-600', icon: 'text-cyan-500', cardBg: 'bg-cyan-50/70', cardBorder: 'border-cyan-200', cardHoverBorder: 'hover:border-cyan-400', cardText: 'text-cyan-800', cardHoverText: 'group-hover:text-cyan-600', cardShadow: 'hover:shadow-cyan-200/60', arrow: 'text-cyan-400' }
+            };
+            for (let i = 1; i <= 6; i++) {
+                let count = settings.roomCounts[`m${i}`] || 0; if (count === 0) continue;
+                let levelGradient = levelColors[i].gradient;
+                let iconColor = levelColors[i].icon;
+                const lc = levelColors[i];
+                html += `<div class="bg-white rounded-3xl sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-8 relative overflow-hidden group/level"><div class="absolute top-0 left-0 w-1.5 sm:w-2.5 h-full bg-gradient-to-b ${levelGradient}"></div><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800 mb-4 sm:mb-8 flex items-center gap-2 sm:gap-3 pl-3 sm:pl-4"><i class="fas fa-layer-group ${iconColor}"></i> มัธยมศึกษาปีที่ ${i} <span class="text-xs sm:text-base font-bold text-slate-400">(ภาคเรียนที่ ${viewTerm()} / ${settings.year})</span></h3><div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-5 pl-3 sm:pl-4">`;
+                for (let j = 1; j <= count; j++) { html += `<button onclick="window.navigate('classroom', {roomId: 'm${i}_${j}'})" class="${lc.cardBg} hover:bg-white border ${lc.cardBorder} ${lc.cardHoverBorder} rounded-xl sm:rounded-2xl p-3 sm:p-5 transition-all hover:-translate-y-1 hover:shadow-lg ${lc.cardShadow} text-left flex flex-col justify-between min-h-[80px] sm:min-h-[120px] group"><span class="text-xl sm:text-3xl font-black ${lc.cardText} ${lc.cardHoverText} transition-colors">ม.${i}/${j}</span><span class="text-[10px] sm:text-sm text-slate-500 font-bold mt-2 sm:mt-3 flex items-center justify-between">เข้าสู่ห้องเรียน <i class="fas fa-arrow-right ${lc.arrow} opacity-0 group-hover:opacity-100 transform -translate-x-3 group-hover:translate-x-0 transition-all duration-300"></i></span></button>`;
+                }
+                html += `</div></div>`;
+            }
+
+            html += `<div class="bg-white rounded-3xl sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-8 relative overflow-hidden group/level"><div class="absolute top-0 left-0 w-1.5 sm:w-2.5 h-full bg-gradient-to-b from-slate-500 to-slate-700"></div><button onclick="window.navigate('school_summary')" class="w-full text-left flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 pl-3 sm:pl-4 group"><div class="flex items-center gap-3 sm:gap-4"><div class="w-10 h-10 sm:w-14 sm:h-14 bg-slate-100 text-slate-700 rounded-xl sm:rounded-2xl flex items-center justify-center text-xl sm:text-2xl shrink-0 group-hover:scale-110 transition-transform shadow-sm"><i class="fas fa-school"></i></div><div><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800 flex items-center gap-2">รวมทุกห้อง</h3><p class="text-xs sm:text-sm text-slate-500 mt-1 font-medium">ภาพรวมจำนวนนักเรียนและสถิติการมาเรียนทั้งโรงเรียนรายเดือน</p></div></div><span class="shrink-0 bg-slate-700 group-hover:bg-slate-800 text-white px-4 py-2.5 sm:px-6 sm:py-3 rounded-xl font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-2 w-full sm:w-auto justify-center"><i class="fas fa-chart-pie"></i> ดูภาพรวมทั้งโรงเรียน</span></button></div>`;
+            
+            html += `</div><div class="mt-12 sm:mt-20 mb-8"><div class="${isDarkNow ? 'bg-[#141e33]' : 'bg-gradient-to-br from-indigo-50 via-white to-blue-50'} rounded-[2rem] sm:rounded-[2.5rem] border-2 ${isDarkNow ? 'border-[#2d3d5a]' : 'border-indigo-100'} shadow-xl ${isDarkNow ? '' : 'shadow-indigo-100/60'} p-5 sm:p-10 relative overflow-hidden"><div class="absolute -top-16 -right-16 w-56 h-56 ${isDarkNow ? 'bg-indigo-500/10' : 'bg-indigo-200/30'} rounded-full blur-3xl pointer-events-none"></div><div class="absolute -bottom-16 -left-16 w-56 h-56 ${isDarkNow ? 'bg-blue-500/10' : 'bg-blue-200/30'} rounded-full blur-3xl pointer-events-none"></div><div class="relative z-10"><div class="text-center mb-8 sm:mb-10"><div class="inline-flex items-center justify-center w-14 h-14 sm:w-20 sm:h-20 bg-gradient-to-br from-indigo-500 to-blue-600 rounded-2xl sm:rounded-3xl shadow-lg shadow-indigo-300/50 mb-4 sm:mb-5 text-white text-2xl sm:text-4xl"><i class="fas fa-chalkboard-teacher"></i></div><span class="${isDarkNow ? 'bg-[#1f2c47] text-indigo-300 border-[#2d3d5a]' : 'bg-white text-indigo-700 border-indigo-200'} font-black px-3 py-1 sm:px-4 sm:py-1.5 rounded-full text-[10px] sm:text-sm inline-block mb-2 sm:mb-3 shadow-sm border tracking-wide">สำหรับคุณครูผู้สอน</span><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800">ระบบจัดการประจำตัวครู</h2><p class="text-xs sm:text-lg text-slate-500 mt-2 sm:mt-3 font-medium px-4">เลือกกลุ่มสาระด้านล่าง แล้วแตะชื่อของท่านเพื่อเช็คชื่อหรือดูรายงาน</p></div>`;
+            if (teachers.length === 0) { 
+                html += `<div class="text-center text-slate-400 p-6 sm:p-8 bg-white/70 rounded-3xl border-2 border-slate-200 border-dashed text-sm sm:text-lg font-medium">ยังไม่มีข้อมูลครูผู้สอนในระบบ</div>`;
+            } else { 
+                // แสดงเป็นแท็บกลุ่มสาระ แทนการเรียงการ์ดครูทุกกลุ่มสาระต่อกันยาวๆ กันหน้าเว็บยาวเกินไป
+                const deptsWithTeachers = departmentsList.filter(d => teachers.some(t => (t.department || 'ระบบ/อื่นๆ') === d));
+                if (!window.dashboardTeacherDept || !deptsWithTeachers.includes(window.dashboardTeacherDept)) {
+                    window.dashboardTeacherDept = deptsWithTeachers[0];
+                }
+                const deptSolid = (cfg) => { const m = cfg.bg.match(/bg-(\w+)-100/); const color = m ? m[1] : 'indigo'; return { bg: `bg-${color}-600`, shadow: `shadow-${color}-200` }; };
+                html += `<div class="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3 mb-8 sm:mb-10 max-w-3xl mx-auto">${deptsWithTeachers.map(d => { const cfg = deptConfig[d]; const solid = deptSolid(cfg); const cnt = teachers.filter(t => (t.department || 'ระบบ/อื่นๆ') === d).length; const active = window.dashboardTeacherDept === d; return `<button onclick="window.selectDashboardTeacherDept('${d}')" class="${active ? `${solid.bg} text-white shadow-lg ${solid.shadow} scale-105 border-2 border-transparent` : `bg-white text-slate-600 border-2 border-slate-200 hover:${cfg.border} hover:shadow-md`} w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-2xl font-bold text-[11px] sm:text-sm transition-all duration-200 flex items-center justify-center gap-1.5 sm:gap-2"><i class="fas ${cfg.icon} ${active ? '' : cfg.text} shrink-0"></i><span class="truncate">${d}</span><span class="${active ? 'bg-white/25' : 'bg-slate-100 ' + cfg.text} px-1.5 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black shrink-0">${cnt}</span></button>`; }).join('')}</div>`;
+
+                const activeDept = window.dashboardTeacherDept;
+                const cfg = deptConfig[activeDept];
+                const solid = deptSolid(cfg);
+                const deptTeachers = teachers.filter(t => (t.department || 'ระบบ/อื่นๆ') === activeDept);
+                html += `<div class="mb-2"><div class="flex items-center gap-3 mb-5 sm:mb-6"><div class="w-9 h-9 sm:w-11 sm:h-11 ${solid.bg} text-white rounded-xl flex items-center justify-center text-sm sm:text-lg shadow-md ${solid.shadow} shrink-0"><i class="fas ${cfg.icon}"></i></div><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800">${activeDept}</h3><span class="ml-auto bg-white border ${cfg.border} ${cfg.text} text-[10px] sm:text-xs font-black px-2.5 py-1 rounded-full shadow-sm shrink-0">${deptTeachers.length} ท่าน</span></div><div class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5">${deptTeachers.sort((a,b) => a.name.localeCompare(b.name)).map(t => { const taughtSubjects = activeSubjects().filter(s => s.teacher === t.name || s.teacher2 === t.name);
+                    return `<button onclick="window.navigate('teacher_dash', {teacherName: '${t.name}'})" class="bg-white border-2 ${cfg.border} rounded-2xl sm:rounded-3xl p-4 sm:p-6 transition-all duration-200 hover:shadow-2xl hover:-translate-y-1.5 text-left flex flex-col items-center text-center group relative overflow-hidden min-h-[140px] sm:min-h-[190px] justify-start"><div class="absolute top-0 left-0 w-full h-1.5 ${solid.bg}"></div><div class="w-12 h-12 sm:w-[4.5rem] sm:h-[4.5rem] ${solid.bg} text-white rounded-full flex items-center justify-center text-xl sm:text-3xl mb-3 sm:mb-4 mt-1 group-hover:scale-110 transition-transform shadow-md ${solid.shadow} shrink-0"><i class="fas fa-user-tie"></i></div><h4 class="font-extrabold text-xs sm:text-lg text-slate-800 relative w-full whitespace-nowrap overflow-hidden text-ellipsis px-1 leading-tight" title="${t.name}">${t.name}</h4><p class="text-[10px] sm:text-xs ${cfg.text} mt-2 font-bold ${cfg.bg} px-2.5 py-1 rounded-full shadow-sm relative mt-auto"><i class="fas fa-book mr-1"></i>${taughtSubjects.length} วิชา</p></button>`; }).join('')}</div></div>`;
+            }
+            html += `</div></div></div>`; document.getElementById('mainContent').innerHTML = html;
+        }
+        window.selectDashboardTeacherDept = function(dept) { window.dashboardTeacherDept = dept; renderDashboard(); };
+        window.toggleTeacherLogRow = function(idx) {
+            const detail = document.getElementById(`teacherLogDetail${idx}`); const chevron = document.getElementById(`teacherLogChevron${idx}`);
+            if (!detail) return;
+            const isHidden = detail.classList.contains('hidden');
+            if (isHidden) { detail.classList.remove('hidden'); if (chevron) chevron.classList.add('rotate-90'); }
+            else { detail.classList.add('hidden'); if (chevron) chevron.classList.remove('rotate-90'); }
+        };
+
+        function renderSchoolSummary(selectedMonth = null) {
+            const schoolTerm = settings.term, schoolYear = settings.year;
+            const schoolTermYearKey = String(schoolTerm) + '_' + String(schoolYear);
+            if (!window.__adminTermRoomsLoaded.has(schoolTermYearKey)) {
+                document.getElementById('mainContent').innerHTML = renderLoadingProgressHTML('กำลังโหลดข้อมูลเช็คชื่อทุกห้อง...', 5, 'schoolLoadBar');
+                ensureAttendanceLoadedForAllRoomsInTerm(schoolTerm, schoolYear, (done, total) => {
+                    const pct = Math.round((done / total) * 100);
+                    const bar = document.getElementById('schoolLoadBar'); if (bar) bar.style.width = pct + '%';
+                    const pctText = document.getElementById('schoolLoadBar_pct'); if (pctText) pctText.textContent = pct;
+                }).then(() => { window.__adminTermRoomsLoaded.add(schoolTermYearKey); renderSchoolSummary(selectedMonth); });
+                return;
+            }
+            let currentDate = new Date();
+            if (!selectedMonth) { let month = (currentDate.getMonth() + 1).toString().padStart(2, '0'); selectedMonth = `${currentDate.getFullYear()}-${month}`; }
+            const monthNames = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+            const displayMonthYear = `${monthNames[parseInt(selectedMonth.split('-')[1])-1]} ${parseInt(selectedMonth.split('-')[0])+543}`;
+            const activeStudents = students.filter(s => s.status !== 'resigned');
+            const resignedCount = students.length - activeStudents.length;
+            const levelCounts = computeLevelCounts();
+            const totals = computeSchoolMonthlyStats(selectedMonth);
+            const totalRecorded = Object.values(totals).reduce((a, b) => a + b, 0);
+            const roomCount = getRoomList().length;
+
+            let html = `<div class="mb-4 sm:mb-8 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 p-4 sm:p-8 relative overflow-hidden"><div class="absolute right-0 top-0 w-1/3 h-full bg-gradient-to-l from-slate-100 to-transparent opacity-60"></div><div class="relative z-10 flex gap-3 sm:gap-4 items-center"><div class="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-slate-700 to-slate-900 rounded-2xl flex items-center justify-center text-white text-2xl sm:text-3xl shadow-lg shrink-0"><i class="fas fa-school"></i></div><div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">รวมทุกห้อง (ภาพรวมทั้งโรงเรียน)</h2><p class="text-slate-500 font-bold mt-1 text-xs sm:text-sm">${roomCount} ห้องเรียน ทุกระดับชั้น</p></div></div><div class="relative z-10 flex flex-wrap gap-1.5 sm:gap-2 w-full lg:w-auto mt-2 lg:mt-0 items-center"><input type="month" value="${selectedMonth}" onchange="window.navigate('school_summary', {month: this.value})" class="flex-1 lg:flex-none bg-slate-50 border border-slate-200 text-slate-700 px-3 py-2 sm:py-2.5 rounded-xl text-sm font-bold outline-none"><button onclick="window.exportSectionInfographicPDF('schoolInfographicSection', 'ภาพรวมทั้งโรงเรียน_${selectedMonth}', 'pdf')" class="flex-1 lg:flex-none bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 sm:py-2.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-sm"><i class="fas fa-file-pdf"></i> <span class="hidden sm:inline">PDF</span></button><button onclick="window.exportSectionInfographicPDF('schoolInfographicSection', 'ภาพรวมทั้งโรงเรียน_${selectedMonth}', 'image')" class="flex-1 lg:flex-none bg-pink-600 hover:bg-pink-700 text-white px-3 py-2 sm:py-2.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-sm"><i class="fas fa-file-image"></i> <span class="hidden sm:inline">รูปภาพ</span></button><button onclick="window.navigate('dashboard')" class="flex-1 lg:flex-none bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-2 sm:py-2.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-sm"><i class="fas fa-arrow-left"></i> กลับ</button></div></div>`;
+
+            html += `<div id="schoolInfographicSection">`;
+
+            html += `<div class="bg-white border border-slate-200 rounded-2xl p-4 sm:p-6 mb-4 sm:mb-6 text-center">${pdfLogoHtml()}${pdfDocMeta()}<h2 class="text-lg sm:text-2xl font-extrabold text-slate-800">ภาพรวมทั้งโรงเรียน ประจำเดือน${displayMonthYear}</h2></div>`;
+
+            html += `<div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-4 mb-4 sm:mb-8">
+                <div class="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 text-center shadow-sm"><div class="w-9 h-9 sm:w-11 sm:h-11 bg-slate-100 text-slate-700 rounded-full flex items-center justify-center mx-auto mb-2 text-sm sm:text-base"><i class="fas fa-users"></i></div><div class="text-2xl sm:text-4xl font-black text-slate-800">${students.length}</div><div class="text-[10px] sm:text-xs font-bold text-slate-500 mt-1">นักเรียนทั้งหมด</div></div>
+                <div class="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 text-center shadow-sm"><div class="w-9 h-9 sm:w-11 sm:h-11 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-2 text-sm sm:text-base"><i class="fas fa-user-check"></i></div><div class="text-2xl sm:text-4xl font-black text-emerald-600">${activeStudents.length}</div><div class="text-[10px] sm:text-xs font-bold text-slate-500 mt-1">กำลังเรียนอยู่</div></div>
+                <div class="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 text-center shadow-sm col-span-2 sm:col-span-1"><div class="w-9 h-9 sm:w-11 sm:h-11 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-2 text-sm sm:text-base"><i class="fas fa-user-minus"></i></div><div class="text-2xl sm:text-4xl font-black text-rose-500">${resignedCount}</div><div class="text-[10px] sm:text-xs font-bold text-slate-500 mt-1">ออก/ย้าย</div></div>
+            </div>`;
+
+            html += `<div class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-8 mb-4 sm:mb-8"><h3 class="text-base sm:text-2xl font-extrabold text-slate-800 mb-4 sm:mb-6 flex items-center gap-2"><i class="far fa-calendar-check text-indigo-500"></i> สถิติการมาเรียนทั้งโรงเรียน เดือน${displayMonthYear}</h3><div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2 sm:gap-3">${Object.entries(totals).map(([name, count]) => { const style = statuses[name];
+                return `<div class="bg-white border border-slate-200 rounded-xl sm:rounded-2xl p-3 sm:p-4 text-center flex flex-col items-center justify-center gap-1.5"><div class="w-8 h-8 sm:w-10 sm:h-10 ${style.bg} ${style.color} rounded-full flex items-center justify-center text-sm sm:text-lg mb-1 border ${style.border}"><i class="fas ${style.icon}"></i></div><div class="${style.color} text-[9px] sm:text-xs font-extrabold">${name}</div><div class="text-xl sm:text-3xl font-black text-slate-800">${count}</div></div>`; }).join('')}</div>${totalRecorded === 0 ? `<div class="text-center text-slate-400 mt-4 text-xs sm:text-sm font-medium"><i class="fas fa-info-circle"></i> ยังไม่มีข้อมูลการเช็คชื่อในเดือนนี้</div>` : ''}</div>`;
+
+            html += `<div class="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6">
+                <div class="bg-white rounded-2xl sm:rounded-[2rem] border border-slate-200 shadow-sm p-4 sm:p-6"><h4 class="font-extrabold text-sm sm:text-lg text-slate-800 mb-3 sm:mb-4 flex items-center gap-2"><i class="fas fa-layer-group text-blue-500"></i> จำนวนนักเรียนแต่ละระดับชั้น</h4><div class="relative h-56 sm:h-72"><canvas id="schoolLevelChart"></canvas></div></div>
+                <div class="bg-white rounded-2xl sm:rounded-[2rem] border border-slate-200 shadow-sm p-4 sm:p-6"><h4 class="font-extrabold text-sm sm:text-lg text-slate-800 mb-3 sm:mb-4 flex items-center gap-2"><i class="fas fa-chart-pie text-purple-500"></i> สัดส่วนสถานะการมาเรียน (เดือน${displayMonthYear})</h4><div class="relative h-56 sm:h-72"><canvas id="schoolStatusChart"></canvas></div><div id="schoolStatusChartLegend" class="mt-4"></div></div>
+            </div>`;
+
+            html += `</div>`;
+
+            document.getElementById('mainContent').innerHTML = html;
+            const levelCtxEl = document.getElementById('schoolLevelChart');
+            if (levelCtxEl && typeof Chart !== 'undefined') {
+                new Chart(levelCtxEl, { type: 'bar', data: { labels: [1,2,3,4,5,6].map(i => `ม.${i}`), datasets: [{ label: 'จำนวนนักเรียน', data: [1,2,3,4,5,6].map(i => levelCounts[i] || 0), backgroundColor: ['#3b82f6','#10b981','#f59e0b','#f43f5e','#a855f7','#06b6d4'], borderRadius: 8, maxBarThickness: 50 }] },
+                    options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 24 } }, plugins: { legend: { display: false },
+                        datalabels: { display: (ctx) => ctx.dataset.data[ctx.dataIndex] > 0, color: chartTextColor(), anchor: 'end', align: 'top', offset: 2, font: { weight: 'bold', size: isMobileView() ? 10 : 12 }, formatter: percentLabelFormatter } },
+                        scales: { x: { ticks: { color: chartTextColor(), font: { weight: 'bold', size: isMobileView() ? 10 : 12 } }, grid: { display: false } }, y: { beginAtZero: true, ticks: { color: chartTextColor(), precision: 0 }, grid: { color: chartGridColor() } } } } });
+            }
+            makeStatusDoughnutChart('schoolStatusChart', totals);
+        }
+
+        function openTeacherDashboard(teacherName) {
+            const isDarkNow = document.documentElement.classList.contains('dark');
+            const tSubjects = activeSubjects().filter(s => s.teacher === teacherName || s.teacher2 === teacherName);
+            const periods = [0, 1, 2, 3, 4, 'lunch', 5, 6, 7, 8];
+            let scheduleHtml = `<div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6 mb-6 overflow-hidden"><h3 class="font-extrabold text-base sm:text-lg text-slate-800 mb-4 flex items-center gap-2"><i class="fas fa-calendar-alt text-indigo-500"></i> ตารางสอนรายสัปดาห์</h3><div class="overflow-x-auto border border-slate-200 rounded-xl shadow-sm w-full"><table class="w-full text-center border-collapse min-w-[700px] sm:min-w-[950px] text-[10px] sm:text-sm"><thead class="bg-slate-100 text-slate-700"><tr><th class="p-2 sm:p-3 border-b border-slate-300 w-16 sm:w-24 bg-slate-100 sticky left-0 z-10">วัน / คาบ</th>`;
+            periods.forEach(p => { if (p === 'lunch') { scheduleHtml += `<th class="p-2 sm:p-3 border-b border-l border-amber-200 w-14 sm:w-20 bg-amber-50 text-amber-700"><i class="fas fa-utensils"></i><span class="hidden sm:inline"> พักเที่ยง</span></th>`; } else { scheduleHtml += `<th class="p-2 sm:p-3 border-b border-l border-slate-200 w-16 sm:w-24">คาบ ${p}</th>`; } });
+            scheduleHtml += `</tr></thead><tbody class="divide-y divide-slate-200">`;
+            for(let d = 1; d <= 5; d++) {
+                let subsOnDay = [];
+                tSubjects.forEach(sub => { if(sub.schedules) { sub.schedules.forEach(sch => { if(parseInt(sch.day) === d) subsOnDay.push({ ...sub, period: parseInt(sch.period) }); }); } });
+                scheduleHtml += `<tr class="hover:bg-slate-50 transition-colors"><td class="p-2 sm:p-3 font-extrabold text-slate-700 border-slate-300 bg-slate-50 sticky left-0 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">${daysLabel[d-1].replace('วัน','')}</td>`;
+                periods.forEach(p => { if (p === 'lunch') { scheduleHtml += `<td class="p-1 sm:p-2 border-l border-amber-100 bg-amber-50/70 h-full align-middle"><div class="flex flex-col items-center justify-center h-full min-h-[50px] text-amber-500"><i class="fas fa-utensils text-xs sm:text-sm"></i></div></td>`; return; } const candidatesAtP = subsOnDay.filter(s => s.period === p); const subj = candidatesAtP.find(s => s.systemType !== 'homeroom') || candidatesAtP[0]; if (subj) { const isLocked = isAttendanceEntryLocked(subj.term, subj.year); scheduleHtml += `<td class="p-1 sm:p-2 border-l border-slate-100 ${isLocked ? 'bg-slate-100/60' : 'bg-indigo-50/40 hover:bg-indigo-100'} transition-colors h-full align-middle"><div class="flex flex-col items-center justify-center h-full min-h-[50px] p-1 sm:p-1.5 rounded-lg ${isLocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}" ${isLocked ? 'title="เทอมนี้ถูกล็อคข้อมูลไว้ ไม่สามารถเช็คชื่อได้"' : `onclick="window.navigate('attendance', {subjectId: '${subj.id}', period: ${p}, fromTeacherDash: true})"`}>${isLocked ? '<i class="fas fa-lock text-slate-400 text-[10px] sm:text-xs mb-0.5"></i>' : ''}<span class="font-black ${isLocked ? 'text-slate-500' : 'text-indigo-800'} text-[9px] sm:text-xs leading-tight line-clamp-2" title="${subj.name}">${subj.name}</span><span class="text-[8px] sm:text-[10px] font-bold text-slate-600 mt-1 bg-white border border-indigo-200 px-1.5 py-0.5 rounded shadow-sm">ม.${subj.roomId.replace('m', '').replace('_', '/')}</span></div></td>`;
+                } else { scheduleHtml += `<td class="p-1 sm:p-2 border-l border-slate-100 text-slate-300 font-medium">-</td>`; } });
+                scheduleHtml += `</tr>`;
+            }
+            scheduleHtml += `</tbody></table></div></div>`;
+            let html = `<div class="mb-4 sm:mb-6 flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-6 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-1/3 h-full ${isDarkNow ? '' : 'bg-gradient-to-l from-indigo-50 to-transparent opacity-60'}"></div><div class="relative z-10 flex gap-3 sm:gap-5 items-center"><div class="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-indigo-500 to-blue-600 rounded-full flex items-center justify-center text-white text-xl sm:text-3xl shadow-lg shadow-indigo-200 shrink-0"><i class="fas fa-chalkboard-teacher"></i></div><div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">ครู : ${teacherName}</h2><p class="text-slate-600 font-bold mt-1 flex flex-wrap items-center gap-2"><span class="bg-indigo-100 text-indigo-800 px-2 py-1 rounded text-[10px] sm:text-sm border border-indigo-200"><i class="fas fa-book-open"></i> สอนทั้งหมด ${tSubjects.length} วิชา</span></p></div></div><div class="relative z-10 w-full md:w-auto"><button onclick="window.navigate('dashboard')" class="w-full md:w-auto bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2.5 sm:py-3.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 font-bold text-sm sm:text-base"><i class="fas fa-arrow-left"></i> กลับ</button></div></div>${scheduleHtml}<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">`;
+            if (tSubjects.length === 0) { html += `<div class="col-span-full text-center text-slate-400 p-8 sm:p-12 bg-white rounded-3xl border border-slate-200 border-dashed shadow-sm text-sm sm:text-lg font-medium">ไม่มีรายวิชาที่สอนในระบบ</div>`;
+            } else {
+                tSubjects.sort((a,b) => a.roomId.localeCompare(b.roomId) || a.name.localeCompare(b.name)).forEach(sub => {
+                    let schedCards = (sub.schedules || []).map(sch => `<div class="flex items-center justify-between border-b border-slate-100 last:border-0 py-1.5 sm:py-2"><span class="text-slate-600 text-[10px] sm:text-sm"><i class="far fa-calendar-alt text-indigo-400 w-4"></i> ${daysLabel[sch.day - 1] || 'ไม่ระบุ'}</span><span class="text-indigo-700 font-bold bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 text-[10px] sm:text-xs">คาบ ${sch.period}</span></div>`).join('');
+                    const isSubLocked = isAttendanceEntryLocked(sub.term, sub.year);
+                    html += `<div class="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-4 sm:p-5 hover:shadow-xl transition-all relative group flex flex-col h-full overflow-hidden stat-card-hover"><div class="absolute top-0 left-0 w-full h-1 bg-indigo-500"></div><div class="flex justify-between items-start mb-2 sm:mb-3 mt-1"><span class="bg-indigo-50 text-indigo-700 border border-indigo-100 text-[10px] sm:text-xs font-black px-2 py-1 rounded w-fit">ห้อง ${formatRoomName(sub.roomId)}</span><span class="bg-slate-100 text-slate-500 border border-slate-200 text-[9px] sm:text-xs font-bold px-2 py-1 rounded w-fit">${sub.credits || 0.5} นก.</span></div><h4 class="font-extrabold text-base sm:text-xl mb-1 text-slate-800 leading-tight line-clamp-2">${sub.name}</h4><p class="text-[10px] sm:text-sm text-slate-500 mb-3 font-mono bg-slate-50 px-2 py-1 rounded w-fit border border-slate-100">${sub.code || 'ไม่มีรหัสวิชา'}</p><div class="bg-slate-50 rounded-xl px-2.5 py-1 mb-4 border border-slate-100 font-medium text-slate-600 flex flex-col">${schedCards}</div><div class="mt-auto flex flex-col gap-2">${isSubLocked ? `<button disabled title="ไม่สามารถเช็คชื่อได้ในขณะนี้" class="w-full bg-slate-200 text-slate-400 py-2.5 sm:py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 cursor-not-allowed"><i class="fas fa-lock"></i> ล็อคแล้ว</button>` : `<button onclick="window.navigate('attendance', {subjectId: '${sub.id}', fromTeacherDash: true})" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 sm:py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-md"><i class="fas fa-clipboard-check"></i> เช็คชื่อ</button>`}<button onclick="window.navigate('subject_summary', {subjectId: '${sub.id}', fromTeacherDash: true})" class="w-full bg-emerald-50 hover:bg-emerald-600 text-emerald-600 hover:text-white border border-emerald-200 hover:border-emerald-600 py-2.5 sm:py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-sm"><i class="fas fa-chart-pie"></i> สรุปผล</button></div></div>`;
+                });
+            }
+            html += `</div>`; document.getElementById('mainContent').innerHTML = html;
+        }
+
+        function openClassroom(roomId, dayIndex = null) {
+            const isDarkNow = document.documentElement.classList.contains('dark');
+            currentRoomId = roomId;
+            if (dayIndex === null) { let today = new Date().getDay(); dayIndex = (today >= 1 && today <= 5) ? today : 1; }
+            // ===== [ใหม่] แอบโหลดข้อมูลเช็คชื่อของห้องนี้ไว้ล่วงหน้าเงียบๆ (ไม่บล็อกการแสดงผลหน้านี้) เผื่อผู้ใช้กด "เช็คชื่อ"/"สรุป" ต่อ จะได้ไม่ต้องรอโหลดซ้ำ =====
+            const preloadTerm = adminTerm ? adminTerm() : settings.term, preloadYear = adminYear ? adminYear() : settings.year;
+            ensureAttendanceLoadedForRoom(preloadTerm, preloadYear, roomId);
+            
+            const roomNameStr = formatRoomName(roomId);
+            const advData = getRoomAdvisors(roomId);
+            let advisorText = "ยังไม่ระบุ";
+            if (Array.isArray(advData)) { let validAdvs = advData.filter(a => a && a.trim() !== "");
+                if (validAdvs.length > 0) advisorText = validAdvs.join(' และ '); }
+
+            const roomSubjects = getRoomSubjects(roomId);
+            const roomStudents = getRoomStudents(roomId).sort((a, b) => parseInt(a.number) - parseInt(b.number));
+            const activeStudents = roomStudents.filter(s => s.status !== 'resigned');
+            const daySubjects = [];
+            roomSubjects.forEach(s => { if(!s.schedules) return; const schedsOnDay = s.schedules.filter(sch => parseInt(sch.day) === dayIndex); schedsOnDay.forEach(sch => { daySubjects.push({ ...s, currentPeriod: parseInt(sch.period) }); }); });
+            let html = `<div class="mb-4 sm:mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-48 sm:w-64 h-full ${isDarkNow ? '' : 'bg-gradient-to-l from-indigo-50 to-transparent opacity-50'}"></div><div class="relative z-10"><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2 sm:gap-4"><div class="w-10 h-10 sm:w-14 sm:h-14 bg-indigo-600 text-white rounded-xl sm:rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-200"><i class="fas fa-door-open text-lg sm:text-2xl"></i></div> ห้องเรียน ${roomNameStr}</h2><div class="flex flex-wrap items-center gap-2 mt-3 text-[10px] sm:text-sm"><p class="text-slate-600 bg-slate-100 px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg border border-slate-200 font-bold flex items-center gap-1 sm:gap-2"><i class="fas fa-user-tie text-indigo-500"></i> <span class="hidden sm:inline">ที่ปรึกษา: </span><span class="text-indigo-700">${advisorText}</span></p><p class="text-slate-600 bg-slate-100 px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg border border-slate-200 font-bold flex items-center gap-1 sm:gap-2"><i class="fas fa-users text-blue-500"></i> <span class="hidden sm:inline">นักเรียน: </span><span class="text-blue-700">${activeStudents.length} คน</span></p></div></div><div class="relative z-10 flex gap-2 w-full sm:w-auto"><button onclick="window.navigate('room_summary', {roomId: '${roomId}', tab: 'daily'})" class="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 px-3 py-2 sm:px-6 sm:py-3 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-xs sm:text-base"><i class="fas fa-chart-bar"></i> ภาพรวมห้อง</button><button onclick="window.navigate('dashboard')" class="flex-1 sm:flex-none bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-2 sm:px-6 sm:py-3 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-xs sm:text-base"><i class="fas fa-arrow-left"></i> กลับ</button></div></div>`;
+            const todayFullThaiDateStr = new Date().toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+            const todayProminentDateStr = `วันนี้ ${todayFullThaiDateStr}`;
+            html += `<div class="bg-white rounded-2xl sm:rounded-3xl shadow-sm border border-slate-200 p-3 sm:p-8 mb-6 sm:mb-10"><div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-4 sm:mb-8"><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800 flex items-center gap-2 flex-wrap"><i class="far fa-calendar-alt text-blue-500 text-xl sm:text-3xl"></i> ตารางเรียน <span class="text-xs sm:text-base font-black ${isDarkNow ? 'bg-indigo-500/20 text-indigo-300 border-indigo-400/40' : 'bg-indigo-50 text-indigo-700 border-indigo-200'} border px-2.5 py-1 rounded-full">${todayProminentDateStr}</span></h3><div class="flex overflow-x-auto gap-1.5 sm:gap-2 pb-2 lg:pb-0 w-full lg:w-auto">`;
+            for(let i = 1; i <= 5; i++) {
+                // คำนวณวันที่ของแต่ละวัน (จันทร์-ศุกร์) ของสัปดาห์ปัจจุบัน - อิงจากวันนี้จริง จะขยับตามสัปดาห์ให้อัตโนมัติทุกครั้งที่เปิดหน้า
+                const todayForWeek = new Date(); const todayDowForWeek = todayForWeek.getDay() || 7; // จันทร์=1 ... อาทิตย์=7
+                const mondayOfWeek = new Date(todayForWeek); mondayOfWeek.setDate(todayForWeek.getDate() - (todayDowForWeek - 1));
+                const dateForThisDay = new Date(mondayOfWeek); dateForThisDay.setDate(mondayOfWeek.getDate() + (i - 1));
+                const dayDateLabel = dateForThisDay.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+                // สีประจำวันแบบไทย: จันทร์เหลือง อังคารชมพู พุธเขียว พฤหัสส้ม ศุกร์ฟ้า
+                const dayColorMap = {
+                    1: { active: 'bg-yellow-500 border-yellow-500', text: 'text-yellow-700', hoverBorder: 'hover:border-yellow-300' },
+                    2: { active: 'bg-pink-500 border-pink-500', text: 'text-pink-700', hoverBorder: 'hover:border-pink-300' },
+                    3: { active: 'bg-green-600 border-green-600', text: 'text-green-700', hoverBorder: 'hover:border-green-300' },
+                    4: { active: 'bg-orange-500 border-orange-500', text: 'text-orange-700', hoverBorder: 'hover:border-orange-300' },
+                    5: { active: 'bg-sky-500 border-sky-500', text: 'text-sky-700', hoverBorder: 'hover:border-sky-300' }
+                };
+                const dc = dayColorMap[i];
+                const activeClass = (i === dayIndex) ? `${dc.active} text-white shadow-md` : `bg-white border-slate-200 text-slate-700 hover:bg-slate-50 ${dc.hoverBorder}`;
+                html += `<button onclick="window.navigate('classroom', {roomId: '${roomId}', dayIndex: ${i}})" class="px-2 sm:px-3 lg:px-5 py-1.5 sm:py-2 rounded-lg border font-bold whitespace-nowrap transition-all flex flex-col items-center justify-center gap-0.5 flex-1 ${activeClass}"><span class="text-[8px] sm:text-[10px] font-medium opacity-80 leading-none">${dayDateLabel}</span><span class="text-[10px] sm:text-sm flex items-center gap-1 leading-none">${i === dayIndex ? '<i class="fas fa-check-circle"></i>' : ''} ${daysLabel[i-1].replace('วัน','')}</span></button>`; }
+            
+            let dObj = new Date();
+            let currentDayOfWeek = dObj.getDay(); let dateToPass = new Date().toISOString().split('T')[0];
+            if (currentDayOfWeek >= 1 && currentDayOfWeek <= 5) { dObj.setDate(dObj.getDate() + (dayIndex - currentDayOfWeek));
+                dateToPass = dObj.toISOString().split('T')[0]; }
+            
+            html += `</div></div><div class="overflow-x-auto rounded-xl border border-slate-200 shadow-sm w-full"><table class="w-full text-left border-collapse min-w-[500px] sm:min-w-[560px] lg:min-w-[700px]"><thead><tr class="bg-slate-50 text-slate-700 text-xs sm:text-sm border-b-2 border-slate-200 uppercase tracking-wider"><th class="p-2 sm:p-3 lg:p-5 font-extrabold w-12 sm:w-16 lg:w-24 text-center">คาบ</th><th class="p-2 sm:p-3 lg:p-5 font-extrabold w-16 sm:w-24 lg:w-36">เวลา</th><th class="p-2 sm:p-3 lg:p-5 font-extrabold">วิชา / กิจกรรม</th><th class="p-2 sm:p-3 lg:p-5 font-extrabold w-20 sm:w-32 lg:w-72">ครูผู้สอน</th><th class="p-2 sm:p-3 lg:p-5 font-extrabold text-center w-20 sm:w-28 lg:w-40">จัดการ</th></tr></thead><tbody class="divide-y divide-slate-100">`;
+            timeSlots.forEach(slot => {
+                if (slot.period === -1) { html += `<tr class="bg-amber-50/70 border-y border-amber-100"><td class="p-2 sm:p-3 lg:p-5 text-center font-bold text-amber-600 bg-amber-100/50 text-xs sm:text-base" colspan="2"><i class="fas fa-utensils mr-1 sm:mr-2"></i>${slot.time}</td><td class="p-2 sm:p-3 lg:p-5 font-black text-amber-700 text-center tracking-widest text-sm sm:text-lg" colspan="3">${slot.name}</td></tr>`; } else {
+                    const subjectInSlot = daySubjects.find(s => s.currentPeriod === slot.period);
+                    
+                    if (subjectInSlot) { const isSlotLocked = isAttendanceEntryLocked(subjectInSlot.term, subjectInSlot.year); html += `<tr class="hover:bg-indigo-50/40 transition-colors group"><td class="p-2 sm:p-3 lg:p-5 font-black text-slate-700 text-center bg-slate-50/50 text-sm sm:text-lg">${slot.period}</td><td class="p-2 sm:p-3 lg:p-5 font-bold text-slate-500 font-mono bg-slate-50/30 text-xs sm:text-base">${slot.time}</td><td class="p-2 sm:p-3 lg:p-5"><div class="font-extrabold text-blue-700 text-sm sm:text-lg">${subjectInSlot.name}</div>${subjectInSlot.code ? `<div class="text-[10px] sm:text-xs font-bold text-slate-400 mt-1 uppercase bg-slate-100 inline-block px-1.5 py-0.5 rounded border border-slate-200">${subjectInSlot.code}</div>` : ''}</td><td class="p-2 sm:p-3 lg:p-5 font-bold text-slate-600 text-xs sm:text-base"><div class="flex items-center gap-2"><div class="hidden sm:flex w-8 h-8 rounded-full bg-slate-100 items-center justify-center text-slate-400 border border-slate-200 shrink-0"><i class="fas fa-chalkboard-teacher"></i></div><span class="flex flex-col min-w-0 max-w-[90px] sm:max-w-[150px] lg:max-w-none">${subjectInSlot.teacher ? `<span class="truncate block" title="${subjectInSlot.teacher}">${subjectInSlot.teacher}</span>` : '<span>-</span>'}${subjectInSlot.teacher2 ? `<span class="truncate block" title="${subjectInSlot.teacher2}">${subjectInSlot.teacher2}</span>` : ''}</span></div></td><td class="p-1.5 sm:p-3 lg:p-5 flex flex-col gap-1.5">${isSlotLocked ? `<button disabled title="ไม่สามารถเช็คชื่อได้ในขณะนี้" class="w-full bg-slate-100 text-slate-400 py-1.5 rounded-lg text-xs sm:text-sm font-bold cursor-not-allowed"><i class="fas fa-lock"></i> ล็อคแล้ว</button>` : `<button onclick="window.navigate('attendance', {subjectId: '${subjectInSlot.id}', period: ${slot.period}, date: '${dateToPass}'})" class="w-full bg-indigo-50 hover:bg-indigo-600 text-indigo-600 hover:text-white border border-indigo-200 hover:border-indigo-600 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all shadow-sm"><i class="fas fa-check"></i> เช็คชื่อ</button>`}<button onclick="window.navigate('subject_summary', {subjectId: '${subjectInSlot.id}'})" class="w-full bg-white hover:bg-emerald-50 text-emerald-600 border border-slate-200 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all shadow-sm"><i class="fas fa-chart-pie"></i> สรุป</button></td></tr>`;
+                    } 
+                    else { html += `<tr><td class="p-2 sm:p-3 lg:p-5 font-bold text-slate-400 text-center bg-slate-50/50 text-sm sm:text-lg">${slot.period}</td><td class="p-2 sm:p-3 lg:p-5 font-bold text-slate-400 font-mono bg-slate-50/30 text-xs sm:text-base">${slot.time}</td><td class="p-2 sm:p-3 lg:p-5 text-slate-300 font-medium italic pl-4 sm:pl-8 border-l border-dashed border-slate-200 text-xs sm:text-sm">- ว่าง -</td><td class="p-2 sm:p-3 lg:p-5"></td><td class="p-2 sm:p-3 lg:p-5"></td></tr>`;
+                    }
+                }
+            });
+            html += `</tbody></table></div></div>`;
+            
+            html += `<h3 class="text-lg sm:text-2xl font-extrabold mb-4 sm:mb-6 text-slate-800 flex items-center gap-2"><i class="fas fa-users text-indigo-500 text-xl sm:text-3xl"></i> รายชื่อนักเรียนห้อง ${roomNameStr}</h3><div class="bg-white rounded-2xl sm:rounded-3xl shadow-sm border border-slate-200 overflow-hidden mb-8 w-full"><div class="overflow-x-auto w-full"><table class="w-full text-left border-collapse min-w-[300px] sm:min-w-[500px]"><thead><tr class="bg-slate-50 text-slate-700 text-[10px] sm:text-sm border-b-2 border-slate-200 uppercase tracking-wider"><th class="p-3 sm:p-5 font-extrabold w-[40px] sm:w-[80px] min-w-[40px] sm:min-w-[80px] text-center sticky left-0 z-20 bg-slate-50 border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">เลขที่</th><th class="p-3 sm:p-5 font-extrabold">ชื่อ-นามสกุล</th><th class="p-3 sm:p-5 font-extrabold text-center w-24 sm:w-48">ดูสถิติ</th></tr></thead><tbody class="divide-y divide-slate-100">`;
+            if (roomStudents.length === 0) { html += `<tr><td colspan="3" class="p-8 text-center text-slate-400 font-medium text-xs sm:text-lg">ยังไม่มีรายชื่อนักเรียน</td></tr>`;
+            } else {
+                roomStudents.forEach((st, idx) => {
+                    const statusBadge = st.status === 'resigned' ? `<span class="bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded text-[8px] sm:text-xs ml-1 sm:ml-2 border border-rose-200 font-black">ออก/ย้าย</span>` : ''; const rowClass = st.status === 'resigned' ? 'opacity-60 bg-slate-50' : (idx%2===0 ? 'bg-white' : 'bg-slate-50/50'); const bgForSticky = st.status === 'resigned' ? 'bg-slate-100' : (idx%2===0 ? 'bg-white' : 'bg-slate-50');
+                    html += `<tr class="${rowClass} hover:bg-slate-100 transition-colors"><td class="p-3 sm:p-5 text-center font-black text-slate-500 text-sm sm:text-lg sticky left-0 z-10 ${bgForSticky} border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">${st.number}</td><td class="p-3 sm:p-5 font-bold text-slate-800 text-[11px] sm:text-base">${st.name} ${statusBadge}</td><td class="p-2 sm:p-5 text-center bg-white"><button onclick="window.navigate('student_summary', {studentId: '${st.id}'})" class="bg-white hover:bg-blue-50 text-blue-600 border border-slate-200 px-2 sm:px-4 py-1.5 sm:py-2.5 rounded-lg text-[10px] sm:text-sm font-bold shadow-sm w-full"><i class="fas fa-chart-line"></i> รายบุคคล</button></td></tr>`;
+                });
+            }
+            html += `</tbody></table></div></div>`; document.getElementById('mainContent').innerHTML = html;
+        }
+
+        function openAttendance(subjectId, initialPeriod = null, fromTeacherDash = false, passedDate = null) {
+            currentSubjectId = subjectId;
+            const subject = subjects.find(s => s.id === subjectId); if (!subject) return;
+            // ===== [ใหม่] เช็คก่อนว่าโหลดข้อมูลเช็คชื่อของห้องนี้มาแล้วหรือยัง ถ้ายัง โหลดก่อนแล้วค่อยวาดหน้าใหม่ (กันเห็นฟอร์มว่างผิดๆ ทั้งที่จริงมีข้อมูลอยู่แล้ว) =====
+            const roomKeyForGate = roomAttKey_(subject.term, subject.year, subject.roomId);
+            if (!(roomKeyForGate in window.__loadedRoomLastModified)) {
+                document.getElementById('mainContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 sm:py-32"><i class="fas fa-spinner fa-spin text-4xl text-indigo-500 mb-4"></i><p class="text-slate-500 font-bold text-sm sm:text-base">กำลังโหลดข้อมูลห้อง ${formatRoomName(subject.roomId)}...</p></div>`;
+                ensureAttendanceLoadedForRoom(subject.term, subject.year, subject.roomId).then(() => openAttendance(subjectId, initialPeriod, fromTeacherDash, passedDate));
+                return;
+            }
+            const roomStudents = getRoomStudents(subject.roomId).sort((a, b) => parseInt(a.number) - parseInt(b.number));
+            const today = passedDate || new Date().toISOString().split('T')[0];
+            let selectedPeriod = initialPeriod;
+            if (!selectedPeriod && subject.schedules && subject.schedules.length > 0) { const todayDay = new Date(today).getDay() || 7;
+                const todaySched = subject.schedules.find(s => parseInt(s.day) === todayDay); selectedPeriod = todaySched ? todaySched.period : subject.schedules[0].period;
+            }
+            let tcOptions = `<option value="" disabled selected>-- เลือกครูที่มาสอนแทน --</option>`;
+            teachers.forEach(t => { if(t.name !== subject.teacher && t.name !== subject.teacher2) tcOptions += `<option value="${t.name}">${t.name}</option>`; });
+            const backAction = fromTeacherDash ? `window.navigate('teacher_dash', {teacherName: '${subject.teacher}'})` : `window.navigate('classroom', {roomId: '${subject.roomId}'})`;
+
+            let html = `<div class="mb-4 sm:mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4 sm:gap-6 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="relative z-10 w-full"><div class="flex flex-wrap items-center gap-2 mb-2 sm:mb-3"><span class="bg-indigo-100 text-indigo-700 font-bold px-2 py-1 rounded text-[10px] sm:text-sm">ห้อง ${formatRoomName(subject.roomId)}</span></div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2"><i class="fas fa-clipboard-check text-indigo-500"></i> ${subject.name}</h2><p class="text-slate-500 mt-1 text-[11px] sm:text-base font-medium flex items-center gap-1.5"><i class="fas fa-chalkboard-teacher"></i> ครู: <span class="text-slate-700">${subject.teacher || '-'}${subject.teacher2 ? ' / ' + subject.teacher2 : ''}</span></p></div><div class="flex flex-col gap-3 relative z-10 w-full md:w-auto mt-2 md:mt-0"><div class="flex flex-row gap-2 w-full"><input type="date" id="attDate" value="${today}" onchange="window.updatePeriodDropdown(); window.updateAttendanceHolidayNote();" class="flex-1 bg-slate-50 border border-slate-200 text-slate-800 px-3 py-2 sm:py-3 rounded-xl shadow-inner focus:ring-2 focus:ring-indigo-500 text-base sm:text-sm font-bold outline-none"><select id="attPeriod" class="w-24 sm:w-32 bg-slate-50 border border-slate-200 text-slate-800 px-2 py-2 sm:py-3 rounded-xl shadow-inner focus:ring-2 focus:ring-indigo-500 text-base sm:text-sm font-bold outline-none"></select></div><label class="flex items-center gap-2 cursor-pointer bg-amber-50 p-2 sm:p-3 rounded-xl border border-amber-200 w-full"><input type="checkbox" id="isSubstitute" onchange="document.getElementById('substituteTeacher').classList.toggle('hidden', !this.checked)" class="w-4 h-4 text-amber-600 rounded"><span class="font-bold text-amber-800 text-[10px] sm:text-sm">มีการสอนแทน (ระบุชื่อผู้เช็คแทน)</span></label><select id="substituteTeacher" class="hidden w-full bg-white border border-amber-300 text-slate-800 px-3 py-2 rounded-xl shadow-inner focus:ring-2 focus:ring-amber-500 text-base sm:text-sm font-bold outline-none">${tcOptions}</select><button onclick="${backAction}" class="w-full bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2 sm:py-3 rounded-xl shadow-sm transition-all font-bold text-sm">ย้อนกลับ</button></div></div>`;
+            
+            html += `<div id="attHolidayNote" class="hidden mb-4 sm:mb-6 bg-rose-50 border-2 border-rose-300 rounded-2xl p-3 sm:p-4 flex items-center gap-3"><div class="w-9 h-9 sm:w-11 sm:h-11 bg-rose-500 text-white rounded-full flex items-center justify-center text-sm sm:text-lg shrink-0"><i class="fas fa-calendar-times"></i></div><span id="attHolidayNoteText" class="text-rose-700 font-bold text-xs sm:text-sm"></span></div>`;
+            if (getTermStatus(subject.term, subject.year) !== 'open') {
+                const st = getTermStatus(subject.term, subject.year);
+                const msg = st === 'not_opened' ? `เทอม ${subject.term}/${subject.year} ยังไม่เปิดใช้งาน (ยังไม่สามารถบันทึกการเช็คชื่อได้)` : `เทอม ${subject.term}/${subject.year} ถูกล็อคข้อมูลไว้ (ดูข้อมูลย้อนหลังได้ แต่ไม่สามารถบันทึกการเช็คชื่อได้)`;
+                html += `<div class="mb-4 sm:mb-6 bg-rose-50 border-2 border-rose-300 rounded-2xl p-3 sm:p-4 flex items-center gap-3"><div class="w-9 h-9 sm:w-11 sm:h-11 bg-rose-500 text-white rounded-full flex items-center justify-center text-sm sm:text-lg shrink-0"><i class="fas fa-lock"></i></div><span class="text-rose-700 font-bold text-xs sm:text-sm">${msg}</span></div>`;
+            }
+            
+            html += `<div class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 overflow-hidden mb-10"><div class="bg-slate-50 border-b border-slate-200 p-2.5 sm:p-4 flex flex-wrap gap-1.5 justify-center">${Object.entries(statuses).map(([name, style]) => `<div class="flex items-center gap-1 px-1.5 sm:px-3 py-1 bg-white border border-slate-200 rounded-lg shadow-sm text-[9px] sm:text-xs font-bold text-slate-600"><div class="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-${style.activeBg.replace('bg-','')}"></div> ${name}</div>`).join('')}</div><div class="block lg:hidden divide-y divide-slate-100">`;
+            if (roomStudents.length === 0) { html += `<div class="p-10 text-center text-slate-400 font-medium">ไม่มีรายชื่อนักเรียน</div>`;
+            } else {
+                roomStudents.forEach(st => {
+                    const isResigned = st.status === 'resigned'; const statusBadge = isResigned ? `<span class="bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded text-[8px] ml-1 font-black border border-rose-200">ออก/ย้าย</span>` : '';
+                    const mkMobileBtn = (status, big) => { const style = statuses[status]; const sizeCls = big ? 'py-3.5 text-base gap-2' : 'py-2.5 text-xs gap-1'; return `<label class="cursor-pointer block ${isResigned ? 'pointer-events-none' : ''}"><input type="radio" name="att_mobile_${st.id}" value="${status}" onchange="syncRadio('${st.id}', '${status}')" class="peer sr-only"><div class="w-full ${sizeCls} rounded-xl border-2 ${style.border} ${style.bg} ${style.color} font-bold transition-all peer-checked:${style.activeBg} peer-checked:text-white peer-checked:border-transparent peer-checked:shadow-md flex items-center justify-center"><i class="fas ${style.icon}"></i>&nbsp;${status}</div></label>`; };
+                    html += `<div class="p-3 sm:p-5 ${isResigned ? 'bg-rose-100/70' : 'bg-white'}"><div class="flex items-center gap-3 mb-3"><span class="shrink-0 font-black text-white ${isResigned ? 'bg-rose-500' : 'bg-indigo-500'} text-lg sm:text-xl w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow-sm">${st.number}</span><div class="font-extrabold ${isResigned ? 'text-rose-700' : 'text-slate-800'} text-base sm:text-lg leading-snug flex items-center flex-wrap gap-1 min-w-0">${st.name} ${statusBadge}</div></div><div class="space-y-1.5">${mkMobileBtn('มา', true)}<div class="grid grid-cols-3 gap-1.5">${mkMobileBtn('ขาด', false)}${mkMobileBtn('สาย', false)}${mkMobileBtn('ร่วมกิจกรรม', false)}</div><div class="grid grid-cols-3 gap-1.5">${mkMobileBtn('ลาป่วย', false)}${mkMobileBtn('ลากิจ', false)}${mkMobileBtn('โดดเรียน', false)}</div></div></div>`;
+                });
+            }
+            
+            html += `</div><div class="hidden lg:block overflow-x-auto w-full"><table class="w-full text-left border-collapse min-w-[950px]"><thead><tr class="bg-white text-slate-700 border-b-2 border-slate-100 uppercase tracking-wider text-sm"><th class="p-5 font-extrabold w-[80px] min-w-[80px] text-center sticky left-0 z-20 bg-white border-r border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">เลขที่</th><th class="p-5 font-extrabold w-[250px] min-w-[250px] sticky left-[80px] z-20 bg-white border-r border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">ชื่อ-นามสกุล</th><th class="p-5 font-extrabold text-center bg-slate-50/50">สถานะการมาเรียน (รายคาบ)</th></tr></thead><tbody class="divide-y divide-slate-100" id="attendanceTableBody">`;
+            if (roomStudents.length > 0) {
+                roomStudents.forEach((st, idx) => {
+                    const isRes = st.status === 'resigned'; const statusBadge = isRes ? `<span class="bg-rose-100 text-rose-700 px-2 py-0.5 rounded text-[10px] ml-2 border border-rose-200 font-black">ออก/ย้าย</span>` : ''; const rowBg = isRes ? 'bg-rose-100/70' : (idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'); const bgForSticky = isRes ? 'bg-rose-100' : (idx % 2 === 0 ? 'bg-white' : 'bg-slate-50');
+                    html += `<tr class="${rowBg} hover:bg-indigo-50/30 transition-colors"><td class="p-5 text-center font-black ${isRes ? 'text-rose-600' : 'text-indigo-600'} text-3xl sticky left-0 z-10 ${bgForSticky} border-r border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">${st.number}</td><td class="p-5 font-bold ${isRes ? 'text-rose-700' : 'text-slate-800'} border-r border-slate-100 sticky left-[80px] z-10 ${bgForSticky} shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] flex items-center flex-wrap">${st.name} ${statusBadge}</td><td class="p-4 ${isRes ? 'bg-rose-50/60' : 'bg-slate-50/30'}"><div class="flex justify-center gap-2">`;
+                    Object.keys(statuses).forEach(status => { const style = statuses[status]; html += `<label class="cursor-pointer"><input type="radio" name="att_${st.id}" value="${status}" onchange="syncRadio('${st.id}', '${status}')" class="peer sr-only" ${isRes ? 'disabled' : ''}><div class="px-3 py-2 rounded-xl border-2 ${style.border} ${style.bg} ${style.color} text-base font-bold transition-all peer-checked:${style.activeBg} peer-checked:text-white peer-checked:border-transparent peer-checked:shadow-md hover:scale-105 active:scale-95 flex items-center gap-1.5 whitespace-nowrap"><i class="fas ${style.icon} opacity-50 peer-checked:opacity-100"></i> ${status}</div></label>`; });
+                    html += `</div></td></tr>`;
+                });
+            }
+            html += `</tbody></table></div><div class="p-4 sm:p-8 bg-slate-50 border-t border-slate-200 flex flex-col justify-end items-center shadow-inner">${isAttendanceEntryLocked(subject.term, subject.year) ? `<button id="saveAttBtn" disabled class="w-full bg-slate-300 text-slate-500 px-8 py-3.5 sm:py-4 rounded-xl sm:rounded-2xl font-extrabold text-base sm:text-lg flex items-center justify-center gap-2 cursor-not-allowed"><i class="fas fa-lock text-xl"></i> ไม่สามารถบันทึกการเช็คชื่อได้ในขณะนี้</button>` : `<button id="saveAttBtn" onclick="window.saveAttendance(${fromTeacherDash})" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3.5 sm:py-4 rounded-xl sm:rounded-2xl font-extrabold text-base sm:text-lg transition-all shadow-xl shadow-indigo-200 flex items-center justify-center gap-2 hover:-translate-y-1"><i class="fas fa-cloud-upload-alt text-xl"></i> บันทึกข้อมูลเช็คชื่อ</button>`}</div></div>`;
+            document.getElementById('mainContent').innerHTML = html;
+            
+            window.updatePeriodDropdown = function() {
+                const dateVal = document.getElementById('attDate').value;
+                const dObj = new Date(dateVal); const dayOfWeek = dObj.getDay() || 7;
+                const schedsOnDay = (subject.schedules || []).filter(s => parseInt(s.day) === dayOfWeek);
+                const selectEl = document.getElementById('attPeriod'), saveBtn = document.getElementById('saveAttBtn');
+                if (schedsOnDay.length > 0) {
+                    selectEl.innerHTML = schedsOnDay.map(sch => `<option value="${sch.period}" ${String(sch.period) === String(selectedPeriod) ? 'selected' : ''}>คาบ ${sch.period} (${daysLabel[sch.day-1]})</option>`).join('');
+                    selectEl.disabled = false; saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-cloud-upload-alt text-xl"></i> บันทึกข้อมูลเช็คชื่อ';
+                    saveBtn.classList.replace('bg-slate-400', 'bg-indigo-600'); saveBtn.classList.replace('hover:bg-slate-500', 'hover:bg-indigo-700');
+                    loadExistingAttendance(subjectId, dateVal, selectEl.value);
+                } else {
+                    selectEl.innerHTML = `<option value="">ไม่มีคาบสอน</option>`;
+                    selectEl.disabled = true; saveBtn.disabled = true;
+                    saveBtn.innerHTML = '<i class="fas fa-times-circle text-xl"></i> ไม่มีคาบสอนในวันที่เลือก';
+                    saveBtn.classList.replace('bg-indigo-600', 'bg-slate-400'); saveBtn.classList.replace('hover:bg-indigo-700', 'hover:bg-slate-500');
+                    document.querySelectorAll('input[type="radio"]').forEach(r => r.checked = false);
+                }
+            };
+            window.updateAttendanceHolidayNote = function() {
+                const dateVal = document.getElementById('attDate').value;
+                const noteEl = document.getElementById('attHolidayNote'), textEl = document.getElementById('attHolidayNoteText');
+                if (!noteEl || !textEl) return;
+                const holiday = getHolidayForDate(dateVal);
+                if (holiday) { textEl.innerText = `วันที่เลือกเป็นวันหยุด: ${holiday.label} (ยังสามารถเช็คชื่อได้ตามปกติหากมีการเรียนการสอน)`; noteEl.classList.remove('hidden'); }
+                else { noteEl.classList.add('hidden'); }
+            };
+            window.updatePeriodDropdown();
+            window.updateAttendanceHolidayNote();
+            document.getElementById('attPeriod').addEventListener('change', (e) => { loadExistingAttendance(subjectId, document.getElementById('attDate').value, e.target.value); });
+        }
+        
+        window.syncRadio = function(stId, val) {
+            const m = document.querySelector(`input[name="att_mobile_${stId}"][value="${val}"]`);
+            const d = document.querySelector(`input[name="att_${stId}"][value="${val}"]`);
+            if(m && !m.disabled) m.checked = true; if(d && !d.disabled) d.checked = true;
+        };
+        function loadExistingAttendance(subjectId, date, period) {
+            if (!period) return;
+            document.querySelectorAll('input[type="radio"]').forEach(r => r.checked = false);
+            document.getElementById('isSubstitute').checked = false; document.getElementById('substituteTeacher').classList.add('hidden'); document.getElementById('substituteTeacher').value = "";
+            let record = attendanceData.find(a => a.subjectId === subjectId && a.date === date && String(a.period) === String(period));
+            if (record) {
+                if(record.substituteTeacher) { document.getElementById('isSubstitute').checked = true;
+                    document.getElementById('substituteTeacher').classList.remove('hidden'); document.getElementById('substituteTeacher').value = record.substituteTeacher; }
+                Object.keys(record.records).forEach(stId => { syncRadio(stId, record.records[stId]); });
+                showToast(`โหลดข้อมูลเก่าแล้ว`, "success");
+            } else {
+                let copiedFromPrev = false;
+                {
+                    const subForCopy = subjects.find(s => s.id === subjectId);
+                    const prevPeriod = parseInt(period) - 1;
+                    const dObj2 = new Date(date); const dow2 = dObj2.getDay() || 7;
+                    const hasPrevSchedule = subForCopy && (subForCopy.schedules || []).some(s => parseInt(s.day) === dow2 && parseInt(s.period) === prevPeriod);
+                    if (hasPrevSchedule) {
+                        const prevRecord = attendanceData.find(a => a.subjectId === subjectId && a.date === date && String(a.period) === String(prevPeriod));
+                        if (prevRecord) {
+                            Object.keys(prevRecord.records).forEach(stId => { syncRadio(stId, prevRecord.records[stId]); });
+                            showToast(`คัดลอกข้อมูลจากคาบ ${prevPeriod} ของวิชานี้ให้แล้ว - กรุณาตรวจสอบก่อนกดบันทึก`, "info");
+                            copiedFromPrev = true;
+                        }
+                    }
+                }
+                if (!copiedFromPrev) { document.querySelectorAll('input[type="radio"][value="มา"]').forEach(r => { if(!r.disabled) r.checked = true; }); }
+            }
+        }
+
+        window.saveAttendance = async function(fromTeacherDash = false) {
+            const date = document.getElementById('attDate').value, period = document.getElementById('attPeriod').value;
+            const isSub = document.getElementById('isSubstitute').checked, subTeacher = document.getElementById('substituteTeacher').value;
+            if (!period) return; if (isSub && !subTeacher) { showToast("กรุณาเลือกชื่อครูที่มาสอนแทน", "error"); return;
+            }
+            const subject = subjects.find(s => s.id === currentSubjectId), roomStudents = getRoomStudents(subject.roomId);
+            if (guardAttendanceLock(subject.term, subject.year)) return;
+            let records = {}, allFilled = true;
+            roomStudents.forEach(st => { if (st.status !== 'resigned') { const selected = document.querySelector(`input[name="att_${st.id}"]:checked`) || document.querySelector(`input[name="att_mobile_${st.id}"]:checked`); if (selected) records[st.id] = selected.value; else allFilled = false; } });
+            if (!allFilled) { showToast("กรุณาเช็คชื่อให้ครบทุกคน", "error"); return; }
+            const existingRec = attendanceData.find(a => a.subjectId === currentSubjectId && a.date === date && String(a.period) === String(period));
+            const payloadData = { id: (existingRec && existingRec.id) || generateId(), subjectId: currentSubjectId, date: date, period: period, records: records, createdAt: (existingRec && existingRec.createdAt) || new Date().toISOString(), checkedAt: new Date().toISOString(), checkedBy: currentUser ? currentUser.name : '' };
+            if(isSub) payloadData.substituteTeacher = subTeacher;
+            showLoadingSpinnerModal("กำลังบันทึกข้อมูล", "กำลังส่งข้อมูลไปยังเซิร์ฟเวอร์ กรุณารอสักครู่...");
+            document.body.style.pointerEvents = 'none';
+            const saveSuccess = await saveData('attendance', payloadData);
+            window.__lastAttendanceSaveAt = Date.now();
+            if (!saveSuccess) { window.closeProgressModal(); document.body.style.pointerEvents = 'auto'; return; } // บันทึกไม่สำเร็จ - saveData แสดงป็อปอัพแจ้งเตือนพร้อมปุ่มบันทึกอีกครั้งให้แล้วในตัว ไม่ต้องทำอะไรต่อจากตรงนี้
+            // ===== [แก้ไข] ดึงข้อมูลล่าสุดของ "ห้องนี้" โดยตรง (ของเดิมพึ่ง default doGet ซึ่งตอนนี้ไม่มีข้อมูลเช็คชื่อติดมาด้วยแล้วหลังแยกไฟล์ตามห้อง - ถ้าไม่แก้จะไปล้าง attendanceData ทิ้งโดยไม่ตั้งใจ) =====
+            // [แก้ไข] ทำขั้นตอนนี้ก่อนปิดป็อปอัพ กันจังหวะที่หน้าจอค้างเฉยๆ ไม่มีอะไรบอกสถานะระหว่างรอ แล้วค่อยปิดป็อปอัพ+เปลี่ยนหน้าพร้อมกันทีเดียว จะได้ลื่นไหลกว่าเดิม
+            await ensureAttendanceLoadedForRoom(subject.term, subject.year, subject.roomId, true);
+            window.closeProgressModal();
+            document.body.style.pointerEvents = 'auto';
+            showToast("บันทึกข้อมูลสำเร็จ!");
+            if (fromTeacherDash) { navigate('teacher_dash', {teacherName: subject.teacher}); } else { navigate('classroom', {roomId: subject.roomId});
+            }
+        };
+
+        window.resetSubjectAttendance = async function(subjectId) {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่ล้างข้อมูลเช็คชื่อได้", "error"); return; }
+            const subChk = subjects.find(s => s.id === subjectId);
+            if (subChk && guardAttendanceLock(subChk.term, subChk.year)) return;
+            showConfirm("ยืนยันการล้างข้อมูล", "ข้อมูลการเช็คชื่อทั้งหมดในวิชานี้จะถูกลบอย่างถาวรและไม่สามารถกู้คืนได้ คุณแน่ใจหรือไม่?", async () => {
+                showToast("กำลังล้างข้อมูล... (อัปเดตแบบเรียลไทม์)", "info"); 
+                document.body.style.pointerEvents = 'none';
+                const sub = subjects.find(s => s.id === subjectId);
+                logAction('ล้างข้อมูลเช็คชื่อของวิชา', sub ? sub.name : subjectId);
+                await saveData('reset_subject', subjectId); 
+                document.body.style.pointerEvents = 'auto'; 
+                showToast("ล้างข้อมูลวิชาเรียบร้อยแล้ว", "success"); 
+                openSubjectSummary(subjectId);
+            });
+        };
+
+        function openSubjectSummary(subjectId, fromTeacherDash = false) {
+            const isDarkNow = document.documentElement.classList.contains('dark');
+            const subject = subjects.find(s => s.id === subjectId);
+            if (!subject) return;
+            const roomKeyForGate3 = roomAttKey_(subject.term, subject.year, subject.roomId);
+            if (!(roomKeyForGate3 in window.__loadedRoomLastModified)) {
+                document.getElementById('mainContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 sm:py-32"><i class="fas fa-spinner fa-spin text-4xl text-indigo-500 mb-4"></i><p class="text-slate-500 font-bold text-sm sm:text-base">กำลังโหลดข้อมูลห้อง ${formatRoomName(subject.roomId)}...</p></div>`;
+                ensureAttendanceLoadedForRoom(subject.term, subject.year, subject.roomId).then(() => openSubjectSummary(subjectId, fromTeacherDash));
+                return;
+            }
+            const roomStudents = getRoomStudents(subject.roomId).sort((a, b) => parseInt(a.number) - parseInt(b.number));
+            const subjectAtt = attendanceData.filter(a => a.subjectId === subjectId).sort((a, b) => new Date(a.date) - new Date(b.date) || parseInt(a.period || 0) - parseInt(b.period || 0));
+            let uniqueCols = []; subjectAtt.forEach(att => { const key = `${att.date}_${att.period}`; if (!uniqueCols.find(c => c.key === key)) { uniqueCols.push({ key, date: att.date, period: att.period, data: att.records, subTeacher: att.substituteTeacher }); } });
+            const totalClasses = uniqueCols.length;
+            const backAction = fromTeacherDash ? `window.navigate('teacher_dash', {teacherName: '${subject.teacher}'})` : `window.navigate('classroom', {roomId: '${subject.roomId}'})`;
+            const isSummaryLocked = getTermStatus(subject.term, subject.year) === 'locked';
+            const isSummaryAttendanceLocked = isAttendanceEntryLocked(subject.term, subject.year);
+            let html = `<div class="mb-4 sm:mb-8 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-1/3 h-full ${isDarkNow ? '' : 'bg-gradient-to-l from-emerald-50 to-transparent opacity-60'}"></div><div class="relative z-10 flex gap-3 items-center"><div class="w-12 h-12 sm:w-20 sm:h-20 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-full flex items-center justify-center text-white text-xl sm:text-3xl shadow-lg border-2 sm:border-4 ${isDarkNow ? 'border-[#141e33]' : 'border-white'} shrink-0"><i class="fas fa-book"></i></div><div><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800 tracking-tight leading-tight">${subject.name}</h2><p class="text-slate-600 font-bold mt-1 sm:mt-2 flex flex-wrap items-center gap-1 sm:gap-3"><span class="bg-emerald-100 text-emerald-900 px-2 sm:px-4 py-0.5 sm:py-1.5 rounded-md sm:rounded-xl text-[10px] sm:text-sm shadow-sm">ห้อง ${formatRoomName(subject.roomId)}</span><span class="bg-slate-100 text-slate-700 px-2 sm:px-4 py-0.5 sm:py-1.5 rounded-md sm:rounded-xl text-[10px] sm:text-sm shadow-sm"><i class="fas fa-chalkboard-teacher mr-1"></i> ${subject.teacher || '-'}${subject.teacher2 ? ' / ' + subject.teacher2 : ''}</span></p></div></div><div class="relative z-10 flex flex-wrap gap-1.5 sm:gap-3 w-full lg:w-auto mt-2 lg:mt-0">${(isAdmin && currentUser && currentUser.role === 'super_admin') ? (isSummaryLocked ? `<button disabled title="เทอมนี้ถูกล็อคข้อมูลไว้" class="flex-1 sm:flex-none bg-slate-100 text-slate-400 border border-slate-200 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold cursor-not-allowed"><i class="fas fa-lock"></i> ล้าง</button>` : `<button onclick="window.resetSubjectAttendance('${subjectId}')" class="flex-1 sm:flex-none bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors" title="เฉพาะ Super Admin"><i class="fas fa-redo"></i> ล้าง</button>`) : ''}${isSummaryAttendanceLocked ? `<button disabled title="ไม่สามารถเช็คชื่อได้ในขณะนี้" class="flex-1 sm:flex-none bg-slate-100 text-slate-400 border border-slate-200 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold cursor-not-allowed"><i class="fas fa-lock"></i> ล็อคแล้ว</button>` : `<button onclick="window.navigate('attendance', {subjectId: '${subjectId}', fromTeacherDash: ${fromTeacherDash}})" class="flex-1 sm:flex-none bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors"><i class="fas fa-edit"></i> แก้ไข</button>`}<button onclick="window.downloadInfographicPDF('${subjectId}')" class="flex-1 sm:flex-none bg-purple-600 hover:bg-purple-700 text-white border border-purple-700 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors"><i class="fas fa-file-pdf"></i> PDF</button><button onclick="window.exportSubjectExcel('${subjectId}')" class="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors"><i class="fas fa-file-excel"></i> Excel</button><button onclick="${backAction}" class="flex-1 sm:flex-none bg-white border border-slate-200 text-slate-700 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors">กลับ</button></div></div>`;
+            
+            html += `<div class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 overflow-hidden p-3 sm:p-8"><div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 sm:mb-6 gap-2"><h3 class="text-lg sm:text-3xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-table text-indigo-500"></i> บันทึกเวลาเรียน</h3><div class="bg-slate-100 px-3 py-1.5 sm:px-5 sm:py-3 rounded-xl text-slate-600 font-bold border border-slate-200 shadow-inner text-xs sm:text-base w-full sm:w-auto text-center"><i class="fas fa-history text-slate-400"></i> สอนแล้ว: <span class="text-indigo-600 text-base sm:text-2xl font-black">${totalClasses}</span> ครั้ง</div></div><div class="overflow-x-auto rounded-xl border border-slate-200 shadow-sm relative max-h-[600px] w-full"><table class="w-full text-left border-collapse min-w-[500px] sm:min-w-[700px] text-[10px] sm:text-sm"><thead class="sticky top-0 z-30 shadow-sm bg-slate-100"><tr class="bg-slate-100 text-slate-700 border-b-2 border-slate-300 uppercase tracking-wider"><th class="p-2 sm:p-4 font-extrabold w-[40px] sm:w-[60px] min-w-[40px] sm:min-w-[60px] text-center border-r border-slate-300 sticky left-0 bg-slate-100 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">เลขที่</th><th class="p-2 sm:p-4 font-extrabold w-[120px] sm:w-[200px] min-w-[120px] sm:min-w-[200px] border-r border-slate-300 sticky left-[40px] sm:left-[60px] bg-slate-100 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">ชื่อ-นามสกุล</th>`;
+            if (totalClasses === 0) { html += `<th class="p-4 font-bold text-center text-slate-400">ยังไม่มีข้อมูล</th>`;
+            } else { uniqueCols.forEach(col => { const d = new Date(col.date); html += `<th class="p-1 sm:p-2 font-extrabold text-center border-r border-slate-200 min-w-[50px] sm:min-w-[80px] bg-slate-50 relative group" title="${col.date}"><div class="text-[9px] sm:text-sm">${d.getDate()}/${d.getMonth()+1}</div><div class="text-[8px] sm:text-[10px] text-slate-500 bg-slate-200/70 px-1 py-0.5 rounded inline-block mt-0.5 border border-slate-300">ค.${col.period || '-'}</div>${col.subTeacher ? `<i class="fas fa-user-edit text-amber-500 absolute top-1 right-1 text-[8px]" title="สอนแทนโดย: ${col.subTeacher}"></i>` : ''}</th>`; });
+            }
+            html += `<th class="p-2 sm:p-4 font-extrabold text-center bg-emerald-100 text-emerald-900 border-l-2 border-emerald-300 min-w-[60px]">รวมมา</th></tr></thead><tbody class="divide-y divide-slate-100 font-medium">`;
+            let subjectTotals = { 'มา': 0, 'ร่วมกิจกรรม': 0, 'สาย': 0, 'ลาป่วย': 0, 'ลากิจ': 0, 'ขาด': 0, 'โดดเรียน': 0 };
+            roomStudents.forEach((st, idx) => {
+                let validCount = 0; let lateCount = 0; let absentCount = 0;
+                const percent = totalClasses > 0 ? Math.round((validCount/totalClasses)*100) : 0; const scoreColor = percent >= 80 ? 'text-emerald-700 bg-emerald-50' : (percent >= 50 ? 'text-amber-700 bg-amber-50' : 'text-rose-700 bg-rose-50');
+                const isRes = st.status === 'resigned'; const rowBg = isRes ? 'bg-slate-100/60 opacity-80' : (idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'); const bgForSticky = isRes ? 'bg-slate-100' : (idx % 2 === 0 ? 'bg-white' : 'bg-slate-50');
+                
+                html += `<tr class="${rowBg} hover:bg-indigo-50/60 transition-colors"><td class="p-2 sm:p-4 text-center text-slate-600 border-r border-slate-200 font-black sticky left-0 z-10 ${bgForSticky} text-xs sm:text-base shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">${st.number}</td><td class="p-2 sm:p-4 text-slate-800 border-r border-slate-200 font-bold whitespace-nowrap sticky left-[40px] sm:left-[60px] z-10 ${bgForSticky} text-[10px] sm:text-sm shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">${st.name} ${isRes?'<span class="text-[8px] bg-rose-100 text-rose-700 px-1 rounded ml-1 border border-rose-200">ออก</span>':''}</td>`;
+                if (totalClasses === 0) { html += `<td class="p-4 text-center text-slate-300">-</td>`;
+                } else {
+                    uniqueCols.forEach(col => {
+                        const status = col.data[st.id] || '-'; if (status === 'มา' || status === 'ร่วมกิจกรรม') validCount++; if (status === 'สาย') lateCount++; if (status === 'ขาด') absentCount++;
+                        if (!isRes && subjectTotals[status] !== undefined) subjectTotals[status]++;
+                        let dotClass = 'bg-slate-200 text-slate-400'; if(status !== '-') dotClass = statuses[status].bg + ' border-' + statuses[status].activeBg.replace('bg-','') + ' ' + statuses[status].color;
+                        html += `<td class="p-1 sm:p-2 text-center border-r border-slate-100" title="${status}">${status !== '-' ? `<div class="w-5 h-5 sm:w-7 sm:h-7 rounded-full mx-auto border-2 text-[8px] sm:text-[10px] flex items-center justify-center font-black ${dotClass} shadow-sm">${status.substring(0,1)}</div>` : '-'}</td>`;
+                    });
+                }
+                
+                let remarks = [];
+                if (lateCount >= (settings.thresholds?.late||4)) remarks.push(`สาย ${lateCount}`); if (absentCount >= (settings.thresholds?.absent||4)) remarks.push(`ขาด ${absentCount}`);
+                let remarkHtml = remarks.length > 0 ? `<div class="text-[8px] sm:text-[10px] text-rose-600 font-bold mt-1 bg-rose-50 rounded px-1.5 py-0.5 border border-rose-200 inline-block shadow-sm w-max whitespace-nowrap"><i class="fas fa-exclamation-circle"></i> ${remarks.join(', ')} ครั้ง</div>` : '';
+                html += `<td class="p-2 sm:p-4 text-center font-black text-sm sm:text-xl ${scoreColor} border-l-2 border-emerald-200">${validCount} <span class="text-[8px] sm:text-[10px] font-bold text-slate-400">/ ${totalClasses}</span><br>${remarkHtml}</td></tr>`;
+            });
+            let subNotesList = uniqueCols.filter(c => c.subTeacher);
+            let subNotesHtml = '';
+            if (subNotesList.length > 0) {
+                subNotesHtml = `<div class="mt-4 sm:mt-6 bg-amber-50 border border-amber-200 p-3 sm:p-4 rounded-xl shadow-inner"><h4 class="font-bold text-amber-800 text-xs sm:text-sm mb-2 flex items-center gap-2"><i class="fas fa-user-edit"></i> หมายเหตุ: การสอนแทน</h4><ul class="text-[10px] sm:text-xs text-amber-700 list-disc list-inside pl-2 sm:pl-5 space-y-1">`;
+                subNotesList.forEach(c => { subNotesHtml += `<li>วันที่ ${c.date.split('-').reverse().join('/')} คาบ ${c.period} - สอนแทนโดย <strong>${c.subTeacher}</strong></li>`; });
+                subNotesHtml += `</ul></div>`;
+            }
+
+            html += `</tbody></table></div><div class="mt-4 sm:mt-6 flex flex-wrap gap-1.5 sm:gap-3 text-[9px] sm:text-xs font-bold text-slate-600 justify-center bg-slate-50 border border-slate-200 p-2.5 sm:p-4 rounded-xl shadow-inner"><span class="mr-1 sm:mr-2 text-slate-400 flex items-center gap-1"><i class="fas fa-info-circle"></i> สัญลักษณ์:</span>${Object.entries(statuses).map(([name, style]) => `<div class="flex items-center gap-1 bg-white px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md border border-slate-200 shadow-sm"><div class="w-3 h-3 sm:w-5 sm:h-5 rounded-full border-2 border-${style.activeBg.replace('bg-','')} ${style.bg} ${style.color} flex items-center justify-center text-[7px] sm:text-[9px] font-black">${name.substring(0,1)}</div> <span>${name}</span></div>`).join('')}</div>${subNotesHtml}</div>`;
+            const subjectTotalRecorded = Object.values(subjectTotals).reduce((a, b) => a + b, 0);
+            html += `<div id="subjectChartInfographicSection" class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-6 mt-4 sm:mt-6"><div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3"><h3 class="text-sm sm:text-lg font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-chart-pie text-emerald-500"></i> กราฟสรุปสถิติการมาเรียนของวิชานี้</h3>${subjectTotalRecorded > 0 ? `<div class="flex gap-1.5"><button onclick="window.exportSectionInfographicPDF('subjectChartInfographicSection', 'กราฟวิชา_${subject.name}', 'pdf')" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm flex items-center gap-1.5 transition-colors"><i class="fas fa-file-pdf"></i> PDF</button><button onclick="window.exportSectionInfographicPDF('subjectChartInfographicSection', 'กราฟวิชา_${subject.name}', 'image')" class="bg-pink-600 hover:bg-pink-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm flex items-center gap-1.5 transition-colors"><i class="fas fa-file-image"></i> รูปภาพ</button></div>` : ''}</div>${subjectTotalRecorded === 0 ? `<div class="text-center text-slate-400 py-8 text-xs sm:text-sm font-medium"><i class="fas fa-info-circle"></i> ยังไม่มีข้อมูลการเช็คชื่อ</div>` : `<div class="relative h-56 sm:h-72"><canvas id="subjectStatusChart"></canvas></div><div id="subjectStatusChartLegend" class="mt-4"></div>`}</div>`;
+            document.getElementById('mainContent').innerHTML = html;
+            if (subjectTotalRecorded > 0) makeStatusDoughnutChart('subjectStatusChart', subjectTotals);
+        }
+
+        function openStudentSummary(studentId, selectedMonth = null) {
+            const isDarkNow = document.documentElement.classList.contains('dark');
+            const student = students.find(s => s.id === studentId);
+            if (!student) return;
+            const roomKeyForGate4 = roomAttKey_(adminTerm(), adminYear(), student.roomId);
+            if (!(roomKeyForGate4 in window.__loadedRoomLastModified)) {
+                document.getElementById('mainContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 sm:py-32"><i class="fas fa-spinner fa-spin text-4xl text-indigo-500 mb-4"></i><p class="text-slate-500 font-bold text-sm sm:text-base">กำลังโหลดข้อมูลห้อง ${formatRoomName(student.roomId)}...</p></div>`;
+                ensureAttendanceLoadedForRoom(adminTerm(), adminYear(), student.roomId).then(() => openStudentSummary(studentId, selectedMonth));
+                return;
+            }
+            let currentDate = new Date(); if (!selectedMonth) { let month = (currentDate.getMonth() + 1).toString().padStart(2, '0');
+                selectedMonth = `${currentDate.getFullYear()}-${month}`; }
+            const roomName = formatRoomName(student.roomId), roomSubjects = getRoomSubjects(student.roomId);
+            let dailyRaw = {}; attendanceData.forEach(record => { const sub = roomSubjects.find(s => s.id === record.subjectId); if (sub) { const status = record.records[studentId]; if (status) { if (!dailyRaw[record.date]) dailyRaw[record.date] = []; dailyRaw[record.date].push({ period: record.period || 1, status: status }); } } });
+            let dailyRecords = {}; Object.keys(dailyRaw).forEach(date => { dailyRecords[date] = calculateDailyStatus(dailyRaw[date]); });
+            const filteredDates = Object.keys(dailyRecords).filter(d => d.startsWith(selectedMonth)).sort();
+            let monthlyStats = { 'มา':0, 'ร่วมกิจกรรม':0, 'สาย':0, 'ลาป่วย':0, 'ลากิจ':0, 'ขาด':0, 'โดดเรียน':0 };
+            let weeklyStats = {};
+            for(let i=1; i<=5; i++) weeklyStats[i] = { 'มา':0, 'ร่วมกิจกรรม':0, 'สาย':0, 'ลาป่วย':0, 'ลากิจ':0, 'ขาด':0, 'โดดเรียน':0 };
+            filteredDates.forEach(d => { const status = dailyRecords[d].status; if(status && monthlyStats[status] !== undefined) monthlyStats[status]++; const dayNum = parseInt(d.split('-')[2]); let week = Math.ceil(dayNum / 7); if(week > 5) week = 5; if(status && weeklyStats[week][status] !== undefined) weeklyStats[week][status]++; });
+            const monthNames = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+            const displayMonthYear = `${monthNames[parseInt(selectedMonth.split('-')[1])-1]} ${parseInt(selectedMonth.split('-')[0])+543}`;
+            const statusBadge = student.status === 'resigned' ? `<span class="bg-rose-100 text-rose-800 px-2 py-0.5 rounded text-[10px] border border-rose-200 font-black">ออก/ย้าย</span>` : '';
+            const backAction = `window.navigate('classroom', {roomId: '${student.roomId}'})`;
+            window.tempStudentReport = { student: student, room: roomName, month: selectedMonth, monthly: monthlyStats, weekly: weeklyStats, daily: dailyRecords, dates: filteredDates };
+            let html = `<div class="mb-4 sm:mb-8 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-1/3 h-full ${isDarkNow ? '' : 'bg-gradient-to-l from-blue-50 to-transparent opacity-60'}"></div><div class="relative z-10 flex gap-3 sm:gap-4 items-center"><div class="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-white text-2xl sm:text-3xl shadow-lg border-2 sm:border-4 ${isDarkNow ? 'border-[#141e33]' : 'border-white'} shrink-0"><i class="fas fa-user-graduate"></i></div><div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">${student.name}</h2><p class="text-slate-600 font-bold mt-1 flex flex-wrap gap-1.5"><span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-[10px] sm:text-xs">เลขที่ ${student.number}</span><span class="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded text-[10px] sm:text-xs">ห้อง ${roomName}</span>${statusBadge}</p></div></div><div class="relative z-10 flex flex-wrap gap-1.5 w-full lg:w-auto mt-2 lg:mt-0 items-center"><select id="studentPdfType" class="bg-slate-50 border border-slate-200 text-slate-700 px-2 py-1.5 sm:px-3 sm:py-2.5 rounded-xl font-bold text-xs sm:text-sm outline-none shadow-sm h-full"><option value="monthly">PDF สรุปรายเดือน</option><option value="weekly">PDF สรุปรายสัปดาห์</option><option value="daily">PDF บันทึกรายวัน</option></select><button onclick="window.downloadStudentPDF('${student.id}', '${selectedMonth}')" class="flex-1 lg:flex-none bg-purple-600 hover:bg-purple-700 text-white px-2 py-1.5 sm:px-4 sm:py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-1.5 transition-colors h-full"><i class="fas fa-file-pdf"></i> โหลด</button><button onclick="window.exportStudentExcel('${student.id}', '${selectedMonth}')" class="flex-1 lg:flex-none bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1.5 sm:px-4 sm:py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-1.5 transition-colors h-full"><i class="fas fa-file-excel"></i> Excel</button><button onclick="${backAction}" class="w-full sm:w-auto bg-white border border-slate-200 text-slate-700 px-3 py-1.5 sm:px-4 sm:py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-sm transition-colors mt-1 sm:mt-0 h-full">กลับ</button></div></div>`;
+            html += `<div class="bg-slate-800 rounded-2xl sm:rounded-[2rem] shadow-xl p-4 sm:p-6 mb-4 sm:mb-8 flex flex-col sm:flex-row justify-between items-center gap-3 text-white relative overflow-hidden"><div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div><h3 class="text-base sm:text-xl font-extrabold flex items-center gap-2 relative z-10"><i class="far fa-calendar-check text-blue-400"></i> สถิติประจำเดือน: <span class="text-blue-300">${displayMonthYear}</span></h3><input type="month" value="${selectedMonth}" class="w-full sm:w-auto relative z-10 bg-slate-700/50 border border-slate-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-400 font-bold text-sm outline-none" onchange="window.navigate('student_summary', {studentId: '${student.id}', month: this.value})"></div><div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2 sm:gap-4 mb-6 sm:mb-10">${Object.entries(monthlyStats).map(([name, count]) => { const style = statuses[name];
+                return `<div class="bg-white border border-slate-200 rounded-xl sm:rounded-2xl p-3 sm:p-4 text-center flex flex-col items-center justify-center gap-1.5 relative overflow-hidden"><div class="absolute inset-0 bg-gradient-to-t from-${style.bg.replace('bg-','')} to-transparent opacity-50"></div><div class="w-8 h-8 sm:w-10 sm:h-10 ${style.bg} ${style.color} rounded-full flex items-center justify-center text-sm sm:text-lg mb-1 relative z-10 border ${style.border}"><i class="fas ${style.icon}"></i></div><div class="${style.color} text-[10px] sm:text-xs font-extrabold relative z-10">${name}</div><div class="text-2xl sm:text-4xl font-black text-slate-800 relative z-10">${count}</div></div>`;
+            }).join('')}</div><div class="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6"><div class="bg-white rounded-2xl border border-slate-200 overflow-hidden flex flex-col shadow-sm"><div class="p-3 sm:p-5 border-b border-slate-200 bg-slate-50 flex items-center gap-2"><div class="w-8 h-8 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center text-sm"><i class="fas fa-calendar-week"></i></div><h4 class="font-extrabold text-base sm:text-xl text-slate-800">สรุปรายสัปดาห์</h4></div><div class="overflow-x-auto w-full"><table class="w-full text-center text-[10px] sm:text-xs min-w-[400px]"><thead class="bg-white text-slate-500 border-b-2 border-slate-100"><tr><th class="p-2 sm:p-3">สัปดาห์</th><th class="p-2 text-emerald-600">มา</th><th class="p-2 text-cyan-600">กิจกรรม</th><th class="p-2 text-amber-500">สาย</th><th class="p-2 text-blue-500">ป่วย</th><th class="p-2 text-indigo-500">ลากิจ</th><th class="p-2 text-rose-500">ขาด</th><th class="p-2 text-purple-600">โดด</th></tr></thead><tbody class="divide-y divide-slate-100 font-bold">${[1,2,3,4,5].map(w => `<tr><td class="p-2 bg-slate-50/50">สัปดาห์ ${w}</td><td class="p-2 bg-emerald-50/30">${weeklyStats[w]['มา']||'-'}</td><td class="p-2 bg-cyan-50/30">${weeklyStats[w]['ร่วมกิจกรรม']||'-'}</td><td class="p-2 bg-amber-50/30">${weeklyStats[w]['สาย']||'-'}</td><td class="p-2 bg-blue-50/30">${weeklyStats[w]['ลาป่วย']||'-'}</td><td class="p-2 bg-indigo-50/30">${weeklyStats[w]['ลากิจ']||'-'}</td><td class="p-2 bg-rose-50/30">${weeklyStats[w]['ขาด']||'-'}</td><td class="p-2 bg-purple-50/30">${weeklyStats[w]['โดดเรียน']||'-'}</td></tr>`).join('')}</tbody></table></div></div><div class="bg-white rounded-2xl border border-slate-200 overflow-hidden flex flex-col shadow-sm"><div class="p-3 sm:p-5 border-b border-slate-200 bg-slate-50 flex items-center gap-2"><div class="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center text-sm"><i class="fas fa-history"></i></div><h4 class="font-extrabold text-base sm:text-xl text-slate-800">ประวัติรายวัน</h4></div><div class="overflow-y-auto max-h-[300px] p-2 sm:p-4 bg-slate-50/30">${filteredDates.length > 0 ? `<ul class="space-y-1.5 sm:space-y-2">${filteredDates.map(d => { const stat = dailyRecords[d].status; const style = statuses[stat]; return `<li class="p-2.5 sm:p-3 rounded-xl border border-slate-200 bg-white shadow-sm flex justify-between items-center"><div class="flex items-center gap-2"><div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 text-xs"><i class="far fa-calendar-alt"></i></div><span class="font-extrabold text-slate-800 text-xs sm:text-sm">${d.split('-').reverse().join('/')}</span></div><span class="px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg border-2 ${style.border} ${style.bg} ${style.color} text-[9px] sm:text-xs font-extrabold flex items-center gap-1"><i class="fas ${style.icon}"></i> ${stat}</span></li>`; }).join('')}</ul>` : `<div class="p-8 text-center text-slate-400 font-medium text-xs"><i class="fas fa-box-open text-2xl mb-2 opacity-50"></i> ไม่มีข้อมูลในเดือนนี้</div>`}</div></div></div>`;
+            document.getElementById('mainContent').innerHTML = html;
+        }
+
+        window.markFollowUp = async function(studentId, month) {
+            showConfirm("ยืนยันการบันทึก", "ยืนยันว่าครูที่ปรึกษาได้ทำการติดตามนักเรียนคนนี้แล้ว?", async () => {
+                showToast("กำลังบันทึกข้อมูล... (อัปเดตแบบเรียลไทม์)", "info"); await saveData('followup', { studentId, month, timestamp: new Date().toISOString() }); showToast("บันทึกติดตามเรียบร้อยแล้ว", "success"); if (currentRoomId) openRoomSummary(currentRoomId, month, 'monthly');
+            });
+        };
+
+        function openRoomSummary(roomId, selectedMonth = null, tab = 'monthly') {
+            const isDarkNow = document.documentElement.classList.contains('dark');
+            // ===== [ใหม่] เช็คก่อนว่าโหลดข้อมูลเช็คชื่อของห้องนี้มาแล้วหรือยัง ถ้ายัง โหลดก่อนแล้วค่อยวาดหน้าใหม่ =====
+            const roomKeyForGate2 = roomAttKey_(adminTerm(), adminYear(), roomId);
+            if (!(roomKeyForGate2 in window.__loadedRoomLastModified)) {
+                document.getElementById('mainContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 sm:py-32"><i class="fas fa-spinner fa-spin text-4xl text-indigo-500 mb-4"></i><p class="text-slate-500 font-bold text-sm sm:text-base">กำลังโหลดข้อมูลห้อง ${formatRoomName(roomId)}...</p></div>`;
+                ensureAttendanceLoadedForRoom(adminTerm(), adminYear(), roomId).then(() => openRoomSummary(roomId, selectedMonth, tab));
+                return;
+            }
+            let currentDate = new Date();
+            if (!selectedMonth) { let month = (currentDate.getMonth() + 1).toString().padStart(2, '0'); selectedMonth = `${currentDate.getFullYear()}-${month}`;
+            }
+            const roomName = formatRoomName(roomId), roomStudents = getRoomStudents(roomId).sort((a,b) => parseInt(a.number) - parseInt(b.number)), roomSubjects = getRoomSubjects(roomId);
+            const monthNames = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+            const displayMonthYear = `${monthNames[parseInt(selectedMonth.split('-')[1])-1]} ${parseInt(selectedMonth.split('-')[0])+543}`;
+            const backAction = `window.navigate('classroom', {roomId: '${roomId}'})`;
+            let roomTotals = null;
+            let html = `<div class="mb-4 sm:mb-8 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-1/3 h-full ${isDarkNow ? '' : 'bg-gradient-to-l from-emerald-50 to-transparent opacity-60'}"></div><div class="relative z-10 flex gap-3 items-center"><div class="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center text-white text-xl sm:text-3xl shadow-lg shrink-0"><i class="fas fa-chart-bar"></i></div><div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">รายงานห้อง ${roomName}</h2></div></div><div class="relative z-10 flex gap-1.5 sm:gap-2 w-full lg:w-auto mt-2 lg:mt-0">${tab === 'monthly' ? `<button onclick="window.downloadRoomMonthlyRegisterPDF('${roomId}', '${selectedMonth}')" title="สมุดทะเบียนรวมทุกวันในเดือนนี้ (ปก + สรุปทั้งเดือน + ลงนามท้ายเล่ม + บันทึกรายวันเป็นภาคผนวก)" class="flex-1 lg:flex-none px-2 sm:px-3 py-2 rounded-xl font-bold text-[9px] sm:text-sm bg-indigo-700 hover:bg-indigo-800 text-white shadow-md flex items-center justify-center gap-1 sm:gap-1.5"><i class="fas fa-book"></i> <span class="whitespace-nowrap">สมุดทะเบียน</span></button>` : ''}<button onclick="window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'monthly'})" class="flex-1 lg:flex-none px-2 sm:px-3 py-2 rounded-xl font-bold text-[9px] sm:text-sm whitespace-nowrap ${tab === 'monthly' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 border border-slate-200'}">สรุปรายเดือน</button><button onclick="window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'daily'})" class="flex-1 lg:flex-none px-2 sm:px-3 py-2 rounded-xl font-bold text-[9px] sm:text-sm whitespace-nowrap ${tab === 'daily' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 border border-slate-200'}">สรุปรายวัน</button><button onclick="${backAction}" class="flex-1 lg:flex-none px-2 sm:px-3 py-2 rounded-xl font-bold text-[9px] sm:text-sm whitespace-nowrap bg-white border border-slate-200 lg:ml-auto">กลับ</button></div></div>`;
+
+            if (tab === 'monthly') {
+                let roomDailyRaw = {}; roomStudents.forEach(st => roomDailyRaw[st.id] = {});
+                attendanceData.forEach(record => { if (record.date.startsWith(selectedMonth)) { const sub = roomSubjects.find(s => s.id === record.subjectId); if (sub) { roomStudents.forEach(st => { const status = record.records[st.id]; 
+                if (status) { if (!roomDailyRaw[st.id][record.date]) roomDailyRaw[st.id][record.date] = []; roomDailyRaw[st.id][record.date].push({ period: record.period || 1, status: status }); } }); } } });
+
+                // ===== ช่วงข้อมูลขยาย สำหรับเช็ค "3 วันใน 1 สัปดาห์" แบบเลื่อนได้ (ย้อนไปได้ถึงเดือนก่อนหน้า ไม่ติดกับดักเส้นแบ่งเดือน) =====
+                const INCOMPLETE_WINDOW_DAYS = 7;
+                const INCOMPLETE_DAYS_THRESHOLD = (settings.thresholds && settings.thresholds.incompleteDays) || 3;
+                const [selYearNum, selMonthNum] = selectedMonth.split('-').map(Number);
+                const firstDayOfMonth = new Date(selYearNum, selMonthNum - 1, 1);
+                const lastDayOfMonth = new Date(selYearNum, selMonthNum, 0);
+                const extendedStart = new Date(firstDayOfMonth); extendedStart.setDate(extendedStart.getDate() - (INCOMPLETE_WINDOW_DAYS - 1));
+                const extendedStartStr = extendedStart.toISOString().split('T')[0];
+                const lastDayStr = lastDayOfMonth.toISOString().split('T')[0];
+                let roomDailyRawExt = {}; roomStudents.forEach(st => roomDailyRawExt[st.id] = {});
+                attendanceData.forEach(record => { if (record.date >= extendedStartStr && record.date <= lastDayStr) { const sub = roomSubjects.find(s => s.id === record.subjectId); if (sub) { roomStudents.forEach(st => { const status = record.records[st.id];
+                if (status) { if (!roomDailyRawExt[st.id][record.date]) roomDailyRawExt[st.id][record.date] = []; roomDailyRawExt[st.id][record.date].push({ period: record.period || 1, status: status }); } }); } } });
+                // หาวันที่ "เข้าเรียนไม่ครบ" ที่ตกอยู่ใน 1 สัปดาห์เดียวกัน (7 วันเลื่อนได้) ครบตามเกณฑ์ที่ตั้งไว้ - คืนวันที่ที่ "ครบเกณฑ์พอดี" (วันตัดสิน) เฉพาะที่อยู่ในเดือนนี้เท่านั้น
+                function findIncompleteTriggerDates(datesSorted) {
+                    const triggers = [];
+                    for (let i = 0; i < datesSorted.length; i++) {
+                        const endDate = new Date(datesSorted[i] + 'T00:00:00');
+                        const windowStart = new Date(endDate); windowStart.setDate(windowStart.getDate() - (INCOMPLETE_WINDOW_DAYS - 1));
+                        let count = 0;
+                        for (let j = 0; j <= i; j++) { const d = new Date(datesSorted[j] + 'T00:00:00'); if (d >= windowStart && d <= endDate) count++; }
+                        if (count >= INCOMPLETE_DAYS_THRESHOLD) triggers.push(datesSorted[i]);
+                    }
+                    return triggers;
+                }
+
+                let studentSummaries = [];
+                const LATE_MONTHLY_THRESHOLD = (settings.thresholds && settings.thresholds.late) || 4;
+                const ABSENT_MONTHLY_THRESHOLD = (settings.thresholds && settings.thresholds.absent) || 4;
+                roomStudents.forEach(st => {
+                    let sStats = { 'มา':0, 'ร่วมกิจกรรม':0, 'สาย':0, 'ลาป่วย':0, 'ลากิจ':0, 'ขาด':0, 'โดดเรียน':0 }, wStats = { 1:0, 2:0, 3:0, 4:0, 5:0 };
+                    let incompleteDays = []; // วันที่ "มา" แต่เข้าเรียนไม่ครบ (>= เกณฑ์คาบที่ตั้งไว้) เฉพาะในเดือนนี้ - ใช้แสดงผลในตาราง
+                    Object.keys(roomDailyRaw[st.id]).sort().forEach(date => { const dayResult = calculateDailyStatus(roomDailyRaw[st.id][date]); const dayStatus = dayResult.status; if (dayStatus) { sStats[dayStatus]++; if (dayStatus === 'มา' || dayStatus === 'ร่วมกิจกรรม' || dayStatus === 'สาย') { const dayNum = parseInt(date.split('-')[2]); let week = Math.ceil(dayNum / 7); if (week > 5) week = 5; wStats[week]++; } if (dayResult.incomplete) incompleteDays.push({ date, missingCount: dayResult.missingCount }); } });
+                    // เช็คแยกจากข้อมูลขยาย (ย้อนไปถึงเดือนก่อนได้) ว่ามีวันไหนครบเกณฑ์ "3 วันใน 1 สัปดาห์" ไหม โดยนับเฉพาะวันตัดสินที่ตกในเดือนนี้
+                    const extIncompleteDatesSorted = Object.keys(roomDailyRawExt[st.id]).sort().filter(date => calculateDailyStatus(roomDailyRawExt[st.id][date]).incomplete);
+                    const triggerDatesThisMonth = findIncompleteTriggerDates(extIncompleteDatesSorted).filter(d => d.startsWith(selectedMonth));
+                    // ===== เกณฑ์ที่ 2: สาย/ขาด เกินจำนวนวันที่ตั้งไว้ต่อเดือน =====
+                    const lateExceeded = sStats['สาย'] >= LATE_MONTHLY_THRESHOLD;
+                    const absentExceeded = sStats['ขาด'] >= ABSENT_MONTHLY_THRESHOLD;
+                    studentSummaries.push({ student: st, monthly: sStats, weekly: wStats, incompleteDays, triggerDatesThisMonth, lateExceeded, absentExceeded });
+                });
+                window.tempRoomReport = { roomId: roomId, month: selectedMonth, data: studentSummaries };
+                // ===== รวม 2 เกณฑ์: เข้าเรียนไม่ครบ (ตกในสัปดาห์) + สาย/ขาดเกินเกณฑ์ต่อเดือน -> "นักเรียนที่ต้องติดตาม" =====
+                const incompleteAttendanceList = studentSummaries.filter(row => row.triggerDatesThisMonth.length > 0 || row.lateExceeded || row.absentExceeded);
+                window.tempRoomReport.incompleteList = incompleteAttendanceList;
+                roomTotals = { 'มา': 0, 'ร่วมกิจกรรม': 0, 'สาย': 0, 'ลาป่วย': 0, 'ลากิจ': 0, 'ขาด': 0, 'โดดเรียน': 0 };
+                studentSummaries.forEach(row => { Object.keys(roomTotals).forEach(k => roomTotals[k] += (row.monthly[k] || 0)); });
+                const roomTotalRecorded = Object.values(roomTotals).reduce((a, b) => a + b, 0);
+                html += `<div id="roomChartInfographicSection" class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-6 mb-4 sm:mb-6"><div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3"><h3 class="text-sm sm:text-lg font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-chart-pie text-emerald-500"></i> กราฟสรุปสถิติการมาเรียนของห้อง เดือน${displayMonthYear}</h3>${roomTotalRecorded > 0 ? `<div class="flex gap-1.5"><button onclick="window.exportSectionInfographicPDF('roomChartInfographicSection', 'กราฟห้อง_${roomName}_${selectedMonth}', 'pdf')" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm flex items-center gap-1.5 transition-colors"><i class="fas fa-file-pdf"></i> PDF</button><button onclick="window.exportSectionInfographicPDF('roomChartInfographicSection', 'กราฟห้อง_${roomName}_${selectedMonth}', 'image')" class="bg-pink-600 hover:bg-pink-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm flex items-center gap-1.5 transition-colors"><i class="fas fa-file-image"></i> รูปภาพ</button></div>` : ''}</div>${roomTotalRecorded === 0 ? `<div class="text-center text-slate-400 py-8 text-xs sm:text-sm font-medium"><i class="fas fa-info-circle"></i> ยังไม่มีข้อมูลการเช็คชื่อในเดือนนี้</div>` : `<div class="relative h-64 sm:h-72"><canvas id="roomMonthlyChart"></canvas></div><div id="roomMonthlyChartLegend" class="mt-4"></div>`}</div>`;
+                html += `<div class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 overflow-hidden p-3 sm:p-8"><div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-3"><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800 flex items-center gap-2"><i class="far fa-calendar-check text-indigo-500"></i> เดือน ${displayMonthYear}</h3><div class="flex flex-wrap gap-1.5 sm:gap-2 w-full md:w-auto"><input type="month" value="${selectedMonth}" onchange="window.navigate('room_summary', {roomId: '${roomId}', month: this.value, tab: 'monthly'})" class="flex-1 md:flex-none bg-slate-50 border border-slate-200 text-slate-700 px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg text-base sm:text-sm font-bold outline-none"><button onclick="window.downloadRoomInfographicPDF('${roomId}', '${selectedMonth}')" class="flex-1 md:flex-none bg-purple-600 hover:bg-purple-700 text-white px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg text-[10px] sm:text-sm font-bold shadow-sm flex gap-1.5 items-center justify-center transition-colors"><i class="fas fa-file-pdf"></i> PDF</button><button onclick="window.exportRoomMonthlyExcel('${roomId}', '${selectedMonth}')" class="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg text-[10px] sm:text-sm font-bold shadow-sm flex gap-1.5 items-center justify-center transition-colors"><i class="fas fa-file-excel"></i> Excel</button></div></div><div class="overflow-x-auto rounded-xl border border-slate-200 shadow-sm max-h-[600px] w-full"><table class="w-full text-center border-collapse min-w-[700px] sm:min-w-[900px] text-[10px] sm:text-sm"><thead class="sticky top-0 z-30 shadow-sm bg-slate-100 text-slate-700 uppercase"><tr class="border-b border-slate-200"><th class="p-2 font-extrabold sticky left-0 z-20 bg-slate-100 border-r border-slate-300 w-[40px] sm:w-[60px] min-w-[40px] sm:min-w-[60px] text-center shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">เลขที่</th><th class="p-2 font-extrabold sticky left-[40px] sm:left-[60px] z-20 bg-slate-100 border-r border-slate-300 w-[150px] sm:w-[250px] min-w-[150px] sm:min-w-[250px] text-left shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">ชื่อ-นามสกุล / การติดตาม</th><th class="p-2 font-extrabold border-x border-slate-200 bg-slate-50" colspan="5">สัปดาห์ที่ (เข้าเรียน)</th><th class="p-2 font-extrabold bg-blue-50" colspan="7">รวมทั้งเดือน (วัน)</th></tr><tr class="border-b-2 border-slate-300"><th class="p-1 border-r border-slate-300 bg-slate-100 sticky left-0 z-20 top-[33px] sm:top-[41px]"></th><th class="p-1 border-r border-slate-300 bg-slate-100 sticky left-[40px] sm:left-[60px] z-20 top-[33px] sm:top-[41px]"></th><th class="p-1 border-x border-slate-200">1</th><th class="p-1 border-r border-slate-200">2</th><th class="p-1 border-r border-slate-200">3</th><th class="p-1 border-r border-slate-200">4</th><th class="p-1 border-r border-slate-200">5</th><th class="p-1 text-emerald-700">รวมมาเรียน</th><th class="p-1 text-cyan-700">กิจ</th><th class="p-1 text-amber-700">สาย</th><th class="p-1 text-blue-700">ป่วย</th><th class="p-1 text-indigo-700">ลากิจ</th><th class="p-1 text-rose-700">ขาด</th><th class="p-1 text-purple-700">โดด</th></tr></thead><tbody class="divide-y divide-slate-100 font-medium">`;
+                if (studentSummaries.length === 0) { html += `<tr><td colspan="14" class="p-10 text-slate-400">ไม่มีข้อมูล</td></tr>`;
+                } 
+                else {
+                    studentSummaries.forEach((row, idx) => {
+                        const isRes = row.student.status === 'resigned'; const bg = isRes ? 'bg-slate-100/60 opacity-80' : (idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'); const bgForSticky = isRes ? 'bg-slate-100' : (idx % 2 === 0 ? 'bg-white' : 'bg-slate-50');
+                        let valid = row.monthly['มา'] + row.monthly['ร่วมกิจกรรม'] + row.monthly['สาย'];
+                        
+                        let lateCount = row.monthly['สาย'] || 0; let absentCount = row.monthly['ขาด'] || 0;
+                        let lateLimit = settings.thresholds?.late || 4; let absLimit = settings.thresholds?.absent || 4;
+                        let incompleteTriggered = (row.triggerDatesThisMonth || []).length > 0;
+                        let needsFollowUp = (lateCount >= lateLimit) || (absentCount >= absLimit) || incompleteTriggered;
+                        let alertHtml = '';
+            
+                        if (needsFollowUp) {
+                            const isFollowedUp = followUps.find(f => f.studentId === row.student.id && f.month === selectedMonth);
+                            const incompleteNote = incompleteTriggered ? `<div class="mt-1 text-[9px] font-bold text-orange-700 bg-orange-100 border border-orange-200 px-1.5 py-0.5 rounded inline-flex items-center gap-1 shadow-sm w-max"><i class="fas fa-door-open"></i> เข้าเรียนไม่ครบ ${(settings.thresholds && settings.thresholds.incompleteDays) || 3} วัน ภายใน 1 สัปดาห์</div>` : '';
+                            if (isFollowedUp) { alertHtml = `${incompleteNote}<div class="mt-1 text-[9px] font-bold text-emerald-700 bg-emerald-100 border border-emerald-200 px-1.5 py-0.5 rounded inline-flex items-center gap-1 shadow-sm"><i class="fas fa-check-circle"></i> ที่ปรึกษาติดตามแล้ว</div>`;
+                            } 
+                            else {
+                                alertHtml = `${incompleteNote}<div class="mt-1 flex flex-col sm:flex-row items-start sm:items-center gap-1.5"><span class="text-[9px] font-bold text-rose-700 bg-rose-100 border border-rose-200 px-1.5 py-0.5 rounded inline-flex items-center gap-1 shadow-sm"><i class="fas fa-exclamation-triangle"></i> ต้องติดตาม</span>`;
+                                if (isAdmin) { alertHtml += `<button onclick="window.markFollowUp('${row.student.id}', '${selectedMonth}')" class="text-[9px] bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-0.5 rounded shadow-sm transition-colors border border-indigo-700"><i class="fas fa-clipboard-check"></i> บันทึกติดตาม</button>`;
+                                }
+                                alertHtml += `</div>`;
+                            }
+                        }
+
+                        html += `<tr class="${bg} hover:bg-slate-100 transition-colors"><td class="p-1.5 sm:p-2 text-center sticky left-0 z-10 ${bgForSticky} border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] font-black text-slate-500">${row.student.number}</td><td class="p-1.5 sm:p-3 text-left sticky left-[40px] sm:left-[60px] z-10 ${bgForSticky} border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] font-bold text-[9px] sm:text-sm break-words"><div class="flex items-center flex-wrap">${row.student.name} ${isRes?'<span class="text-[8px] bg-rose-100 text-rose-700 px-1 rounded border border-rose-200 ml-1">ออก</span>':''}</div>${alertHtml}</td><td class="p-1.5">${row.weekly[1]||'-'}</td><td class="p-1.5">${row.weekly[2]||'-'}</td><td class="p-1.5">${row.weekly[3]||'-'}</td><td class="p-1.5">${row.weekly[4]||'-'}</td><td class="p-1.5 border-r border-slate-200">${row.weekly[5]||'-'}</td><td class="p-1.5 font-black text-emerald-600 bg-emerald-50/30">${valid||'-'}</td><td class="p-1.5 font-black text-cyan-600">${row.monthly['ร่วมกิจกรรม']||'-'}</td><td class="p-1.5 font-black text-amber-500">${row.monthly['สาย']||'-'}</td><td class="p-1.5 font-black text-blue-500">${row.monthly['ลาป่วย']||'-'}</td><td class="p-1.5 font-black text-indigo-500">${row.monthly['ลากิจ']||'-'}</td><td class="p-1.5 font-black text-rose-500">${row.monthly['ขาด']||'-'}</td><td class="p-1.5 font-black text-purple-600">${row.monthly['โดดเรียน']||'-'}</td></tr>`;
+                    });
+                }
+                html += `</tbody></table></div></div>`;
+
+                // ===== ส่วนแยก: นักเรียนที่ต้องติดตาม (รวม 2 เกณฑ์: เข้าเรียนไม่ครบ + สาย/ขาดเกินเกณฑ์ต่อเดือน) =====
+                if (incompleteAttendanceList.length > 0) {
+                    html += `<div class="mt-4 sm:mt-6 bg-orange-50 border-2 border-orange-200 rounded-2xl p-4 sm:p-6"><h3 class="text-base sm:text-lg font-extrabold text-orange-800 mb-1 flex items-center gap-2"><i class="fas fa-user-clock"></i> นักเรียนที่ต้องติดตาม (${incompleteAttendanceList.length} คน)</h3><p class="text-[10px] sm:text-xs text-orange-600 font-medium mb-4">รวม 2 เกณฑ์: (1) มาโรงเรียนแต่ขาดเรียนตั้งแต่ ${(settings.thresholds && settings.thresholds.incompletePeriods) || 4} คาบขึ้นไปในวันเดียวกัน ซ้ำตั้งแต่ ${(settings.thresholds && settings.thresholds.incompleteDays) || 3} วัน ภายใน 1 สัปดาห์ใดๆ (นับต่อเนื่องข้ามเดือนได้) และ (2) สาย/ขาด เกิน ${LATE_MONTHLY_THRESHOLD}/${ABSENT_MONTHLY_THRESHOLD} วันต่อเดือนตามลำดับ</p><div class="space-y-2">${incompleteAttendanceList.map(row => { const isFollowedUp = followUps.find(f => f.studentId === row.student.id && f.month === selectedMonth); const triggerDatesDisplay = row.triggerDatesThisMonth.map(d => { const parts = d.split('-'); return `${parts[2]}/${parts[1]}`; }).join(', '); const reasonBadges = [ row.triggerDatesThisMonth.length > 0 ? `<span class="bg-orange-100 text-orange-700 border border-orange-200 text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded"><i class="fas fa-door-open"></i> เข้าเรียนไม่ครบ (${triggerDatesDisplay})</span>` : '', row.lateExceeded ? `<span class="bg-amber-100 text-amber-700 border border-amber-200 text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded"><i class="fas fa-clock"></i> สายเกินเกณฑ์ (${row.monthly['สาย']} วัน)</span>` : '', row.absentExceeded ? `<span class="bg-rose-100 text-rose-700 border border-rose-200 text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded"><i class="fas fa-user-times"></i> ขาดเกินเกณฑ์ (${row.monthly['ขาด']} วัน)</span>` : '' ].filter(Boolean).join(' '); return `<div class="bg-white border border-orange-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2"><div class="min-w-0"><span class="font-bold text-slate-800 text-xs sm:text-sm">${row.student.number}. ${row.student.name}</span><div class="flex flex-wrap gap-1 mt-1">${reasonBadges}</div></div>${isFollowedUp ? `<span class="text-[9px] sm:text-[10px] font-bold text-emerald-700 bg-emerald-100 border border-emerald-200 px-2 py-1 rounded-full shrink-0"><i class="fas fa-check-circle"></i> ติดตามแล้ว</span>` : (isAdmin ? `<button onclick="window.markFollowUp('${row.student.id}', '${selectedMonth}')" class="text-[9px] sm:text-[10px] bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1 rounded-full shadow-sm transition-colors font-bold shrink-0"><i class="fas fa-clipboard-check"></i> บันทึกติดตาม</button>` : `<span class="text-[9px] sm:text-[10px] font-bold text-rose-700 bg-rose-100 border border-rose-200 px-2 py-1 rounded-full shrink-0"><i class="fas fa-exclamation-triangle"></i> ต้องติดตาม</span>`)}</div>`; }).join('')}</div></div>`;
+                }
+            } 
+            else if (tab === 'daily') {
+                const todayStr = new Date().toISOString().split('T')[0];
+                const displayDate = window.tempDailyDate || todayStr; const dObj = new Date(displayDate); const dayOfWeek = dObj.getDay();
+                let dayIndexForSched = (dayOfWeek >= 1 && dayOfWeek <= 5) ? dayOfWeek : 1;
+                const monday = new Date(dObj);
+                const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek; monday.setDate(dObj.getDate() + diffToMonday);
+                const subjectsToday = [];
+                roomSubjects.forEach(s => { if (s.schedules) { s.schedules.forEach(sch => { if (parseInt(sch.day) === dayIndexForSched) { subjectsToday.push({ ...s, period: parseInt(sch.period) }); } }); } });
+                subjectsToday.sort((a,b) => a.period - b.period);
+                const dailyAttRecords = attendanceData.filter(a => a.date === displayDate && subjectsToday.some(st => st.id === a.subjectId && String(st.period) === String(a.period)));
+                let dayButtonsHtml = `<div class="flex flex-wrap gap-1 w-full mt-2 sm:mt-0 sm:w-auto justify-center bg-slate-50 p-1.5 rounded-lg border border-slate-200">`;
+                for(let i=1; i<=5; i++) { let iterDate = new Date(monday); iterDate.setDate(monday.getDate() + (i-1)); let iterDateStr = iterDate.toISOString().split('T')[0];
+                    let isActive = iterDateStr === displayDate; let activeCls = isActive ? 'bg-indigo-600 text-white shadow-md' : 'bg-transparent text-slate-600 hover:bg-slate-200';
+                    dayButtonsHtml += `<button onclick="window.tempDailyDate='${iterDateStr}'; window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'daily'})" class="px-2 py-1 sm:px-3 sm:py-1.5 rounded text-[10px] sm:text-sm font-bold transition-colors ${activeCls}">${daysLabel[i-1].replace('วัน','')}</button>`;
+                }
+                dayButtonsHtml += `</div>`;
+                html += `<div class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 p-3 sm:p-8"><div class="flex flex-col mb-4 gap-2"><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800 flex items-center gap-2"><i class="far fa-calendar-day text-indigo-500"></i> เช็คชื่อรวมรายวิชา</h3><div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2"><div class="flex flex-col sm:flex-row gap-2 w-full md:w-auto"><input type="date" value="${displayDate}" onchange="window.tempDailyDate=this.value; window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'daily'})" class="w-full sm:w-auto bg-slate-50 border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-[11px] sm:text-sm font-bold shadow-inner outline-none focus:ring-2 focus:ring-indigo-500">${dayButtonsHtml}</div><div class="flex gap-1.5 w-full md:w-auto mt-2 md:mt-0"><button onclick="window.downloadRoomDailyPDF('${roomId}', '${displayDate}')" class="flex-1 md:flex-none bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm flex gap-1 items-center justify-center transition-colors"><i class="fas fa-file-pdf"></i> PDF</button><button onclick="window.exportRoomDailyExcel('${roomId}', '${displayDate}')" class="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm flex gap-1 items-center justify-center transition-colors"><i class="fas fa-file-excel"></i> Excel</button></div></div></div><div class="overflow-x-auto rounded-xl border border-slate-200 shadow-sm max-h-[600px] w-full"><table class="w-full text-center border-collapse text-[10px] sm:text-sm min-w-[500px] sm:min-w-[800px]"><thead class="bg-slate-100 sticky top-0 z-30 shadow-sm border-b-2 border-slate-200"><tr><th class="p-2 font-extrabold sticky left-0 z-20 bg-slate-100 border-r border-slate-300 w-[40px] sm:w-[60px] min-w-[40px] sm:min-w-[60px] text-center shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">เลขที่</th><th class="p-2 font-extrabold sticky left-[40px] sm:left-[60px] z-20 bg-slate-100 border-r border-slate-300 w-[120px] sm:w-[200px] min-w-[120px] sm:min-w-[200px] text-left shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">ชื่อ-นามสกุล</th>`;
+                if (subjectsToday.length === 0) { html += `<th class="p-2 text-slate-500">ไม่มีวิชาเรียนในวันนี้</th>`;
+                } else { subjectsToday.forEach(sub => { html += `<th class="p-1 sm:p-2 border-r border-slate-200 bg-slate-50 min-w-[60px] sm:min-w-[80px]"><div class="font-extrabold text-indigo-700 break-words line-clamp-2 max-w-[100px] mx-auto leading-tight" title="${sub.name}">${sub.name}</div><div class="text-[8px] sm:text-[10px] text-slate-500 mt-0.5 bg-slate-200/50 rounded inline-block px-1 border border-slate-300">ค.${sub.period}</div></th>`; });
+                }
+                html += `</tr></thead><tbody class="divide-y divide-slate-100">`;
+                if (roomStudents.length > 0) {
+                    roomStudents.forEach((st, idx) => {
+                        const isRes = st.status === 'resigned'; const bg = isRes ? 'bg-slate-100/60 opacity-80' : (idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'); const bgForSticky = isRes ? 'bg-slate-100' : (idx % 2 === 0 ? 'bg-white' : 'bg-slate-50');
+                        html += `<tr class="${bg} hover:bg-slate-100 transition-colors"><td class="p-1.5 sm:p-2 text-center sticky left-0 z-10 ${bgForSticky} border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] font-black text-slate-500">${st.number}</td><td class="p-1.5 sm:p-2 text-left sticky left-[40px] sm:left-[60px] z-10 ${bgForSticky} border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] font-bold text-[9px] sm:text-sm break-words">${st.name} ${isRes?'<span class="text-[8px] bg-rose-100 text-rose-700 px-1 rounded border border-rose-200">ออก</span>':''}</td>`;
+                        if (subjectsToday.length === 0) html += `<td>-</td>`;
+                        else { subjectsToday.forEach(sub => { const attRecord = dailyAttRecords.find(a => a.subjectId === sub.id && String(a.period) === String(sub.period)); let statusStr = '-'; let displayHtml = '<span class="text-slate-300">-</span>'; if (attRecord && attRecord.records[st.id]) { statusStr = attRecord.records[st.id]; const stl = statuses[statusStr]; displayHtml = `<span class="${stl.color} font-bold text-[8px] sm:text-[10px] bg-white border ${stl.border} px-1 py-0.5 rounded shadow-sm whitespace-nowrap">${statusStr}</span>`; } html += `<td class="p-1 sm:p-2 border-r border-slate-100">${displayHtml}</td>`; });
+                        }
+                        html += `</tr>`;
+                    });
+                }
+                html += `</tbody></table></div></div>`;
+            }
+            document.getElementById('mainContent').innerHTML = html;
+            if (roomTotals) { const rSum = Object.values(roomTotals).reduce((a,b)=>a+b,0); if (rSum > 0) makeStatusDoughnutChart('roomMonthlyChart', roomTotals); }
+        }
+
+        window.__adminTermRoomsLoaded = new Set(); // "term_year" ที่เคยโหลดข้อมูลเช็คชื่อทุกห้องมาแล้ว (ใช้เฉพาะ 2 แท็บที่จำเป็นจริงๆ คือ "ติดตามครู" และสถิติในแท็บ "สำรองข้อมูล" - แท็บอื่นไม่ต้องใช้เลย)
+        function renderAdmin() {
+            const isSuperAdmin = currentUser && currentUser.role === 'super_admin';
+            window.__pendingNotifs = computePendingNotifications();
+            const notifCategoryLabels = { incomplete: 'ตารางเรียนไม่ครบ', duplicate: 'วิชาซ้ำกัน', nostudents: 'ยังไม่มีนักเรียน', noadvisor: 'ยังไม่มีครูที่ปรึกษา', nostaff: 'ยังไม่มีเจ้าหน้าที่ประจำห้อง', conflict: 'ตารางสอนชนกัน' };
+            const notifCategoryIcons = { incomplete: 'fa-calendar-day', duplicate: 'fa-clone', nostudents: 'fa-user-slash', noadvisor: 'fa-id-badge', nostaff: 'fa-user-tie', conflict: 'fa-triangle-exclamation' };
+            let notifHtml = '';
+            if (window.__pendingNotifs.length > 0) {
+                const notifExpanded = !!window.__notifBarExpanded;
+                const byCategory = {};
+                window.__pendingNotifs.forEach((n, idx) => { const cat = n.type || 'other'; if (!byCategory[cat]) byCategory[cat] = []; byCategory[cat].push({ ...n, idx }); });
+                const categoryChipsHtml = Object.keys(byCategory).map(cat => `<span class="bg-white border border-amber-200 text-amber-800 text-[10px] sm:text-xs font-bold px-2 py-1 rounded-lg">${notifCategoryLabels[cat] || cat} (${byCategory[cat].length})</span>`).join('');
+                const categoryDetailHtml = Object.keys(byCategory).map(cat => `<div class="mb-2 last:mb-0"><p class="text-[10px] sm:text-xs font-black text-amber-700 mb-1.5 flex items-center gap-1.5"><i class="fas ${notifCategoryIcons[cat] || 'fa-info-circle'}"></i> ${notifCategoryLabels[cat] || cat} (${byCategory[cat].length})</p><div class="flex flex-wrap gap-1.5 pl-1">${byCategory[cat].map(n => `<button onclick="window.goToNotification(${n.idx})" class="bg-white border border-amber-200 hover:bg-amber-100/60 text-slate-700 text-[10px] sm:text-xs font-bold px-2.5 py-1.5 rounded-lg transition-colors">${n.text}</button>`).join('')}</div></div>`).join('');
+                notifHtml = `<div class="mb-4 sm:mb-6 bg-amber-50 border-2 border-amber-300 rounded-2xl p-3 sm:p-5"><button onclick="window.toggleNotifBar()" class="w-full flex items-center justify-between gap-2 text-left"><h3 class="text-xs sm:text-base font-extrabold text-amber-800 flex items-center gap-2"><i class="fas fa-bell"></i> แถบแจ้งเตือนที่รอการแก้ไข (${window.__pendingNotifs.length})</h3><i class="fas fa-chevron-${notifExpanded ? 'up' : 'down'} text-amber-500"></i></button>${notifExpanded ? `<div class="mt-3 pt-3 border-t border-amber-200">${categoryDetailHtml}</div>` : `<div class="flex flex-wrap gap-1.5 mt-2.5">${categoryChipsHtml}</div>`}</div>`;
+            } else {
+                notifHtml = `<div class="mb-4 sm:mb-6 bg-emerald-50 border-2 border-emerald-300 rounded-2xl p-3 sm:p-5 flex items-center gap-2.5"><i class="fas fa-circle-check text-emerald-500 text-lg sm:text-xl"></i><h3 class="text-xs sm:text-base font-extrabold text-emerald-800">ข้อมูลครบพร้อมใช้งาน</h3></div>`;
+            }
+            let html = notifHtml + `<div class="mb-4 sm:mb-8 flex flex-col md:flex-row md:items-center justify-between gap-3"><div><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2"><i class="fas fa-tools text-indigo-500"></i> จัดการระบบ</h2>${currentUser ? `<p class="text-xs sm:text-sm text-slate-500 font-bold mt-1">เข้าสู่ระบบในชื่อ: ${currentUser.name} <span class="ml-1 ${currentUser.role === 'super_admin' ? 'bg-purple-100 text-purple-700 border-purple-200' : 'bg-indigo-100 text-indigo-700 border-indigo-200'} border px-2 py-0.5 rounded-full text-[10px] font-black">${currentUser.role === 'super_admin' ? 'Super Admin' : 'เจ้าหน้าที่'}</span></p>` : ''}</div></div><div class="mb-4 sm:mb-6 bg-indigo-50 border border-indigo-200 rounded-2xl px-3 sm:px-5 py-2.5 sm:py-3 flex flex-col gap-2.5"><div class="flex items-center gap-2 text-indigo-700 font-bold text-xs sm:text-sm"><i class="fas fa-user-edit"></i> คุณกำลังจัดการข้อมูลเทอม ${adminTerm()}/${adminYear()} <span class="text-[9px] sm:text-[11px] font-medium text-indigo-500">(เฉพาะหน้าจอของคุณเอง ไม่กระทบสิ่งที่ผู้ใช้ทั่วไปเห็นที่หน้าแรกซึ่งยังเป็นเทอม ${settings.term}/${settings.year})</span></div><div class="flex flex-wrap items-center gap-2"><div class="flex items-center gap-1.5 bg-white p-1 rounded-lg border border-indigo-200 w-max"><span class="text-[9px] sm:text-[10px] font-black text-indigo-400 pl-1.5 pr-0.5 uppercase">เทอม</span>${Array.from({length: settings.termCount === 3 ? 3 : 2}, (_, i) => i + 1).map(tn => `<button onclick="window.setAdminWorkingTerm('${tn}')" class="${String(adminTerm()) === String(tn) ? 'bg-indigo-600 text-white shadow-sm' : 'text-indigo-600 hover:bg-indigo-50'} px-2.5 sm:px-3 py-1 rounded-md font-bold text-[10px] sm:text-xs transition-all">${tn}</button>`).join('')}</div><div class="flex items-center gap-1.5 bg-white p-1 rounded-lg border border-indigo-200 w-max"><span class="text-[9px] sm:text-[10px] font-black text-indigo-400 pl-1.5 pr-0.5 uppercase">ปี</span>${sortedAcademicYears().map(y => `<button onclick="window.setAdminWorkingYear('${y.year}')" class="${String(adminYear()) === String(y.year) ? 'bg-indigo-600 text-white shadow-sm' : 'text-indigo-600 hover:bg-indigo-50'} px-2.5 sm:px-3 py-1 rounded-md font-bold text-[10px] sm:text-xs transition-all flex items-center gap-1">${y.year}${y.status === 'archived' ? '<i class="fas fa-lock text-[8px]"></i>' : ''}</button>`).join('')}</div></div></div><div class="mb-4 sm:mb-6"><p class="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-wider mb-1.5 pl-1"><i class="fas fa-sliders-h"></i> ตั้งค่าระบบ (ใช้ร่วมกันทุกเทอม/ทุกปี)</p><div class="flex flex-wrap gap-1.5 bg-slate-200/50 p-1.5 rounded-xl w-full shadow-inner"><button onclick="window.navigate('admin', {tab: 'settings'})" class="${currentAdminTab === 'settings' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-cog text-indigo-500"></i> ตั้งค่าทั่วไป</button><button onclick="window.navigate('admin', {tab: 'term_settings'})" class="${currentAdminTab === 'term_settings' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-calendar-alt text-purple-500"></i> ตั้งค่าภาคเรียน</button><button onclick="window.navigate('admin', {tab: 'data_health'})" class="${currentAdminTab === 'data_health' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-hdd text-blue-500"></i> สถานะข้อมูลระบบ</button><button onclick="window.navigate('admin', {tab: 'holidays'})" class="${currentAdminTab === 'holidays' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-calendar-times text-rose-500"></i> วันหยุดและประกาศ</button><button onclick="window.navigate('admin', {tab: 'backup'})" class="${currentAdminTab === 'backup' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-shield-alt text-emerald-500"></i> สำรองข้อมูล</button>${isSuperAdmin ? `<button onclick="window.navigate('admin', {tab: 'users'})" class="${currentAdminTab === 'users' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-user-cog text-amber-500"></i> ผู้ใช้งาน</button>` : ''}<button onclick="window.navigate('admin', {tab: 'logs'})" class="${currentAdminTab === 'logs' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-history text-slate-500"></i> Log</button></div></div><div class="mb-4 sm:mb-8"><p class="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-wider mb-1.5 pl-1"><i class="fas fa-layer-group"></i> ข้อมูลรายเทอม/รายปี (เทอม ${adminTerm()}/${adminYear()})</p><div class="flex flex-wrap gap-1.5 bg-slate-200/50 p-1.5 rounded-xl w-full shadow-inner"><button onclick="window.navigate('admin', {tab: 'data_status'})" class="${currentAdminTab === 'data_status' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-database text-teal-500"></i> ความพร้อมของข้อมูล</button>${isSuperAdmin ? `<button onclick="window.navigate('admin', {tab: 'teacher_log'})" class="${currentAdminTab === 'teacher_log' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-user-clock text-rose-500"></i> ติดตามครู</button>` : ''}<button onclick="window.navigate('admin', {tab: 'teachers'})" class="${currentAdminTab === 'teachers' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-chalkboard-teacher text-orange-500"></i> ครู</button><button onclick="window.navigate('admin', {tab: 'advisors'})" class="${currentAdminTab === 'advisors' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-id-badge text-pink-500"></i> ครูที่ปรึกษา</button><button onclick="window.navigate('admin', {tab: 'subjects'})" class="${currentAdminTab === 'subjects' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-book text-cyan-500"></i> วิชา</button><button onclick="window.navigate('admin', {tab: 'students'})" class="${currentAdminTab === 'students' ? 'bg-white shadow-md text-indigo-700' : 'text-slate-600 hover:bg-white/50'} px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-[10px] sm:text-sm font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0"><i class="fas fa-users text-violet-500"></i> นักเรียน</button></div></div><div id="adminContent" class="bg-white rounded-2xl sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-8 w-full"></div>`;
+            document.getElementById('mainContent').innerHTML = html; renderAdminTab();
+        }
+        // สลับเทอมที่แอดมินกำลังจัดการอยู่ในหน้าแอดมิน - เป็นการตั้งค่าเฉพาะเครื่อง/เซสชันของแอดมินคนนี้เท่านั้น
+        // ไม่บันทึก log และไม่ส่งข้อมูลขึ้นเซิร์ฟเวอร์ จึงไม่กระทบสิ่งที่ผู้ใช้ทั่วไปเห็นที่หน้าแรก และแอดมินแต่ละคนสลับเทอมกันได้อิสระ
+        // ===== [ใหม่] โหลดข้อมูลเช็คชื่อของเทอม/ปีอื่น (นอกเหนือจากเทอม/ปีปัจจุบันที่โหลดมาตอนเปิดเว็บ) แบบ on-demand =====
+        // ใช้ตอนแอดมินสลับไปดู/จัดการเทอม-ปีอื่นที่ไม่ใช่เทอมปัจจุบัน จะได้ไม่ต้องโหลดข้อมูลทุกเทอมทุกปีมาตั้งแต่ต้น (ทำให้เว็บช้า)
+        // ===== [ใหม่] โหลดข้อมูลเช็คชื่อแบบ on-demand ทีละ "ห้อง" (ไม่ใช่ทั้งเทอมเหมือนเดิม) - เบากว่ามาก =====
+        // เช็คก่อนด้วย endpoint เบาๆ (get_attendance_meta) ว่าไฟล์ห้องนี้มีการแก้ไขล่าสุดเมื่อไหร่ ถ้าตรงกับที่มีอยู่แล้วในเครื่อง ข้ามไปเลย ไม่โหลดซ้ำ
+        window.__loadedRoomLastModified = {}; // key: "term_year_roomId" -> timestamp ล่าสุดที่โหลดมา
+        window.__loadedRoomsList = []; // [{term, year, roomId}] - เก็บแยกไว้ต่างหาก (แม่นยำกว่าแกะจาก key string) ใช้ตอน realtime sync เช็คทุกห้องที่เคยโหลด
+        function roomAttKey_(term, year, roomId) { return String(term) + '_' + String(year) + '_' + String(roomId); }
+        async function ensureAttendanceLoadedForRoom(term, year, roomId, forceCheck = false) {
+            const key = roomAttKey_(term, year, roomId);
+            const alreadyLoaded = key in window.__loadedRoomLastModified;
+            if (alreadyLoaded && !forceCheck) return; // เคยโหลดแล้ว และไม่ได้บังคับให้เช็คซ้ำ - ข้ามเลย
+            try {
+                if (alreadyLoaded) {
+                    // เคยโหลดแล้ว แค่เช็คว่ามีการแก้ไขใหม่ไหม (payload เล็กมาก) ก่อนตัดสินใจโหลดเต็ม
+                    const metaRes = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=get_attendance_meta&term=${encodeURIComponent(term)}&year=${encodeURIComponent(year)}&room=${encodeURIComponent(roomId)}`);
+                    const meta = await metaRes.json();
+                    if (meta && meta.status === 'success' && meta.lastModified === window.__loadedRoomLastModified[key]) return; // ไม่มีอะไรเปลี่ยน - ไม่ต้องโหลดเต็ม
+                }
+                const res = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=get_attendance&term=${encodeURIComponent(term)}&year=${encodeURIComponent(year)}&room=${encodeURIComponent(roomId)}`);
+                const data = await res.json();
+                if (data && data.status === 'success' && Array.isArray(data.attendanceData)) {
+                    // ล้างข้อมูลเก่าของห้องนี้ออกก่อน (เผื่อมีการลบ record ไปฝั่งเซิร์ฟเวอร์) แล้วแทนที่ด้วยชุดล่าสุด - ไม่กระทบข้อมูลห้องอื่นที่โหลดไว้อยู่แล้ว
+                    const roomSubjectIds = new Set(subjects.filter(s => s.roomId === roomId).map(s => s.id));
+                    attendanceData = attendanceData.filter(a => !roomSubjectIds.has(a.subjectId));
+                    attendanceData.push(...data.attendanceData);
+                    if (!alreadyLoaded) window.__loadedRoomsList.push({ term, year, roomId });
+                    window.__loadedRoomLastModified[key] = data.lastModified || Date.now();
+                }
+            } catch (e) { /* เน็ตมีปัญหา - ข้อมูลห้องนี้อาจยังไม่ครบ แต่ไม่ทำให้ทั้งระบบล่ม ลองใหม่ได้ */ }
+        }
+        // ใช้เฉพาะ 2 แท็บที่ต้องดูภาพรวม "ทุกห้อง" ของเทอมนั้นจริงๆ (ติดตามครู, สถิติในแท็บสำรองข้อมูล) - โหลดทีละห้องแต่ยิงพร้อมกันได้ (Promise.all) พร้อมรายงานความคืบหน้าจริงผ่าน onProgress
+        async function ensureAttendanceLoadedForAllRoomsInTerm(term, year, onProgress = null) {
+            const roomIds = [...new Set(subjects.filter(s => String(s.term) === String(term) && String(s.year) === String(year)).map(s => s.roomId))];
+            let doneCount = 0;
+            await Promise.all(roomIds.map(r => ensureAttendanceLoadedForRoom(term, year, r).then(() => { doneCount++; if (onProgress) onProgress(doneCount, roomIds.length); })));
+        }
+        // ===== [ใหม่] HTML หลอด Progress แบบใช้ร่วมกันทุกจุดที่ต้องรอโหลดข้อมูลเช็คชื่อ =====
+        function renderLoadingProgressHTML(message, pct, id) {
+            return `<div class="flex flex-col items-center justify-center py-16 sm:py-24 px-4"><i class="fas fa-cloud-download-alt text-3xl sm:text-4xl text-indigo-400 mb-4"></i><p class="text-slate-600 font-bold text-sm sm:text-base mb-3">${message}</p><div class="w-full max-w-xs sm:max-w-sm h-2.5 sm:h-3 bg-slate-200 rounded-full overflow-hidden"><div id="${id}" class="bg-indigo-500 h-full rounded-full transition-all duration-300" style="width: ${pct}%"></div></div><p class="text-[10px] sm:text-xs text-slate-400 font-bold mt-2"><span id="${id}_pct">${Math.round(pct)}</span>%</p></div>`;
+        }
+        window.setAdminWorkingTerm = function(term) {
+            term = String(term);
+            if (term === String(adminTerm())) return;
+            showConfirm("ยืนยันการสลับเทอม", `ต้องการสลับไปจัดการข้อมูลเทอม ${term}/${adminYear()} ใช่หรือไม่? (มีผลเฉพาะหน้าจอของคุณเองเท่านั้น ไม่กระทบสิ่งที่ผู้ใช้ทั่วไปเห็นที่หน้าแรก)`, () => {
+                adminWorkingTerm = term;
+                renderAdmin();
+            });
+        };
+        // สลับปีการศึกษาที่แอดมินกำลังจัดการอยู่ (แยกอิสระจากปีที่แสดงผลจริงที่หน้าแรก) - ใช้เตรียมข้อมูลปีใหม่ล่วงหน้า หรือย้อนกลับไปดู/แก้ไขปีเก่าได้โดยไม่กระทบผู้ใช้ทั่วไป
+        window.setAdminWorkingYear = function(year) {
+            year = String(year);
+            if (year === String(adminYear())) return;
+            showConfirm("ยืนยันการสลับปีการศึกษา", `ต้องการสลับไปจัดการข้อมูลปีการศึกษา ${year} ใช่หรือไม่? (มีผลเฉพาะหน้าจอของคุณเองเท่านั้น ไม่กระทบปีการศึกษาที่ผู้ใช้ทั่วไปเห็นที่หน้าแรกซึ่งยังคงเป็น ${settings.year} ตามเดิม จนกว่าคุณจะไปตั้งค่าที่แท็บ "ตั้งค่าภาคเรียน" อย่างชัดเจน)`, () => {
+                adminWorkingYear = year;
+                adminWorkingTerm = null; // เปลี่ยนปีแล้วรีเซ็ตกลับไปเทอม 1 ของปีนั้นเพื่อไม่ให้สับสน
+                renderAdmin();
+            });
+        };
+        // ตัวกรองเทอม/ปีเฉพาะของแท็บ "สถานะข้อมูล" — ไม่กระทบเทอมที่แอดมินกำลังจัดการอยู่ (แถบสีม่วงด้านบน) และไม่บันทึกลงเซิร์ฟเวอร์
+        window.setDataStatusTerm = function(term) { window.dataStatusTerm = String(term); renderAdminTab(); };
+        window.setDataStatusYear = function(year) { window.dataStatusYear = String(year); renderAdminTab(); };
+        window.setTeacherStatusTerm = function(term) { window.teacherStatusTerm = String(term); renderAdminTab(); };
+        window.setTeacherStatusYear = function(year) { window.teacherStatusYear = String(year); renderAdminTab(); };
+
+        function renderAdminTab() {
+            const content = document.getElementById('adminContent');
+            if (currentAdminTab === 'settings') {
+                const isSuperAdminSettings = currentUser && currentUser.role === 'super_admin';
+                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-server text-indigo-500"></i> สถานะเว็บไซต์</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 flex items-center justify-between gap-3 flex-wrap"><div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full ${settings.serverOnline !== false ? 'bg-emerald-500' : 'bg-rose-500'}"></span><span class="font-bold text-sm sm:text-base ${settings.serverOnline !== false ? 'text-emerald-700' : 'text-rose-600'}">${settings.serverOnline !== false ? 'ออนไลน์ (เปิดใช้งานปกติ)' : 'ปิดปรับปรุง'}</span></div>${isSuperAdminSettings ? `<button onclick="window.toggleServerOnline()" class="${settings.serverOnline !== false ? 'bg-rose-50 border-rose-200 hover:bg-rose-100 text-rose-600' : 'bg-emerald-50 border-emerald-200 hover:bg-emerald-100 text-emerald-700'} border px-3 py-1.5 rounded-lg font-bold text-xs sm:text-sm transition-colors flex items-center gap-1.5"><i class="fas fa-power-off"></i> ${settings.serverOnline !== false ? 'ปิดสถานะออนไลน์' : 'เปิดสถานะออนไลน์'}</button>` : `<span class="text-[10px] sm:text-xs font-bold text-slate-400 flex items-center gap-1"><i class="fas fa-lock"></i> เฉพาะ Super Admin</span>`}</div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-heading text-indigo-500"></i> ชื่อหัวเรื่องระบบ</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100">${!isSuperAdminSettings ? `<div class="flex items-center gap-1.5 text-[10px] sm:text-xs font-bold text-slate-400 mb-2"><i class="fas fa-lock"></i> เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้</div>` : ''}<label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ชื่อระบบ (แสดงที่แถบด้านบน)</label><input type="text" id="setSiteTitle" value="${settings.title || 'ระบบเช็คชื่อนักเรียนอัจฉริยะ'}" ${!isSuperAdminSettings ? 'disabled' : ''} class="w-full ${!isSuperAdminSettings ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white'} border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="เช่น ระบบเช็คชื่อนักเรียนอัจฉริยะ">${isSuperAdminSettings ? `<div class="flex justify-end mt-3"><button onclick="window.saveSiteTitleSettings()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกชื่อระบบ</button></div>` : ''}</div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-icons text-indigo-500"></i> ไอคอนเว็บไซต์ (Favicon)</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 flex items-center gap-4 flex-wrap"><img id="faviconPreview" src="${settings.faviconDataUrl || 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/graduation-cap.svg'}" class="w-14 h-14 rounded-xl border border-slate-200 bg-white object-contain p-1 shadow-sm"><div class="flex-1 min-w-[200px]">${isSuperAdminSettings ? `<input type="file" id="faviconFileInput" accept="image/*" class="hidden" onchange="window.handleFaviconUpload(event)"><button onclick="document.getElementById('faviconFileInput').click()" class="bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors"><i class="fas fa-upload"></i> เลือกรูปไอคอนใหม่</button><p class="text-[10px] sm:text-xs text-slate-400 mt-1.5 font-medium">แนะนำไฟล์ภาพสี่เหลี่ยมจัตุรัส ระบบจะปรับขนาดให้อัตโนมัติ และบันทึกทันทีที่เลือกไฟล์</p>` : `<div class="flex items-center gap-1.5 text-[10px] sm:text-xs font-bold text-slate-400"><i class="fas fa-lock"></i> เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้</div>`}</div></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-image text-indigo-500"></i> โลโก้บนแถบหัวเว็บไซต์</h3><div class="mb-6 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 flex items-center gap-4 flex-wrap"><div id="navLogoPreviewBox" class="w-14 h-14 rounded-xl border border-slate-200 bg-white flex items-center justify-center overflow-hidden shadow-sm">${settings.logoDataUrl ? `<img id="navLogoPreview" src="${settings.logoDataUrl}" class="w-full h-full object-cover">` : `<i class="fas fa-graduation-cap text-indigo-400 text-xl" id="navLogoPreview"></i>`}</div><div class="flex-1 min-w-[200px]">${isSuperAdminSettings ? `<input type="file" id="navLogoFileInput" accept="image/*" class="hidden" onchange="window.handleHeaderLogoUpload(event)"><button onclick="document.getElementById('navLogoFileInput').click()" class="bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors"><i class="fas fa-upload"></i> เลือกรูปโลโก้ใหม่</button>${settings.logoDataUrl ? `<button onclick="window.removeHeaderLogo()" class="ml-2 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-600 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors"><i class="fas fa-times"></i> ลบโลโก้</button>` : ''}<p class="text-[10px] sm:text-xs text-slate-400 mt-1.5 font-medium">แสดงแทนไอคอนหมวกบัณฑิตที่มุมซ้ายบนของเว็บ บันทึกทันทีที่เลือกไฟล์</p>` : `<div class="flex items-center gap-1.5 text-[10px] sm:text-xs font-bold text-slate-400"><i class="fas fa-lock"></i> เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้</div>`}</div></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-cubes text-indigo-500"></i> จำนวนห้อง (ต่อชั้นปี)</h3>${!isSuperAdminSettings ? `<div class="flex items-center gap-1.5 text-[10px] sm:text-xs font-bold text-slate-400 mb-2"><i class="fas fa-lock"></i> เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้</div>` : ''}<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3 mb-3">`;
+                for(let i=1; i<=6; i++) { html += `<div class="bg-slate-50 p-2 sm:p-3 rounded-lg border border-slate-100 text-center"><label class="block font-black text-[10px] sm:text-xs text-slate-700 mb-1 sm:mb-2">ม.${i}</label><input type="number" id="setCountM${i}" value="${settings.roomCounts[`m${i}`]}" min="0" max="15" ${!isSuperAdminSettings ? 'disabled' : ''} class="w-full text-center py-1.5 sm:py-2 rounded border border-slate-200 font-bold ${!isSuperAdminSettings ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'text-indigo-600'} outline-none text-base sm:text-sm"></div>`;
+                }
+                html += `</div>${isSuperAdminSettings ? `<div class="flex justify-end mb-6"><button onclick="window.saveRoomCountsSettings()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกจำนวนห้อง</button></div>` : '<div class="mb-6"></div>'}<h3 class="text-lg sm:text-xl font-extrabold text-rose-600 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-exclamation-triangle"></i> ล้างข้อมูลทั้งระบบ</h3><div class="bg-rose-50 p-4 rounded-xl border border-rose-200 shadow-sm flex flex-col sm:flex-row justify-between items-center gap-4"><div><h4 class="font-bold text-rose-800 text-sm sm:text-base">ล้างข้อมูลการเช็คชื่อทั้งหมด</h4><p class="text-[10px] sm:text-xs text-rose-600 font-medium">ลบประวัติการเช็คชื่อของทุกวิชา ทุกห้อง ทุกวัน (ไม่สามารถกู้คืนได้)</p>${!isSuperAdminSettings ? `<p class="text-[10px] sm:text-xs text-slate-400 font-bold mt-1"><i class="fas fa-lock"></i> เฉพาะ Super Admin เท่านั้นที่ใช้งานส่วนนี้ได้</p>` : ''}</div>${isSuperAdminSettings ? `<button onclick="window.resetAllAttendanceData()" class="w-full sm:w-auto bg-rose-600 hover:bg-rose-700 text-white px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-bold shadow-sm transition-colors text-sm whitespace-nowrap"><i class="fas fa-trash-alt"></i> ล้างข้อมูลทั้งหมด</button>` : `<button disabled title="เฉพาะ Super Admin เท่านั้น" class="w-full sm:w-auto bg-slate-200 text-slate-400 px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-bold text-sm whitespace-nowrap cursor-not-allowed"><i class="fas fa-lock"></i> ล้างข้อมูลทั้งหมด</button>`}</div>`;
+                content.innerHTML = html;
+            } 
+            else if (currentAdminTab === 'term_settings') {
+                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-sliders-h text-indigo-500"></i> ข้อมูลภาคเรียน</h3><div class="mb-4 bg-indigo-50/70 p-3 sm:p-4 rounded-xl border border-indigo-200"><label class="block text-[10px] sm:text-xs font-bold text-indigo-700 mb-1.5"><i class="fas fa-broadcast-tower"></i> เทอมที่บังคับแสดงผลหน้าแรก (สำหรับผู้ใช้ทั่วไปที่ยังไม่ได้ล็อกอิน)</label><p class="text-[9px] sm:text-[11px] text-indigo-500 font-medium mb-3">ผู้ใช้ทั่วไปจะถูกบังคับให้เห็นเฉพาะเทอมนี้เสมอเมื่อเข้าเว็บ และไม่สามารถสลับเองได้ - เลือกแล้วต้องกด "บันทึก" ด้านล่างจึงจะมีผลจริง</p><div class="flex items-center gap-1.5 flex-wrap mb-3">${(() => { const pendingTerm = (window.__pendingPublicTerm !== undefined && window.__pendingPublicTerm !== null) ? String(window.__pendingPublicTerm) : String(settings.term); return Array.from({length: settings.termCount || 2}, (_, i) => i + 1).map(tn => { const isSel = pendingTerm === String(tn); const isSaved = String(settings.term) === String(tn); return `<button onclick="window.selectPendingPublicTerm('${tn}')" class="${isSel ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-indigo-200 text-indigo-600 hover:bg-indigo-100'} px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all flex items-center gap-1.5">${isSel ? '<i class="fas fa-check-circle"></i>' : ''} เทอม ${tn}${isSaved ? ' <span class="text-[8px] sm:text-[9px] font-normal opacity-75">(ปัจจุบัน)</span>' : ''}</button>`; }).join(''); })()}</div><div class="flex justify-end"><button onclick="window.savePublicTermSetting()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกเทอมที่แสดงผลหน้าแรก</button></div></div><div class="mb-3 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100"><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-2">จำนวนเทอมของระบบ (ต่อปีการศึกษา)</label><div class="flex items-center gap-1.5 flex-wrap mb-3">${[1,2,3].map(n => { const pendingN = (window.__pendingTermCount !== undefined && window.__pendingTermCount !== null) ? Number(window.__pendingTermCount) : Number(settings.termCount || 2); const isSel = pendingN === n; const isSaved = Number(settings.termCount || 2) === n; return `<button onclick="window.selectPendingTermCount(${n})" class="${isSel ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'} px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all flex items-center gap-1.5">${isSel ? '<i class="fas fa-check-circle"></i>' : ''} ${n} เทอม${isSaved ? ' <span class="text-[8px] sm:text-[9px] font-normal opacity-75">(ปัจจุบัน)</span>' : ''}</button>`; }).join('')}</div><div class="flex justify-end"><button onclick="window.saveTermCountSetting()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกจำนวนเทอม</button></div></div><div class="mb-3 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100"><div class="flex items-center justify-between mb-2"><label class="block text-[10px] sm:text-xs font-bold text-slate-700">ปีการศึกษา</label><button onclick="window.openAddYearPrompt()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-plus"></i> เพิ่มปี</button></div><p class="text-[9px] sm:text-[11px] text-slate-400 font-medium mb-3">เลือกปีที่ต้องการแสดงผลแล้วกด "บันทึก" ด้านล่างจึงจะมีผลจริง ปีที่ถูกจัดเก็บแล้ว (เก็บถาวร) จะถูกล็อคไว้ ต้องให้ Super Admin ปลดล็อคก่อนจึงจะเลือกใช้งานได้อีกครั้ง</p><div class="space-y-2 mb-3">${sortedAcademicYears().map(y => { const st = y.status === 'archived' ? 'archived' : 'active'; const pendingYear = (window.__pendingYear !== undefined && window.__pendingYear !== null) ? String(window.__pendingYear) : String(settings.year); const isSel = pendingYear === String(y.year); const isSaved = String(settings.year) === String(y.year); const isSuperAdminYr = currentUser && currentUser.role === 'super_admin'; return `<div class="flex items-center justify-between gap-2 bg-white border ${st === 'archived' ? 'border-blue-200' : 'border-slate-200'} rounded-lg px-3 py-2"><button onclick="window.selectPendingYear('${y.year}')" ${st === 'archived' ? 'disabled' : ''} class="flex-1 text-left flex items-center gap-2 ${st === 'archived' ? 'cursor-not-allowed opacity-70' : ''}">${isSel ? '<i class="fas fa-check-circle text-indigo-600"></i>' : (st === 'archived' ? '<i class="fas fa-lock text-blue-400"></i>' : '<i class="far fa-circle text-slate-300"></i>')}<span class="font-bold text-sm ${isSel ? 'text-indigo-700' : 'text-slate-600'}">ปีการศึกษา ${y.year}</span>${isSaved ? '<span class="text-[8px] sm:text-[9px] font-normal text-slate-400">(กำลังแสดงผลอยู่)</span>' : ''}${st === 'archived' ? '<span class="bg-blue-50 text-blue-600 border border-blue-200 text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded">ถูกจัดเก็บแล้ว</span>' : '<span class="bg-emerald-50 text-emerald-600 border border-emerald-200 text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded">พร้อมใช้งาน</span>'}${y.hidden ? '<span class="bg-slate-700 text-white text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded ml-1"><i class="fas fa-eye-slash"></i> ซ่อนจากแอดมินทั่วไป</span>' : ''}</button><div class="shrink-0 flex items-center gap-1.5">${st === 'archived' ? (isSuperAdminYr ? `<button onclick="window.unlockAcademicYear('${y.year}')" title="ปลดล็อคปีนี้ (เฉพาะ Super Admin)" class="bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-colors"><i class="fas fa-lock-open"></i> ปลดล็อค</button>` : '') : `<button onclick="window.archiveAcademicYear('${y.year}')" title="จัดเก็บปีนี้ (เก็บถาวร)" class="bg-white hover:bg-rose-50 text-rose-500 border border-rose-200 px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-colors"><i class="fas fa-archive"></i> จัดเก็บ</button>`}${isSuperAdminYr ? `<button onclick="window.toggleYearVisibility('${y.year}')" title="${y.hidden ? 'แสดงปีนี้ให้แอดมินทั่วไปเห็นอีกครั้ง' : 'ซ่อนปีนี้จากแอดมินทั่วไป (เฉพาะ Super Admin เห็น)'}" class="${y.hidden ? 'bg-amber-50 hover:bg-amber-100 text-amber-600 border-amber-200' : 'bg-white hover:bg-slate-50 text-slate-400 border-slate-200'} border px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-colors"><i class="fas ${y.hidden ? 'fa-eye-slash' : 'fa-eye'}"></i></button>` : ''}<button onclick="window.deleteAcademicYear('${y.year}')" title="ลบปีการศึกษานี้ (เผื่อสร้างผิดพลาด)" class="bg-white hover:bg-rose-50 text-rose-400 border border-slate-200 hover:border-rose-200 px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-colors"><i class="fas fa-trash-alt"></i></button></div></div>`; }).join('')}</div><div class="flex justify-end"><button onclick="window.saveYearSetting()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5 shrink-0"><i class="fas fa-save"></i> บันทึกปีการศึกษาที่แสดงผล</button></div></div><h3 class="text-base sm:text-lg font-extrabold text-slate-800 mb-1.5 flex items-center gap-2"><i class="fas fa-toggle-on text-indigo-500"></i> สถานะการใช้งานแต่ละเทอม</h3><p class="text-[9px] sm:text-[11px] text-slate-400 font-medium mb-3">เลือกสถานะแล้วต้องกด "บันทึก" ของเทอมนั้นๆ จึงจะมีผลจริง</p>${Array.from({length: settings.termCount || 2}, (_, i) => i + 1).map(tn => { const pendingMap = window.__pendingTermStatusByTerm || {}; const pendingStatus = pendingMap[tn] || getTermStatus(tn, settings.year); const isPublicNow = Number(settings.term) === tn; const opts = [
+    { key: 'open', label: 'เปิดใช้งาน', desc: 'ลงข้อมูล/เช็คชื่อได้ปกติ', icon: 'fa-wifi', activeCls: 'bg-emerald-600 text-white border-emerald-600', idleCls: 'bg-white border-slate-200 text-emerald-600 hover:bg-emerald-50' },
+    { key: 'maintenance', label: 'ปิดปรับปรุงชั่วคราว', desc: 'ดูข้อมูลได้ปกติ แต่เช็คชื่อไม่ได้ชั่วคราว', icon: 'fa-tools', activeCls: 'bg-amber-500 text-white border-amber-500', idleCls: 'bg-white border-slate-200 text-amber-600 hover:bg-amber-50' },
+    { key: 'not_opened', label: 'ยังไม่เปิดใช้งาน', desc: 'ผู้ใช้ทั่วไปสลับมาเทอมนี้ไม่ได้', icon: 'fa-power-off', activeCls: 'bg-slate-500 text-white border-slate-500', idleCls: 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100' },
+    { key: 'locked', label: 'ล็อคข้อมูล', desc: 'ปิดใช้งานแล้ว แต่ดูข้อมูลย้อนหลังได้', icon: 'fa-box-archive', activeCls: 'bg-blue-600 text-white border-blue-600', idleCls: 'bg-white border-slate-200 text-blue-600 hover:bg-blue-50' }
+]; return `<div class="mb-4 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100"><h4 class="text-sm sm:text-base font-extrabold text-slate-700 mb-2 flex items-center gap-2">เทอม ${tn}/${settings.year}${isPublicNow ? ' <span class="bg-indigo-100 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black"><i class="fas fa-broadcast-tower"></i> กำลังแสดงผลหน้าแรก</span>' : ''}</h4><div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">${opts.map(opt => `<button onclick="window.selectPendingTermStatusFor(${tn}, '${opt.key}')" class="${pendingStatus === opt.key ? opt.activeCls : opt.idleCls} border-2 rounded-xl px-3 py-2.5 sm:py-3 font-bold text-xs sm:text-sm transition-all flex flex-col items-center gap-1 text-center"><i class="fas ${opt.icon} text-base sm:text-lg"></i><span>${opt.label}</span><span class="text-[9px] sm:text-[10px] font-medium opacity-80">${opt.desc}</span></button>`).join('')}</div><div class="flex justify-end"><button onclick="window.saveTermStatusSettingFor(${tn})" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกสถานะเทอม ${tn}</button></div></div>`; }).join('')}<div class="space-y-1.5 text-[10px] sm:text-[11px] text-slate-500 font-medium bg-white/70 rounded-lg p-3 border border-slate-200 mb-3"><p><span class="font-bold text-emerald-600"><i class="fas fa-wifi"></i> เปิดใช้งาน:</span> ผู้ใช้ทั่วไปสลับมาดู/ใช้งานเทอมนี้ได้ตามปกติที่หน้าแรก ครูเช็คชื่อได้ และแอดมินลงข้อมูลวิชาได้ตามปกติ</p><p><span class="font-bold text-amber-600"><i class="fas fa-tools"></i> ปิดปรับปรุงชั่วคราว:</span> ทุกคนยังเข้าดูข้อมูล/รายงานของเทอมนี้ได้ตามปกติ แอดมินยังแก้ไขวิชา/นักเรียนได้ตามปกติ แต่ครูจะเช็คชื่อไม่ได้ชั่วคราวจนกว่าจะเปลี่ยนกลับเป็น "เปิดใช้งาน" เหมาะสำหรับตอนต้องหยุดรับข้อมูลชั่วคราว เช่น กำลังตรวจสอบ/แก้ไขข้อมูลครั้งใหญ่</p><p><span class="font-bold text-slate-600"><i class="fas fa-power-off"></i> ยังไม่เปิดใช้งาน:</span> ปุ่มเลือกเทอมนี้ที่หน้าแรกจะถูกล็อคไว้สำหรับผู้ใช้ทั่วไป มีเพียงแอดมินเท่านั้นที่เข้าถึงและจัดเตรียมรายวิชาล่วงหน้าได้ แต่ครูยังเช็คชื่อไม่ได้จนกว่าจะเปลี่ยนเป็น "เปิดใช้งาน"</p><p><span class="font-bold text-blue-600"><i class="fas fa-box-archive"></i> ล็อคข้อมูล:</span> ใช้เมื่อจบเทอมแล้ว ทุกคนยังดูรายงาน/ประวัติย้อนหลังของเทอมนี้ได้ตามปกติ แต่ไม่สามารถเพิ่ม/แก้ไขวิชาหรือเช็คชื่อเพิ่มเติมได้อีก</p></div>`;
+                content.innerHTML = html;
+            }
+            else if (currentAdminTab === 'advisors') {
+                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-1.5 flex items-center gap-2"><i class="fas fa-id-badge text-indigo-500"></i> ครูที่ปรึกษา และ เจ้าหน้าที่ <span class="text-[10px] sm:text-xs font-bold text-slate-400">(เทอม ${adminTerm()}/${adminYear()})</span></h3><p class="text-[9px] sm:text-[11px] text-slate-400 font-medium mb-3">ข้อมูลนี้แยกเก็บตามเทอม กำหนดครูที่ปรึกษา/เจ้าหน้าที่ต่างกันในแต่ละเทอมได้ (สลับเทอมที่ต้องการแก้ไขได้จากแถบสีม่วงด้านบนสุดของหน้านี้) หากเทอม/ปีนี้ยังไม่เคยตั้งค่าไว้ ระบบจะคัดลอกข้อมูลล่าสุดจากเทอม/ปีที่ใกล้เคียงที่สุดมาให้ก่อนโดยอัตโนมัติ (มีป้ายกำกับ "คัดลอกมา") กรุณาตรวจสอบแล้วกดบันทึกเพื่อยืนยันสำหรับเทอมนี้</p><div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-8">`;
+                let tcOptions = teachers && teachers.length > 0 ? teachers.slice().sort((a,b) => a.name.localeCompare(b.name)).map(t => `<option value="${t.name}">`).join('') : '';
+                const teacherDatalistHtml = `<datalist id="teacherNamesDatalist">${tcOptions}</datalist>`;
+
+                getRoomList().forEach(roomId => { 
+                    const advs = getRoomAdvisors(roomId, adminTerm(), adminYear()); const adv1 = advs[0] || ""; const adv2 = advs[1] || "";
+                    const staff = getRoomStaff(roomId, adminTerm(), adminYear());
+                    const isCopied = (adv1 || adv2 || staff) && isPersonnelDataCopied(roomId, adminTerm(), adminYear());
+                    const hasAdvisorAssigned = !!(adv1 || adv2);
+                    const hasStaffAssigned = !!staff;
+                    const isIncomplete = !hasAdvisorAssigned || !hasStaffAssigned;
+
+                    html += `<div class="bg-slate-50 p-2.5 rounded-lg border-2 ${isIncomplete ? 'border-rose-400' : (isCopied ? 'border-amber-300' : 'border-slate-100')} flex flex-col gap-1.5 shadow-sm"><div class="font-black text-indigo-800 text-[10px] sm:text-sm mb-1 flex items-center justify-between flex-wrap gap-1"><span><i class="fas fa-users"></i> ห้อง ${formatRoomName(roomId)}</span><span class="flex gap-1">${isIncomplete ? `<span class="bg-rose-100 text-rose-700 border border-rose-300 text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded" title="ยังไม่มีครูที่ปรึกษาและ/หรือเจ้าหน้าที่ประจำห้อง"><i class="fas fa-exclamation-triangle"></i> ข้อมูลยังไม่ครบ</span>` : ''}${isCopied ? '<span class="bg-amber-100 text-amber-700 border border-amber-300 text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded" title="คัดลอกจากเทอม/ปีอื่น ยังไม่ได้บันทึกสำหรับเทอมนี้"><i class="fas fa-copy"></i> คัดลอกมา</span>' : ''}</span></div><input type="text" list="teacherNamesDatalist" id="adv1_${roomId}" value="${(adv1||'').replace(/"/g,'&quot;')}" placeholder="พิมพ์ชื่อครูที่ปรึกษาคนที่ 1..." class="w-full bg-white border border-slate-200 rounded px-2 py-1.5 text-base sm:text-sm font-bold focus:ring-1 focus:ring-indigo-500 outline-none text-slate-600"><input type="text" list="teacherNamesDatalist" id="adv2_${roomId}" value="${(adv2||'').replace(/"/g,'&quot;')}" placeholder="พิมพ์ชื่อครูที่ปรึกษาคนที่ 2..." class="w-full bg-white border border-slate-200 rounded px-2 py-1.5 text-base sm:text-sm font-bold focus:ring-1 focus:ring-indigo-500 outline-none text-slate-600"><input type="text" list="teacherNamesDatalist" id="staff_${roomId}" value="${(staff||'').replace(/"/g,'&quot;')}" placeholder="พิมพ์ชื่อเจ้าหน้าที่ประจำห้อง..." class="w-full bg-white border border-slate-200 rounded px-2 py-1.5 text-base sm:text-sm font-bold focus:ring-1 focus:ring-indigo-500 outline-none text-slate-600"></div>`;
+                });
+                html += teacherDatalistHtml;
+                html += `</div><div class="flex justify-end mb-8"><button onclick="window.saveAdvisors()" class="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-bold shadow-sm transition-colors text-sm"><i class="fas fa-save"></i> บันทึกบุคลากรประจำห้อง</button></div>`;
+                content.innerHTML = html;
+            }
+            else if (currentAdminTab === 'data_health') {
+                const isSuperAdminDS = currentUser && currentUser.role === 'super_admin';
+                const fmtSize = (b) => b < 1024 ? `${b} B` : (b < 1024*1024 ? `${(b/1024).toFixed(1)} KB` : `${(b/1024/1024).toFixed(2)} MB`);
+                const limitChars = settings.storageLimitChars || 8000000;
+
+                // ===== [ใหม่] ดึงขนาดไฟล์จริงจาก Drive (ไฟล์หลัก + ไฟล์เช็คชื่อรายเทอม/ปีทุกไฟล์) แทนการคำนวณจากข้อมูลในเครื่องซึ่งตอนนี้มีแค่เทอมปัจจุบัน =====
+                if (!window.__storageInfo && !window.__storageInfoLoading) {
+                    window.__storageInfoLoading = true;
+                    fetch(`${GOOGLE_APP_SCRIPT_URL}?action=get_storage_info`).then(r => r.json()).then(info => {
+                        window.__storageInfo = info; window.__storageInfoLoading = false;
+                        if (currentAdminTab === 'data_health') renderAdminTab();
+                    }).catch(() => { window.__storageInfoLoading = false; });
+                }
+
+                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-hdd text-indigo-500"></i> ขนาดข้อมูลที่ใช้ไป</h3><p class="text-[10px] sm:text-xs text-slate-500 font-medium mb-4">ข้อมูลตอนนี้แยกเก็บเป็นหลายไฟล์บน Drive (ไฟล์หลัก + ไฟล์เช็คชื่อแยกรายเทอม/ปี) แต่ละไฟล์มีขีดจำกัดขนาดของตัวเองแยกกัน ไม่รวมกันเหมือนเดิม</p>`;
+
+                if (!window.__storageInfo) {
+                    html += `<div class="flex items-center justify-center py-10 text-slate-400 gap-2"><i class="fas fa-spinner fa-spin"></i> กำลังดึงขนาดไฟล์จริงจากเซิร์ฟเวอร์...</div>`;
+                } else {
+                    const info = window.__storageInfo;
+                    const renderFileBar = (label, icon, color, bytes) => {
+                        const usagePct = Math.min(100, Math.round((bytes / limitChars) * 100));
+                        const barColor = usagePct >= 100 ? 'bg-rose-600' : (usagePct >= 90 ? 'bg-rose-500' : (usagePct >= 70 ? 'bg-amber-500' : 'bg-emerald-500'));
+                        return `<div class="bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 mb-2"><div class="flex justify-between items-center mb-1.5"><span class="text-xs sm:text-sm font-bold text-slate-700 flex items-center gap-1.5"><i class="fas ${icon} ${color.replace('bg-','text-')}"></i> ${label}</span><span class="text-xs sm:text-sm font-black ${usagePct >= 90 ? 'text-rose-500' : (usagePct >= 70 ? 'text-amber-500' : 'text-emerald-600')}">${fmtSize(bytes)} (${usagePct}%)</span></div><div class="w-full h-2.5 sm:h-3 bg-slate-200 rounded-full overflow-hidden"><div class="${barColor} h-full rounded-full transition-all duration-700" style="width: ${usagePct}%"></div></div></div>`;
+                    };
+
+                    html += `<h4 class="text-xs sm:text-sm font-black text-slate-500 uppercase tracking-wider mb-2 mt-4"><i class="fas fa-file-alt"></i> ไฟล์หลัก (ตั้งค่า/ครู/วิชา/นักเรียน)</h4>`;
+                    html += info.mainFile ? renderFileBar('SchoolAttendanceDB.json', 'fa-database', 'bg-indigo-400', info.mainFile.sizeBytes) : `<p class="text-xs text-slate-400 mb-4">ยังไม่พบไฟล์หลัก</p>`;
+                    if (info.mainFile) {
+                        html += info.mainFileHasLeftoverAttendance
+                            ? `<div class="flex flex-wrap items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 -mt-1 mb-3"><span class="text-[10px] sm:text-xs font-bold text-amber-700"><i class="fas fa-exclamation-triangle"></i> พบข้อมูลเช็คชื่อค้างอยู่ในไฟล์หลัก (ระบบจะล้างให้อัตโนมัติเมื่อมีการใช้งานครั้งถัดไป)</span>${isSuperAdminDS ? `<button onclick="window.forceCleanMainFile()" class="bg-amber-600 hover:bg-amber-700 text-white px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold shrink-0"><i class="fas fa-broom"></i> ล้างทันที</button>` : ''}</div>`
+                            : `<div class="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 -mt-1 mb-3"><span class="text-[10px] sm:text-xs font-bold text-emerald-700"><i class="fas fa-check-circle"></i> ไฟล์หลักสะอาด ไม่มีข้อมูลเช็คชื่อตกค้าง</span></div>`;
+                    }
+
+                    html += `<h4 class="text-xs sm:text-sm font-black text-slate-500 uppercase tracking-wider mb-2 mt-4"><i class="fas fa-history"></i> ไฟล์ประวัติการแก้ไข (แยกต่างหาก)</h4>`;
+                    html += info.logsFile ? renderFileBar('ActivityLogs.json', 'fa-history', 'bg-slate-400', info.logsFile.sizeBytes) : `<p class="text-xs text-slate-400 mb-4">ยังไม่มีไฟล์ log (จะสร้างอัตโนมัติเมื่อมีการใช้งานครั้งแรก)</p>`;
+
+                    const currentTermYearKey = String(adminTerm()) + '/' + String(adminYear());
+                    // แอดมินทั่วไปเห็นแค่เทอม/ปีที่กำลังดูอยู่ (เบากว่า ไม่ต้องแสดงทุกเทอม) - Super Admin เห็นครบทุกเทอม/ปี พร้อมย่อ/ขยายได้
+                    const visibleAttFiles = isSuperAdminDS ? info.attendanceFiles : info.attendanceFiles.filter(f => (f.term + '/' + f.year) === currentTermYearKey);
+                    html += `<h4 class="text-xs sm:text-sm font-black text-slate-500 uppercase tracking-wider mb-2 mt-5"><i class="fas fa-calendar-check"></i> ไฟล์เช็คชื่อแยกรายห้อง (${visibleAttFiles.length} ไฟล์${isSuperAdminDS ? '' : ` - เทอม ${currentTermYearKey}`})</h4>`;
+                    if (visibleAttFiles.length === 0) {
+                        html += `<p class="text-xs text-slate-400 mb-2">ยังไม่มีไฟล์เช็คชื่อ${isSuperAdminDS ? '' : 'ของเทอมนี้'}</p>`;
+                    } else {
+                        // จัดกลุ่มตามเทอม/ปีก่อน แล้วเรียงห้องภายในแต่ละกลุ่ม อ่านง่ายกว่าเรียงมั่ว
+                        const grouped = {};
+                        visibleAttFiles.forEach(f => {
+                            const key = f.term + '/' + f.year;
+                            if (!grouped[key]) grouped[key] = [];
+                            grouped[key].push(f);
+                        });
+                        if (!window.__storageGroupExpanded) window.__storageGroupExpanded = {};
+                        Object.keys(grouped).sort().reverse().forEach(key => {
+                            const isCurrentTerm = key === currentTermYearKey;
+                            const groupBytes = grouped[key].reduce((sum, f) => sum + f.sizeBytes, 0);
+                            const roomFilesHtml = grouped[key].sort((a, b) => (a.room || '').localeCompare(b.room || '')).map(f => {
+                                const label = f.legacyPendingMigration ? `⏳ ไฟล์รวมทุกห้อง (รอแยกเป็นรายห้องอัตโนมัติ)` : `ห้อง ${formatRoomName(f.room)}`;
+                                return renderFileBar(label, 'fa-calendar-check', 'bg-emerald-400', f.sizeBytes);
+                            }).join('');
+                            if (isSuperAdminDS) {
+                                // Super Admin: หัวข้อกดย่อ/ขยายได้ ค่าเริ่มต้นเปิดเฉพาะเทอมที่กำลังดูอยู่
+                                const expanded = key in window.__storageGroupExpanded ? window.__storageGroupExpanded[key] : isCurrentTerm;
+                                html += `<button onclick="window.__storageGroupExpanded['${key}'] = ${!expanded}; renderAdminTab();" class="w-full flex items-center justify-between gap-2 mt-3 mb-1.5 text-left"><span class="text-[10px] sm:text-xs font-black text-slate-500">เทอม ${key}${isCurrentTerm ? ' <span class="text-indigo-500">(กำลังดูอยู่)</span>' : ''} <span class="text-slate-400 font-medium">(${grouped[key].length} ห้อง, รวม ${fmtSize(groupBytes)})</span></span><i class="fas fa-chevron-${expanded ? 'up' : 'down'} text-slate-400 text-[10px]"></i></button>${expanded ? roomFilesHtml : ''}`;
+                            } else {
+                                html += `<p class="text-[10px] sm:text-xs font-black text-slate-400 mt-3 mb-1.5">เทอม ${key} <span class="text-indigo-500">(กำลังดูอยู่)</span></p>${roomFilesHtml}`;
+                            }
+                        });
+                    }
+
+                    if (isSuperAdminDS) {
+                        html += `<div class="flex flex-wrap items-center justify-between gap-2 bg-teal-50 border border-teal-200 rounded-lg px-3 py-2.5 mt-2 mb-2"><span class="text-[10px] sm:text-xs font-bold text-teal-700"><i class="fas fa-folder-plus"></i> สร้างไฟล์เช็คชื่อล่วงหน้าให้ครบทุกห้องของเทอม ${adminTerm()}/${adminYear()} (ไม่บังคับ - ไฟล์จะถูกสร้างอัตโนมัติอยู่แล้วตอนเช็คชื่อจริงครั้งแรก)</span><button onclick="window.ensureRoomFilesForCurrentTerm()" class="bg-teal-600 hover:bg-teal-700 text-white px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold shrink-0"><i class="fas fa-plus"></i> สร้างไฟล์ล่วงหน้า</button></div>`;
+                    }
+                    html += isSuperAdminDS ? `<div class="flex flex-wrap items-end gap-2 mt-4 pt-4 border-t border-slate-200"><div class="flex-1 min-w-[160px]"><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ตั้งขีดจำกัดพื้นที่ต่อไฟล์ (ตัวอักษร)</label><input type="number" id="setStorageLimit" value="${limitChars}" min="1000" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"></div><button onclick="window.saveStorageLimit()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกขีดจำกัด</button></div><p class="text-[10px] sm:text-xs text-slate-400 font-medium mt-2"><i class="fas fa-info-circle"></i> ขีดจำกัดนี้ใช้ประเมิน % ของแต่ละไฟล์แยกกัน (ไม่ใช่รวมกัน) อ้างอิงขีดจำกัดจริงของ DriveApp.createFile() ที่ประมาณ 10MB ต่อไฟล์ เผื่อระยะปลอดภัยไว้ที่ 8,000,000 ตัวอักษร</p>` : `<p class="text-[10px] sm:text-xs text-slate-400 font-medium mt-3"><i class="fas fa-lock"></i> เฉพาะ Super Admin เท่านั้นที่ตั้งขีดจำกัดพื้นที่จัดเก็บได้</p>`;
+                }
+
+content.innerHTML = html;
+            }
+            else if (currentAdminTab === 'backup') {
+                const isSuperAdminBk = currentUser && currentUser.role === 'super_admin';
+                const backupTermYearKey = String(adminTerm()) + '_' + String(adminYear());
+                if (!window.__adminTermRoomsLoaded.has(backupTermYearKey)) {
+                    content.innerHTML = renderLoadingProgressHTML(`กำลังโหลดข้อมูลเช็คชื่อเทอม ${adminTerm()}/${adminYear()} (สำหรับสถิติ)...`, 5, 'backupLoadBar');
+                    ensureAttendanceLoadedForAllRoomsInTerm(adminTerm(), adminYear(), (done, total) => {
+                        const pct = Math.round((done / total) * 100);
+                        const bar = document.getElementById('backupLoadBar'); if (bar) bar.style.width = pct + '%';
+                        const pctText = document.getElementById('backupLoadBar_pct'); if (pctText) pctText.textContent = pct;
+                    }).then(() => { window.__adminTermRoomsLoaded.add(backupTermYearKey); renderAdminTab(); });
+                    return;
+                }
+                const oldestDate = attendanceData.reduce((min, a) => (a.date && (!min || a.date < min)) ? a.date : min, null);
+                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-1 flex items-center gap-2"><i class="fas fa-shield-alt text-purple-500"></i> สำรองข้อมูล</h3><p class="text-[10px] sm:text-xs text-slate-500 font-medium mb-6">รวมทุกช่องทางการเก็บถาวร/สำรองข้อมูลเช็คชื่อไว้ในที่เดียว ไม่ว่าจะเก็บถาวรแบบไหน ไฟล์จะถูกบันทึกไว้บนเซิร์ฟเวอร์เสมอ และดูย้อนหลังหรือดาวน์โหลดซ้ำได้จากส่วน "ดูข้อมูลเช็คชื่อที่เก็บถาวรแล้ว" ด้านล่างทั้งหมด (ระบบยังมีนโยบายเก็บถาวรข้อมูลที่เก่ากว่า 2 ปีให้อัตโนมัติอยู่แล้วทุกครั้งที่บันทึกข้อมูลด้วย)</p>`;
+
+                // ===== 1. เก็บถาวรข้อมูลเช็คชื่อเก่า (เก็บด่วน/นอกรอบ) =====
+                html += `<div class="mb-6 bg-purple-50/60 p-4 sm:p-6 rounded-2xl border border-purple-200"><h4 class="text-base sm:text-lg font-extrabold text-purple-800 mb-2 flex items-center gap-2"><i class="fas fa-archive text-purple-500"></i> เก็บถาวรข้อมูลเช็คชื่อเก่า (เก็บด่วน/นอกรอบ)</h4><p class="text-[10px] sm:text-xs text-purple-600 font-medium mb-3">ใช้เผื่อต้องการเก็บถาวรข้อมูลเร็วกว่ากำหนด หรือกำหนดวันที่เอง เช่น ก่อนขึ้นเทอมใหม่${oldestDate ? ` (ข้อมูลเก่าสุดที่มีอยู่: ${oldestDate.split('-').reverse().join('/')})` : ''}</p><div class="flex flex-wrap items-end gap-2"><div class="flex-1 min-w-[160px]"><label class="block text-[10px] sm:text-xs font-bold text-purple-700 mb-1">เก็บถาวรข้อมูลที่บันทึกก่อนวันที่</label><input type="date" id="archiveCutoffDate" onchange="window.updateArchivePreview()" class="w-full bg-white border border-purple-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-purple-400 outline-none"></div><button onclick="window.archiveOldAttendance()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-file-download"></i> เก็บถาวร</button></div><p id="archivePreviewText" class="text-[10px] sm:text-xs text-purple-500 font-bold mt-2">เลือกวันที่เพื่อดูจำนวนข้อมูลที่จะถูกเก็บถาวร</p></div>`;
+
+                // ===== 2. จัดเก็บปีการศึกษา (เชื่อมกับทะเบียนปีการศึกษาโดยตรง) =====
+                html += `<div class="mb-6 bg-blue-50/60 p-4 sm:p-6 rounded-2xl border border-blue-200"><h4 class="text-base sm:text-lg font-extrabold text-blue-800 mb-2 flex items-center gap-2"><i class="fas fa-graduation-cap text-blue-500"></i> จัดเก็บข้อมูลรายปีการศึกษา</h4><p class="text-[10px] sm:text-xs text-blue-600 font-medium mb-3">จัดเก็บ (archive) ข้อมูลเช็คชื่อทั้งปีการศึกษาในคราวเดียว เหมาะสำหรับตอนจบปีการศึกษา ปีที่ถูกจัดเก็บแล้วจะถูกล็อค ต้องให้ Super Admin ปลดล็อคก่อนจึงจะนำกลับมาใช้งานได้ (จัดการปีการศึกษาเพิ่มเติม/เพิ่มปีใหม่ได้ที่แท็บ "ตั้งค่าภาคเรียน")</p><div class="space-y-1.5">${sortedAcademicYears().map(y => { const st = y.status === 'archived' ? 'archived' : 'active'; const isCurrentPublic = String(settings.year) === String(y.year);
+                    return `<div class="flex items-center justify-between gap-2 bg-white border ${st === 'archived' ? 'border-blue-200' : 'border-slate-200'} rounded-lg px-3 py-2"><div class="flex items-center gap-2"><span class="font-bold text-sm text-slate-700">ปีการศึกษา ${y.year}</span>${isCurrentPublic ? '<span class="text-[8px] sm:text-[9px] font-normal text-slate-400">(กำลังแสดงผลอยู่)</span>' : ''}${st === 'archived' ? '<span class="bg-blue-50 text-blue-600 border border-blue-200 text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded">ถูกจัดเก็บแล้ว</span>' : '<span class="bg-emerald-50 text-emerald-600 border border-emerald-200 text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded">พร้อมใช้งาน</span>'}</div>${st === 'archived' ? (isSuperAdminBk ? `<button onclick="window.unlockAcademicYear('${y.year}')" class="bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-colors"><i class="fas fa-lock-open"></i> ปลดล็อค</button>` : '<span class="text-[9px] sm:text-[10px] text-slate-400 font-bold"><i class="fas fa-lock"></i> เฉพาะ Super Admin</span>') : `<button onclick="window.archiveAcademicYear('${y.year}')" class="bg-white hover:bg-blue-50 text-blue-500 border border-blue-200 px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-colors"><i class="fas fa-archive"></i> จัดเก็บปีนี้</button>`}</div>`; }).join('')}</div></div>`;
+
+                // ===== 3. ดูข้อมูลเช็คชื่อที่เก็บถาวรแล้ว (รวมทุกแหล่งที่มาไว้ในที่เดียว) =====
+                html += `<div class="mb-6 bg-slate-50 p-4 sm:p-6 rounded-2xl border border-slate-200"><div class="flex flex-wrap items-center justify-between gap-2 mb-2"><h4 class="text-base sm:text-lg font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-box-open text-slate-500"></i> ดูข้อมูลเช็คชื่อที่เก็บถาวรแล้ว</h4><button onclick="window.loadArchiveList()" class="bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-sync-alt"></i> โหลดรายชื่อไฟล์</button></div><p class="text-[10px] sm:text-xs text-slate-500 font-medium mb-3">รวมไฟล์ที่เก็บถาวรไว้ทั้งหมด ไม่ว่าจะมาจากนโยบายอัตโนมัติทุก 2 ปี, เก็บด่วนนอกรอบ, หรือจัดเก็บรายปีการศึกษาด้านบน กดปุ่ม "โหลดรายชื่อไฟล์" เพื่อเริ่มดู แล้วเลือกไฟล์ที่ต้องการดาวน์โหลดเป็น Excel เพื่อดูรายละเอียด</p><div id="archiveListContainer" class="space-y-0"><div class="text-center text-slate-400 py-4 text-xs sm:text-sm font-medium">กดปุ่ม "โหลดรายชื่อไฟล์" ด้านบนเพื่อเริ่มต้น</div></div></div>`;
+
+                // ===== 4. กู้คืนฐานข้อมูลจาก Snapshot (สำรองอัตโนมัติรายสัปดาห์) - เฉพาะ Super Admin เท่านั้น เพราะเป็นการเขียนทับข้อมูลปัจจุบันทั้งหมด =====
+                if (isSuperAdminBk) {
+                    html += `<div class="mb-6 bg-rose-50/60 p-4 sm:p-6 rounded-2xl border-2 border-rose-300"><div class="flex flex-wrap items-center justify-between gap-2 mb-2"><h4 class="text-base sm:text-lg font-extrabold text-rose-800 flex items-center gap-2"><i class="fas fa-history text-rose-500"></i> กู้คืนฐานข้อมูลจาก Snapshot</h4><button onclick="window.loadSnapshotList()" class="bg-white border border-rose-300 hover:bg-rose-100 text-rose-700 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-sync-alt"></i> โหลดรายชื่อไฟล์สำรอง</button></div><p class="text-[10px] sm:text-xs text-rose-600 font-bold mb-3"><i class="fas fa-exclamation-triangle"></i> ใช้เฉพาะกรณีฉุกเฉินเท่านั้น เช่น ข้อมูลถูกล้าง/เขียนทับผิดพลาด — การกู้คืนจะ<u>เขียนทับข้อมูลปัจจุบันทั้งหมด</u>ด้วยข้อมูล ณ เวลาที่สำรองไว้ (ระบบจะสำรองสถานะปัจจุบันไว้ก่อนกู้คืนให้อัตโนมัติเผื่อกู้คืนผิดไฟล์)</p><div id="snapshotListContainer" class="space-y-1.5"><div class="text-center text-slate-400 py-4 text-xs sm:text-sm font-medium">กดปุ่ม "โหลดรายชื่อไฟล์สำรอง" ด้านบนเพื่อเริ่มต้น</div></div></div>`;
+                }
+
+                content.innerHTML = html;
+            }
+            else if (currentAdminTab === 'teacher_log') {
+                // ===== เฉพาะ Super Admin เท่านั้นที่ดูแท็บนี้ได้ =====
+                const isSuperAdminLog = currentUser && currentUser.role === 'super_admin';
+                if (!isSuperAdminLog) {
+                    content.innerHTML = `<div class="text-center text-slate-400 py-14 text-sm font-medium"><i class="fas fa-lock text-3xl mb-3 block"></i> หน้านี้สำหรับ Super Admin เท่านั้น</div>`;
+                    return;
+                }
+                const logTermYearKey = String(adminTerm()) + '_' + String(adminYear());
+                if (!window.__adminTermRoomsLoaded.has(logTermYearKey)) {
+                    content.innerHTML = renderLoadingProgressHTML(`กำลังโหลดข้อมูลเช็คชื่อเทอม ${adminTerm()}/${adminYear()} ทุกห้อง...`, 5, 'logLoadBar');
+                    ensureAttendanceLoadedForAllRoomsInTerm(adminTerm(), adminYear(), (done, total) => {
+                        const pct = Math.round((done / total) * 100);
+                        const bar = document.getElementById('logLoadBar'); if (bar) bar.style.width = pct + '%';
+                        const pctText = document.getElementById('logLoadBar_pct'); if (pctText) pctText.textContent = pct;
+                    }).then(() => { window.__adminTermRoomsLoaded.add(logTermYearKey); renderAdminTab(); });
+                    return;
+                }
+                // ===== log แจ้งว่าวิชาไหน ครูคนไหน เช็คชื่อไปเมื่อไหร่ (เรียงล่าสุดขึ้นก่อน) =====
+                const trackedSubjectIds = new Set(subjects.filter(s => String(s.term) === String(adminTerm()) && String(s.year) === String(adminYear())).map(s => s.id));
+                const allTeacherNamesInLog = Array.from(new Set(
+                    subjects.filter(s => trackedSubjectIds.has(s.id)).flatMap(s => [s.teacher, s.teacher2]).filter(Boolean)
+                ));
+                // จัดกลุ่มครูตามกลุ่มสาระการเรียนรู้ (department) สำหรับ dropdown - ครูที่ไม่มีข้อมูล department จะถูกจัดไว้ในกลุ่ม "ไม่ระบุกลุ่มสาระ"
+                const teacherDeptGroups = {};
+                allTeacherNamesInLog.forEach(name => {
+                    const t = teachers.find(x => x.name === name);
+                    const dept = (t && t.department) ? t.department : 'ไม่ระบุกลุ่มสาระ';
+                    if (!teacherDeptGroups[dept]) teacherDeptGroups[dept] = [];
+                    teacherDeptGroups[dept].push(name);
+                });
+                Object.keys(teacherDeptGroups).forEach(dept => teacherDeptGroups[dept].sort((a, b) => a.localeCompare(b, 'th')));
+                const sortedDeptNames = Object.keys(teacherDeptGroups).sort((a, b) => a.localeCompare(b, 'th'));
+                if (!window.__teacherLogState) window.__teacherLogState = { mode: 'all', teacherFilter: null, search: '' };
+                const tls = window.__teacherLogState;
+                let events = attendanceData
+                    .filter(a => trackedSubjectIds.has(a.subjectId))
+                    .map(a => {
+                        const sub = subjects.find(s => s.id === a.subjectId);
+                        const teacherNames = sub ? [sub.teacher, sub.teacher2].filter(Boolean).join(' และ ') : '-';
+                        return {
+                            id: a.id,
+                            subjectName: sub ? sub.name : '(ไม่พบวิชานี้แล้ว)',
+                            roomId: sub ? sub.roomId : '',
+                            teacherList: sub ? [sub.teacher, sub.teacher2].filter(Boolean) : [],
+                            teacherNames: a.substituteTeacher ? `${teacherNames} <span class="text-amber-600">(สอนแทนโดย ${a.substituteTeacher})</span>` : teacherNames,
+                            date: a.date, period: a.period,
+                            checkedAt: a.checkedAt || null,
+                            createdAt: a.createdAt || null,
+                            checkedBy: a.checkedBy || ''
+                        };
+                    })
+                    .sort((x, y) => (y.checkedAt || y.date).localeCompare(x.checkedAt || x.date));
+
+                if (tls.mode === 'teacher' && tls.teacherFilter) events = events.filter(ev => ev.teacherList.includes(tls.teacherFilter) || ev.teacherNames.includes(tls.teacherFilter));
+                if (tls.search && tls.search.trim()) {
+                    const q = tls.search.trim().toLowerCase();
+                    events = events.filter(ev => ev.subjectName.toLowerCase().includes(q) || ev.teacherNames.toLowerCase().includes(q) || formatRoomName(ev.roomId).toLowerCase().includes(q));
+                }
+
+                let html = `<div class="flex flex-wrap items-center justify-between gap-2 mb-1"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-user-clock text-rose-500"></i> ติดตามครู</h3><button onclick="window.refreshTeacherLog()" class="bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-sync-alt${window.__teacherLogRefreshing ? ' fa-spin' : ''}"></i> รีเฟรช</button></div><p class="text-[10px] sm:text-xs text-slate-500 font-medium mb-4">รายการแจ้งเตือนว่าวิชาใด ของครูคนใด มีการเช็คชื่อไปแล้วเมื่อใด (เฉพาะเทอม ${adminTerm()}/${adminYear()}) เรียงจากล่าสุดไปเก่าสุด</p>`;
+                html += `<div class="flex flex-wrap items-center gap-2 mb-3"><span class="text-[10px] sm:text-xs font-bold text-slate-500">แสดง:</span><select onchange="if (this.value === '__all__') window.setTeacherLogMode('all', null); else window.setTeacherLogMode('teacher', this.value);" class="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[10px] sm:text-xs font-bold outline-none focus:ring-1 focus:ring-indigo-400"><option value="__all__" ${tls.mode === 'all' ? 'selected' : ''}>ทั้งหมด</option>${sortedDeptNames.map(dept => `<optgroup label="${dept}">${teacherDeptGroups[dept].map(t => `<option value="${t}" ${tls.mode === 'teacher' && tls.teacherFilter === t ? 'selected' : ''}>${t}</option>`).join('')}</optgroup>`).join('')}</select></div>`;
+                html += `<div class="relative mb-4"><i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i><input type="text" value="${(tls.search || '').replace(/"/g, '&quot;')}" oninput="window.setTeacherLogSearch(this.value)" placeholder="ค้นหาชื่อครู / ห้องเรียน / วิชาเรียน..." class="w-full bg-white border border-slate-200 rounded-lg pl-8 pr-3 py-2 text-xs sm:text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none"></div>`;
+                if (events.length === 0) {
+                    html += `<div class="text-center text-slate-400 py-10 text-sm font-medium"><i class="fas fa-info-circle"></i> ยังไม่มีการเช็คชื่อในเทอมนี้</div>`;
+                } else {
+                    html += `<div class="space-y-1.5 max-h-[32rem] overflow-y-auto">${events.map(ev => {
+                        const firstCheckStr = ev.createdAt ? new Date(ev.createdAt).toLocaleString('th-TH', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (ev.checkedAt ? new Date(ev.checkedAt).toLocaleString('th-TH', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '- (ไม่มีข้อมูลเวลา)');
+                        const latestEditStr = ev.checkedAt ? new Date(ev.checkedAt).toLocaleString('th-TH', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
+                        // ถ้าเวลาสร้างครั้งแรก (createdAt) กับเวลาบันทึกล่าสุด (checkedAt) ต่างกัน แปลว่ามีการแก้ไขการเช็คชื่อภายหลัง (ไม่ว่าจะแก้กี่ครั้งก็ตาม เก็บแค่ครั้งแรกกับล่าสุด)
+                        const wasEdited = ev.createdAt && ev.checkedAt && ev.createdAt !== ev.checkedAt;
+                        const isExpanded = !!(window.__teacherLogExpanded && window.__teacherLogExpanded[ev.id]);
+                        return `<div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+                            <div class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-[11px] sm:text-xs">
+                                <div class="flex items-center gap-2 min-w-0">
+                                    <i class="fas fa-check-circle text-emerald-500 shrink-0"></i>
+                                    <span class="font-bold text-slate-800 truncate">${ev.subjectName}</span>
+                                    <span class="text-slate-400">·</span>
+                                    <span class="text-slate-600 truncate">${ev.teacherNames}</span>
+                                    <span class="bg-emerald-100 text-emerald-700 border border-emerald-300 text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded shrink-0"><i class="fas fa-check"></i> เช็คครั้งแรก</span>
+                                    ${wasEdited ? `<button onclick="window.toggleTeacherLogExpand('${ev.id}')" class="bg-amber-100 text-amber-700 border border-amber-300 text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded shrink-0 hover:bg-amber-200 transition-colors"><i class="fas fa-pen"></i> แก้ไขแล้ว <i class="fas fa-chevron-${isExpanded ? 'up' : 'down'} ml-0.5"></i></button>` : ''}
+                                </div>
+                                <div class="flex items-center gap-2 shrink-0 text-slate-500">
+                                    <span>${formatRoomName(ev.roomId)}</span>
+                                    <span>คาบ ${ev.period}</span>
+                                    <span class="font-bold text-indigo-600"><i class="far fa-clock"></i> ${firstCheckStr}</span>
+                                </div>
+                            </div>
+                            ${(wasEdited && isExpanded) ? `<div class="bg-amber-50 border-t border-amber-200 px-3 py-2 text-[10px] sm:text-xs flex flex-wrap items-center gap-2"><i class="fas fa-pen text-amber-500"></i><span class="font-bold text-amber-800">แก้ไขล่าสุด${ev.checkedBy ? ` โดย ${ev.checkedBy}` : ''}:</span><span class="font-bold text-indigo-600"><i class="far fa-clock"></i> ${latestEditStr}</span></div>` : ''}
+                        </div>`;
+                    }).join('')}</div>`;
+                }
+                content.innerHTML = html;
+            }
+            else if (currentAdminTab === 'data_status') {
+                // ===== 2. สถานะการลงข้อมูลนักเรียนรายห้อง =====
+                const roomList = getRoomList();
+                const roomsWithNone = roomList.filter(r => getRoomStudents(r).length === 0);
+                const TOTAL_WEEKLY_SLOTS = 45; // 5 วัน x 9 คาบ (0-8 ไม่รวมพักเที่ยง)
+                const dsTerm = window.dataStatusTerm || adminTerm();
+                const dsYear = window.dataStatusYear || adminYear();
+                const roomScheduleFillPct = roomList.map(r => { const filled = new Set(); getRoomSubjects(r, dsTerm, dsYear).forEach(s => (s.schedules || []).forEach(sch => filled.add(sch.day + '-' + sch.period))); return Math.min(100, Math.round((filled.size / TOTAL_WEEKLY_SLOTS) * 100)); });
+                const roomsFullSchedule = roomList.filter((r, i) => roomScheduleFillPct[i] >= 100);
+                // ===== Progress Bar ภาพรวมความพร้อมของข้อมูล (อิงจาก 2 ปัจจัย: ลงรายชื่อนักเรียนครบทุกห้อง + ลงรายวิชาเต็มตารางทุกห้อง) =====
+                const studentPct = roomList.length > 0 ? Math.round(((roomList.length - roomsWithNone.length) / roomList.length) * 100) : 0;
+                // นับ % แบบเฉลี่ยความคืบหน้าของแต่ละห้อง (ไม่ใช่นับเฉพาะห้องที่ครบ 45 คาบเท่านั้น) ห้องที่ลงไปแล้วบางส่วนก็นับเป็นเปอร์เซ็นต์ย่อยได้
+                const schedulePct = roomList.length > 0 ? Math.round(roomScheduleFillPct.reduce((a, b) => a + b, 0) / roomList.length) : 0;
+                const roomsWithAdvisorStaff = roomList.filter(r => {
+                    const advs = getRoomAdvisors(r, dsTerm, dsYear);
+                    const hasAdv = Array.isArray(advs) && advs.some(a => a && String(a).trim());
+                    const staff = getRoomStaff(r, dsTerm, dsYear);
+                    const hasStaff = !!(staff && String(staff).trim());
+                    return hasAdv && hasStaff;
+                });
+                const advisorPct = roomList.length > 0 ? Math.round((roomsWithAdvisorStaff.length / roomList.length) * 100) : 0;
+                const overallPct = Math.round((studentPct + schedulePct + advisorPct) / 3);
+                const overallBarColor = overallPct >= 100 ? 'bg-emerald-500' : (overallPct >= 60 ? 'bg-amber-500' : 'bg-rose-500');
+                let html = `<div class="mb-6 bg-slate-50 p-4 sm:p-6 rounded-2xl border border-slate-100"><div class="flex justify-between items-end mb-2"><span class="font-extrabold text-slate-700 text-sm sm:text-base flex items-center gap-2"><i class="fas fa-tasks text-indigo-500"></i> ความพร้อมของข้อมูลโดยรวม <span class="text-[9px] sm:text-[10px] font-medium text-slate-400">(เทอม ${dsTerm}/${dsYear})</span></span><span class="text-lg sm:text-2xl font-black ${overallPct >= 100 ? 'text-emerald-500' : (overallPct >= 60 ? 'text-amber-500' : 'text-rose-500')}">${overallPct}%</span></div><div class="w-full h-3 sm:h-4 bg-slate-200 rounded-full overflow-hidden shadow-inner mb-3"><div class="${overallBarColor} h-full rounded-full transition-all duration-700 shadow-sm" style="width: ${overallPct}%"></div></div><div class="grid grid-cols-1 sm:grid-cols-3 gap-3"><div><div class="flex justify-between items-center mb-1"><span class="text-[10px] sm:text-xs font-bold text-slate-600"><i class="fas fa-users text-blue-400"></i> ลงรายชื่อนักเรียนครบทุกห้อง</span><span class="text-[10px] sm:text-xs font-black text-slate-500">${studentPct}%</span></div><div class="w-full h-2 bg-slate-200 rounded-full overflow-hidden"><div class="bg-blue-500 h-full rounded-full transition-all duration-700" style="width: ${studentPct}%"></div></div></div><div><div class="flex justify-between items-center mb-1"><span class="text-[10px] sm:text-xs font-bold text-slate-600"><i class="fas fa-calendar-check text-indigo-400"></i> ลงรายวิชาเต็มตารางทุกห้อง</span><span class="text-[10px] sm:text-xs font-black text-slate-500">${schedulePct}%</span></div><div class="w-full h-2 bg-slate-200 rounded-full overflow-hidden"><div class="bg-indigo-500 h-full rounded-full transition-all duration-700" style="width: ${schedulePct}%"></div></div></div><div><div class="flex justify-between items-center mb-1"><span class="text-[10px] sm:text-xs font-bold text-slate-600"><i class="fas fa-id-badge text-purple-400"></i> แต่งตั้งครูที่ปรึกษา+เจ้าหน้าที่ครบทุกห้อง</span><span class="text-[10px] sm:text-xs font-black text-slate-500">${advisorPct}%</span></div><div class="w-full h-2 bg-slate-200 rounded-full overflow-hidden"><div class="bg-purple-600 h-full rounded-full transition-all duration-700" style="width: ${advisorPct}%"></div></div></div></div></div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-clipboard-check text-indigo-500"></i> สถานะการลงข้อมูลนักเรียนรายห้อง</h3><div class="mb-3 flex flex-wrap items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl p-2.5"><label class="text-[10px] sm:text-xs font-bold text-slate-500 pl-1"><i class="fas fa-filter"></i> ดูสถานะตาราง/วิชาของ:</label><select onchange="window.setDataStatusYear(this.value)" class="bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] sm:text-xs font-bold outline-none focus:ring-1 focus:ring-indigo-400">${sortedAcademicYears().map(y => `<option value="${y.year}" ${String(dsYear) === String(y.year) ? 'selected' : ''}>ปีการศึกษา ${y.year}${y.status === 'archived' ? ' (เก็บถาวรแล้ว)' : ''}</option>`).join('')}</select><select onchange="window.setDataStatusTerm(this.value)" class="bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] sm:text-xs font-bold outline-none focus:ring-1 focus:ring-indigo-400">${Array.from({length: settings.termCount || 2}, (_, i) => i + 1).map(tn => `<option value="${tn}" ${String(dsTerm) === String(tn) ? 'selected' : ''}>เทอม ${tn}</option>`).join('')}</select><span class="text-[9px] sm:text-[10px] text-slate-400 font-medium">(ไม่กระทบเทอมที่กำลังจัดการอยู่ด้านบนสุดของหน้า)</span></div><div class="mb-3 flex flex-wrap gap-2"><span class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded-full"><i class="fas fa-check-circle"></i> ลงข้อมูลแล้ว ${roomList.length - roomsWithNone.length} ห้อง</span><span class="bg-rose-50 border border-rose-200 text-rose-600 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded-full"><i class="fas fa-exclamation-circle"></i> ยังไม่ได้ลงข้อมูล ${roomsWithNone.length} ห้อง</span><span class="bg-indigo-50 border border-indigo-200 text-indigo-700 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded-full"><i class="fas fa-calendar-check"></i> ตารางเต็มแล้ว ${roomsFullSchedule.length} ห้อง</span></div><div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 mb-8">${roomList.map(r => { const cnt = getRoomStudents(r).length; const activeCnt = getRoomStudents(r).filter(s => s.status !== 'resigned').length; const done = cnt > 0;
+                    const roomSubjects = getRoomSubjects(r, dsTerm, dsYear);
+                    const filledSlots = new Set(); roomSubjects.forEach(s => (s.schedules || []).forEach(sch => filledSlots.add(sch.day + '-' + sch.period)));
+                    const missingSlots = TOTAL_WEEKLY_SLOTS - filledSlots.size; const isFullSchedule = filledSlots.size >= TOTAL_WEEKLY_SLOTS;
+                    return `<div class="rounded-xl border p-3 ${done ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'}"><div class="flex items-center justify-between mb-1"><span class="font-black text-slate-700 text-xs sm:text-sm">ห้อง ${formatRoomName(r)}</span><i class="fas ${done ? 'fa-check-circle text-emerald-500' : 'fa-times-circle text-rose-400'} text-sm"></i></div><div class="text-[10px] sm:text-xs font-bold ${done ? 'text-emerald-700' : 'text-rose-500'} mb-1.5">${done ? `${activeCnt} คน` : 'ยังไม่มีข้อมูล'}</div><div class="text-[9px] sm:text-[10px] font-bold ${isFullSchedule ? 'text-indigo-600' : 'text-amber-600'} border-t pt-1.5 ${done ? 'border-emerald-200' : 'border-rose-200'}">${isFullSchedule ? `<i class="fas fa-calendar-check"></i> ตารางเต็มแล้ว (${roomSubjects.length} วิชา)` : `<i class="fas fa-calendar-day"></i> ${roomSubjects.length} วิชา · ขาด ${missingSlots} คาบ`}</div></div>`; }).join('')}</div>`;
+
+                // ===== 3. สถานะการลงข้อมูลรายวิชาของครู =====
+                const tsTerm = window.teacherStatusTerm || adminTerm();
+                const tsYear = window.teacherStatusYear || adminYear();
+                html += `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-chalkboard-teacher text-indigo-500"></i> สถานะการลงข้อมูลรายวิชาของครู</h3><div class="mb-3 flex flex-wrap items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl p-2.5"><label class="text-[10px] sm:text-xs font-bold text-slate-500 pl-1"><i class="fas fa-filter"></i> ดูสถานะของ:</label><select onchange="window.setTeacherStatusYear(this.value)" class="bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] sm:text-xs font-bold outline-none focus:ring-1 focus:ring-indigo-400">${sortedAcademicYears().map(y => `<option value="${y.year}" ${String(tsYear) === String(y.year) ? 'selected' : ''}>ปีการศึกษา ${y.year}${y.status === 'archived' ? ' (เก็บถาวรแล้ว)' : ''}</option>`).join('')}</select><select onchange="window.setTeacherStatusTerm(this.value)" class="bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] sm:text-xs font-bold outline-none focus:ring-1 focus:ring-indigo-400">${Array.from({length: settings.termCount || 2}, (_, i) => i + 1).map(tn => `<option value="${tn}" ${String(tsTerm) === String(tn) ? 'selected' : ''}>เทอม ${tn}</option>`).join('')}</select><span class="text-[9px] sm:text-[10px] text-slate-400 font-medium">(แยกอิสระจากตัวกรองของส่วนห้องเรียนด้านบน)</span></div>`;
+                const nonSystemDepts = departmentsList.filter(d => d !== 'ระบบ/อื่นๆ');
+                const teacherDeptCounts = {};
+                teachers.forEach(t => { const d = t.department || 'ระบบ/อื่นๆ'; teacherDeptCounts[d] = (teacherDeptCounts[d] || 0) + 1; });
+                const nonSystemTeacherTotal = nonSystemDepts.reduce((sum, d) => sum + (teacherDeptCounts[d] || 0), 0);
+                html += `<div class="mb-3 flex items-center gap-2"><span class="bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs sm:text-sm font-black px-3 py-1.5 rounded-full flex items-center gap-1.5"><i class="fas fa-chalkboard-teacher"></i> เพิ่มครูแล้วทั้งหมด ${nonSystemTeacherTotal} คน</span><span class="text-[9px] sm:text-[10px] text-slate-400 font-medium">(ไม่รวมกลุ่ม "ระบบ/อื่นๆ")</span></div>`;
+                html += `<div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-6">${nonSystemDepts.map(d => { const cfg = deptConfig[d]; const cnt = teacherDeptCounts[d] || 0;
+                    return `<div class="rounded-xl border ${cnt > 0 ? cfg.border : 'border-slate-200'} ${cnt > 0 ? cfg.bg : 'bg-slate-50'} p-3 sm:p-4 text-center"><div class="w-9 h-9 sm:w-11 sm:h-11 bg-white ${cnt > 0 ? cfg.text : 'text-slate-400'} rounded-full flex items-center justify-center mx-auto mb-2 text-sm sm:text-lg border ${cnt > 0 ? cfg.border : 'border-slate-200'} shadow-sm"><i class="fas ${cfg.icon}"></i></div><div class="font-bold text-slate-700 text-[10px] sm:text-xs mb-1 leading-tight min-h-[2em] sm:min-h-[1.5em] flex items-center justify-center">${d}</div><div class="text-xl sm:text-2xl font-black ${cnt > 0 ? cfg.text : 'text-slate-300'}">${cnt}</div><div class="text-[9px] sm:text-[10px] text-slate-400 font-medium">คน</div></div>`; }).join('')}</div>`;
+                if (teachers.length === 0) {
+                    html += `<div class="text-center text-slate-400 py-10 font-medium bg-slate-50 rounded-xl border border-slate-100">ยังไม่มีข้อมูลครูในระบบ</div>`;
+                } else {
+                    html += `<div class="overflow-x-auto rounded-xl border border-slate-200"><table class="w-full text-left text-xs sm:text-sm min-w-[500px]"><thead class="bg-slate-100"><tr><th class="p-2.5 font-extrabold">ชื่อครู</th><th class="p-2.5 font-extrabold text-center">จำนวนวิชา</th><th class="p-2.5 font-extrabold text-center">จำนวนชั้น</th><th class="p-2.5 font-extrabold text-center">จำนวนห้อง</th></tr></thead><tbody class="divide-y divide-slate-100">`;
+                    teachers.slice().sort((a,b) => a.name.localeCompare(b.name)).forEach(t => {
+                        const taught = activeSubjects(tsTerm, tsYear).filter(s => s.teacher === t.name || s.teacher2 === t.name);
+                        const rooms = [...new Set(taught.map(s => s.roomId))];
+                        const levels = [...new Set(rooms.map(r => r.split('_')[0]))];
+                        html += `<tr class="hover:bg-slate-50 transition-colors"><td class="p-2.5 font-bold text-slate-700">${t.name}</td><td class="p-2.5 text-center font-black ${taught.length === 0 ? 'text-rose-400' : 'text-indigo-600'}">${taught.length}</td><td class="p-2.5 text-center font-black text-slate-600">${levels.length}</td><td class="p-2.5 text-center font-black text-slate-600">${rooms.length}</td></tr>`;
+                    });
+                    html += `</tbody></table></div>`;
+                }
+                content.innerHTML = html;
+            }
+            else if (currentAdminTab === 'teachers') {
+                let deptOptions = departmentsList.map(d => `<option value="${d}">${d}</option>`).join('');
+                let html = `<div class="flex flex-col sm:flex-row justify-between sm:items-center mb-3 gap-2"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-chalkboard-teacher text-indigo-500"></i> จัดการครูผู้สอน</h3><div class="flex flex-wrap gap-1.5"><button onclick="window.openTeacherModal()" class="flex-1 sm:flex-none bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors"><i class="fas fa-plus"></i> เพิ่มครูใหม่</button><button onclick="window.downloadTeacherTemplate()" class="flex-1 sm:flex-none bg-amber-500 hover:bg-amber-600 text-white px-3 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-download"></i> โหลดฟอร์มครู</button><label class="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg font-bold text-xs sm:text-sm cursor-pointer text-center shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-import"></i> นำเข้ารายชื่อครู<input type="file" accept=".xlsx, .xls" class="hidden" onchange="window.handleImportTeachers(event)"></label></div></div>`;
+                html += `<div class="mb-4 bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-sm"><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><i class="fas fa-search text-slate-400"></i></div><input type="text" id="searchTeacherInput" onkeyup="window.filterTeachers()" class="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-400 shadow-inner" placeholder="ค้นหาชื่อครู หรือกลุ่มสาระฯ..."></div></div>`;
+                html += `<div id="teacherModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-3 transition-opacity"><div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto transform scale-95 opacity-0 transition-all duration-300" id="teacherModalBox"><div class="p-4 sm:p-6"><div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-extrabold text-lg" id="teacherModalTitle">เพิ่มครูใหม่</h4><button onclick="window.closeTeacherModal()" class="text-slate-400 text-xl hover:text-rose-500 transition-colors"><i class="fas fa-times"></i></button></div><div class="flex flex-col gap-3 mb-4"><div><label class="block text-[10px] sm:text-xs font-bold mb-1">ชื่อ-นามสกุล ครูผู้สอน</label><input type="text" id="newTcName" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-400" placeholder="เช่น ครูสมใจ รักเรียน"></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">กลุ่มสาระการเรียนรู้</label><select id="newTcDept" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-400">${deptOptions}</select></div></div><div class="flex justify-end gap-2"><button onclick="window.closeTeacherModal()" class="bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded font-bold text-sm transition-colors">ยกเลิก</button><button onclick="window.saveTeacherForm()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded font-bold text-sm shadow-sm transition-colors"><i class="fas fa-save"></i> บันทึก</button></div></div></div></div>`;
+                html += `<div class="mb-4 flex items-center gap-1.5"><span class="text-[10px] sm:text-xs font-bold text-slate-500 mr-1">มุมมอง:</span><button onclick="window.setTeacherViewMode('grid')" class="${(window.__teacherViewMode||'grid') === 'grid' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'} px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs transition-colors"><i class="fas fa-th-large"></i> Grid</button><button onclick="window.setTeacherViewMode('list')" class="${window.__teacherViewMode === 'list' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'} px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs transition-colors"><i class="fas fa-list"></i> List</button></div>`;
+                const teacherDeptSections = {};
+                teachers.forEach(t => { const dept = t.department || 'ระบบ/อื่นๆ'; if (!teacherDeptSections[dept]) teacherDeptSections[dept] = []; teacherDeptSections[dept].push(t); });
+                const orderedDeptNames = departmentsList.filter(d => teacherDeptSections[d]).concat(Object.keys(teacherDeptSections).filter(d => !departmentsList.includes(d)));
+                const isListView = window.__teacherViewMode === 'list';
+                html += `<div id="adminTeacherGrid">`;
+                orderedDeptNames.forEach(dept => {
+                    const list = teacherDeptSections[dept].sort((a,b) => a.name.localeCompare(b.name));
+                    html += `<div class="mb-4"><h4 class="text-[10px] sm:text-xs font-black text-indigo-600 uppercase tracking-wider mb-2 flex items-center gap-1.5"><i class="fas fa-layer-group"></i> ${dept} <span class="text-slate-400 font-medium normal-case">(${list.length} คน)</span></h4>`;
+                    if (isListView) {
+                        html += `<div class="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">${list.map(t => { const count = activeSubjects(adminTerm(), adminYear()).filter(s => s.teacher === t.name || s.teacher2 === t.name).length; return `<div class="teacher-card flex items-center gap-3 bg-white hover:bg-slate-50 px-3 py-2 transition-colors" data-search="${t.name} ${dept}"><div class="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-sm shrink-0"><i class="fas fa-user-tie"></i></div><span class="flex-1 min-w-0 font-bold text-slate-800 text-xs sm:text-sm truncate">${t.name}</span><span class="text-[9px] sm:text-[10px] font-bold text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100 shrink-0">สอน ${count} วิชา</span><button onclick="window.prepareEditTeacher('${t.id}')" class="w-7 h-7 bg-amber-50 hover:bg-amber-100 text-amber-600 rounded-full flex items-center justify-center shrink-0"><i class="fas fa-edit text-[10px]"></i></button><button onclick="window.deleteTeacher('${t.id}', ${count})" class="w-7 h-7 bg-rose-50 hover:bg-rose-100 text-rose-500 rounded-full flex items-center justify-center shrink-0"><i class="fas fa-trash text-[10px]"></i></button></div>`; }).join('')}</div>`;
+                    } else {
+                        html += `<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">${list.map(t => { const count = activeSubjects(adminTerm(), adminYear()).filter(s => s.teacher === t.name || s.teacher2 === t.name).length; return `<div class="bg-white border border-slate-200 rounded-xl p-3 text-center relative group shadow-sm hover:shadow-md transition-shadow teacher-card" data-search="${t.name} ${dept}"><div class="absolute top-1.5 right-1.5 flex gap-1"><button onclick="window.prepareEditTeacher('${t.id}')" class="w-6 h-6 bg-amber-50 hover:bg-amber-100 text-amber-600 rounded-full flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity"><i class="fas fa-edit text-[10px]"></i></button><button onclick="window.deleteTeacher('${t.id}', ${count})" class="w-6 h-6 bg-rose-50 hover:bg-rose-100 text-rose-500 rounded-full flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity"><i class="fas fa-trash text-[10px]"></i></button></div><div class="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto text-lg mb-2"><i class="fas fa-user-tie"></i></div><h4 class="font-bold text-slate-800 text-[11px] sm:text-sm line-clamp-2" title="${t.name}">${t.name}</h4><span class="text-[9px] sm:text-[10px] font-bold text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded mt-1 inline-block border border-slate-100">สอน ${count} วิชา</span></div>`; }).join('')}</div>`;
+                    }
+                    html += `</div>`;
+                });
+                html += `</div>`;
+                content.innerHTML = html;
+            }
+            else if (currentAdminTab === 'subjects') {
+                let tcOptions = '';
+                if (teachers.length > 0) {
+                    const deptGroups = {};
+                    teachers.forEach(t => { const dept = t.department || 'ไม่ระบุกลุ่มสาระ'; if (!deptGroups[dept]) deptGroups[dept] = []; deptGroups[dept].push(t); });
+                    Object.keys(deptGroups).sort((a, b) => a.localeCompare(b)).forEach(dept => {
+                        tcOptions += `<optgroup label="${dept}">`;
+                        deptGroups[dept].sort((a, b) => a.name.localeCompare(b.name)).forEach(t => { tcOptions += `<option value="${t.name}">${t.name}</option>`; });
+                        tcOptions += `</optgroup>`;
+                    });
+                } else { tcOptions = `<option value="" disabled selected>-- ไม่มีข้อมูล --</option>`; }
+                const subjRoomList = getRoomList();
+                let __sysSubjectsChanged = false;
+                subjRoomList.forEach(r => { if (ensureSystemSubjectsForRoom(r, adminTerm(), adminYear())) __sysSubjectsChanged = true; });
+                if (__sysSubjectsChanged) { logAction('สร้างคาบระบบอัตโนมัติ', 'เข้าแถวเช้า / โฮมรูม'); saveData('full'); }
+                if (!window.adminSelectedSubjectRoom) window.adminSelectedSubjectRoom = 'all';
+                if (window.adminSelectedSubjectRoom !== 'all' && !subjRoomList.includes(window.adminSelectedSubjectRoom)) window.adminSelectedSubjectRoom = 'all';
+                const isAllRooms = window.adminSelectedSubjectRoom === 'all';
+                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-book-open text-indigo-500"></i> จัดการวิชา <span class="text-[10px] sm:text-xs font-bold text-slate-400">(เทอม ${adminTerm()}/${adminYear()})</span></h3>`;
+                if (adminTermStatus() === 'locked') { html += `<div class="mb-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl px-3 py-2 text-[10px] sm:text-sm font-bold flex items-center gap-2"><i class="fas fa-lock"></i> เทอมนี้ถูกล็อคข้อมูลไว้ (เก็บถาวร) ไม่สามารถเพิ่ม/แก้ไข/ลบวิชาได้ (ไปเปลี่ยนสถานะที่แท็บ "ตั้งค่า")</div>`; }
+                else if (adminTermStatus() === 'not_opened') { html += `<div class="mb-3 bg-slate-100 border border-slate-200 text-slate-600 rounded-xl px-3 py-2 text-[10px] sm:text-sm font-bold flex items-center gap-2"><i class="fas fa-power-off"></i> เทอมนี้ยังไม่เปิดใช้งาน ครูยังเช็คชื่อไม่ได้ แต่แอดมินยังจัดเตรียมรายวิชาล่วงหน้าได้ตามปกติ</div>`; }
+                html += `<div class="flex flex-col lg:flex-row justify-between lg:items-center mb-3 gap-2"><div class="flex items-center gap-1 w-full lg:w-auto"><div class="flex flex-col shrink-0"><button onclick="window.stepAdminSubjectRoom(-1)" title="ห้องก่อนหน้า" class="bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-500 rounded-t-lg px-2 py-1 text-xs leading-none"><i class="fas fa-chevron-up"></i></button><button onclick="window.stepAdminSubjectRoom(1)" title="ห้องถัดไป" class="bg-white border-2 border-t-0 border-slate-200 hover:bg-slate-50 text-slate-500 rounded-b-lg px-2 py-1 text-xs leading-none"><i class="fas fa-chevron-down"></i></button></div><select id="adminSubjectRoomSelect" onchange="window.adminSelectedSubjectRoom = this.value; window.renderAdminTab();" class="bg-white border-2 border-slate-200 rounded-lg px-3 py-1.5 font-bold text-sm w-full lg:w-auto outline-none focus:border-indigo-400 shadow-sm"><option value="all" ${isAllRooms ? 'selected' : ''}>รวมทุกห้อง (ทั้งหมด)</option>${subjRoomList.map(r => `<option value="${r}" ${window.adminSelectedSubjectRoom === r ? 'selected' : ''}>ห้อง ${formatRoomName(r)}</option>`).join('')}</select></div><div class="flex flex-wrap gap-1.5"><button onclick="window.openSubjectModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm transition-colors flex items-center justify-center gap-1.5 flex-1 sm:flex-none"><i class="fas fa-plus"></i> เพิ่มวิชาใหม่${!isAllRooms ? ` (ห้อง ${formatRoomName(window.adminSelectedSubjectRoom)})` : ''}</button>${!isAllRooms ? `<button onclick="window.downloadSubjectTemplate()" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-2 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-download"></i> โหลดฟอร์มวิชา</button><label class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg font-bold text-[10px] sm:text-sm cursor-pointer flex-1 sm:flex-none text-center shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-import"></i> นำเข้ารายวิชา Excel<input type="file" accept=".xlsx, .xls" class="hidden" onchange="window.handleImportSubjects(event)"></label><button onclick="window.openExportSubjectsModal()" class="bg-teal-600 hover:bg-teal-700 text-white px-3 py-2 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-export"></i> ส่งออกรายวิชา</button><button onclick="window.clearRoomSubjects('${window.adminSelectedSubjectRoom}')" class="bg-rose-600 hover:bg-rose-700 text-white px-3 py-2 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-broom"></i> ลบวิชาทั้งหมดในห้อง</button>` : `<span class="text-[10px] sm:text-xs text-slate-400 font-bold flex items-center px-2">เลือกห้องที่ต้องการเพื่อนำเข้า/โหลดฟอร์ม/ลบวิชา</span>`}</div></div>`;
+                if (!isAllRooms) {
+                    const rst = computeRoomScheduleStatus(window.adminSelectedSubjectRoom, adminTerm(), adminYear());
+                    const dupes = findDuplicateSubjectsInRoom(window.adminSelectedSubjectRoom, adminTerm(), adminYear());
+                    html += `<div class="mb-3 flex flex-wrap gap-2">`;
+                    html += rst.done ? `<span class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded-full"><i class="fas fa-calendar-check"></i> ตารางเรียนครบแล้ว (${rst.filled}/${rst.total} คาบ)</span>` : `<span class="bg-amber-50 border border-amber-200 text-amber-700 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded-full"><i class="fas fa-calendar-day"></i> ยังลงตารางไม่ครบ (${rst.filled}/${rst.total} คาบ)</span>`;
+                    if (dupes.size > 0) html += `<span class="bg-rose-50 border border-rose-200 text-rose-600 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded-full"><i class="fas fa-clone"></i> พบวิชาซ้ำ ${dupes.size} รายการ (ชื่อ/รหัสวิชาซ้ำกัน)</span>`;
+                    html += `</div>`;
+                    // ===== ตารางเรียนรายสัปดาห์ของห้องนี้ (แถว = วันจันทร์-ศุกร์, คอลัมน์ = คาบ 0-8) เพื่อให้ดูง่ายว่าคาบไหนยังขาดวิชา คลิกช่องว่างเพื่อเพิ่มวิชาในคาบนั้นได้ทันที =====
+                    const gridPeriods = timeSlots.filter(t => t.period >= 0);
+                    const gridMatrix = {};
+                    getRoomSubjects(window.adminSelectedSubjectRoom, adminTerm(), adminYear()).sort((a, b) => (a.systemType === 'homeroom' ? -1 : 0) - (b.systemType === 'homeroom' ? -1 : 0)).forEach(s => (s.schedules || []).forEach(sch => { gridMatrix[sch.day + '-' + sch.period] = s; }));
+                    const gridDayColors = { 1: { bg: 'bg-yellow-50', text: 'text-yellow-800' }, 2: { bg: 'bg-pink-50', text: 'text-pink-800' }, 3: { bg: 'bg-green-50', text: 'text-green-800' }, 4: { bg: 'bg-orange-50', text: 'text-orange-800' }, 5: { bg: 'bg-sky-50', text: 'text-sky-800' } };
+                    html += `<div class="mb-4"><h4 class="text-xs sm:text-sm font-extrabold text-slate-600 mb-2 flex items-center gap-1.5"><i class="fas fa-table text-indigo-400"></i> ตารางเรียนห้อง ${formatRoomName(window.adminSelectedSubjectRoom)} <span class="text-[9px] sm:text-[10px] font-medium text-slate-400">(คลิกช่องว่างเพื่อเพิ่มวิชาในคาบนั้น)</span></h4><div class="overflow-x-auto rounded-xl border border-slate-200"><table class="w-full text-center text-[9px] sm:text-[11px] border-collapse min-w-[720px]"><thead><tr class="bg-slate-100"><th class="p-1.5 sm:p-2 border border-slate-200 sticky left-0 bg-slate-100 z-10">วัน \\ คาบ</th>${gridPeriods.map(p => `<th class="p-1.5 sm:p-2 border border-slate-200 font-bold">${p.period}${p.period === 0 ? '<div class="font-normal text-slate-400 text-[8px] sm:text-[9px]">(แถว)</div>' : ''}</th>${p.period === 4 ? `<th class="p-1 border border-amber-200 font-bold bg-amber-50 text-amber-600 w-6 sm:w-8" title="พักกลางวัน"><i class="fas fa-utensils"></i></th>` : ''}`).join('')}</tr></thead><tbody>`;
+                    for (let d = 1; d <= 5; d++) {
+                        const dc = gridDayColors[d];
+                        html += `<tr><td class="p-1.5 sm:p-2 border border-slate-200 font-bold ${dc.bg} ${dc.text} sticky left-0 z-10 whitespace-nowrap">${daysLabel[d-1].replace('วัน','')}</td>`;
+                        gridPeriods.forEach(p => {
+                            const sub = gridMatrix[d + '-' + p.period];
+                            if (sub) {
+                                html += `<td class="p-1 border border-slate-200 bg-emerald-50/70 align-top" title="${sub.name}${sub.teacher ? ' - ครู' + sub.teacher : ''}"><div class="font-bold text-emerald-700 line-clamp-2 leading-tight">${sub.name}</div>${sub.teacher ? `<div class="text-slate-400 text-[8px] sm:text-[9px] line-clamp-1">${sub.teacher}</div>` : ''}</td>`;
+                            } else {
+                                html += `<td class="p-1 border border-slate-200 bg-rose-50/50 hover:bg-rose-100 cursor-pointer transition-colors" title="คลิกเพื่อเพิ่มวิชาคาบนี้" onclick="window.openSubjectModal(${d}, ${p.period})"><i class="fas fa-plus text-rose-300 text-[9px] sm:text-[10px]"></i></td>`;
+                            }
+                            if (p.period === 4) html += `<td class="p-1 border border-amber-100 bg-amber-50/50 text-amber-400 text-center"><i class="fas fa-utensils text-[8px] sm:text-[9px]"></i></td>`;
+                        });
+                        html += `</tr>`;
+                    }
+                    html += `</tbody></table></div></div>`;
+                }
+
+                html += `<div class="mb-4 bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-sm"><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><i class="fas fa-search text-slate-400"></i></div><input type="text" id="searchSubjectInput" onkeyup="window.filterSubjects()" class="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-400 shadow-inner" placeholder="ค้นหา รหัสวิชา, ชื่อวิชา, ครูผู้สอน..."></div></div>`;
+                html += `<div id="subjectModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-3 transition-opacity"><div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto transform scale-95 opacity-0 transition-all duration-300" id="subjectModalBox"><div class="p-4 sm:p-6"><div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-extrabold text-lg" id="subjectModalTitle">เพิ่ม</h4><button onclick="window.closeSubjectModal()" class="text-slate-400 text-xl hover:text-rose-500 transition-colors"><i class="fas fa-times"></i></button></div><div id="subjectTemplatePickerWrap" class="mb-4 bg-indigo-50 border border-indigo-200 rounded-xl p-3"><label class="block text-[10px] sm:text-xs font-bold text-indigo-700 mb-1"><i class="fas fa-copy"></i> คัดลอกข้อมูลจากวิชาที่มีอยู่แล้วในระดับชั้นเดียวกัน (ไม่บังคับ)</label><select id="subjectTemplatePicker" onchange="window.applySubjectTemplate(this.value)" class="w-full bg-white border border-indigo-200 rounded px-2 py-2 text-base sm:text-sm outline-none focus:ring-1 focus:ring-indigo-400"><option value="">-- พิมพ์ข้อมูลใหม่เอง --</option></select></div><div id="subjectSystemNote" class="hidden bg-slate-100 border border-slate-200 text-slate-500 text-[10px] sm:text-xs font-bold rounded-lg px-3 py-2 mb-3"><i class="fas fa-shield-alt"></i> คาบระบบ (เข้าแถวเช้า/โฮมรูม) แก้ไขได้เฉพาะ "หน่วยกิต" และ "ตารางคาบสอน" เท่านั้น ช่องอื่นถูกล็อคไว้</div><div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2.5 mb-4"><div><label class="block text-[10px] sm:text-xs font-bold mb-1">ห้อง</label><select id="newSubRoom" onchange="window.populateSubjectTemplateOptions(); window.renderScheduleInputs();" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed">${subjRoomList.map(r => `<option value="${r}">${formatRoomName(r)}</option>`).join('')}</select></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">รหัสวิชา</label><input type="text" id="newSubCode" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm outline-none focus:ring-1 focus:ring-indigo-400 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed" placeholder="เช่น ว31101"></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">ชื่อวิชา</label><input type="text" id="newSubName" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm outline-none focus:ring-1 focus:ring-indigo-400 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed"></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">ครู (หลัก)</label><input type="text" list="subjectTeacherDatalist" id="newSubTeacher" placeholder="พิมพ์ชื่อครู..." class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed"></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">ครู (ร่วมสอน)</label><input type="text" list="subjectTeacherDatalist" id="newSubTeacher2" placeholder="พิมพ์ชื่อครู (ไม่บังคับ)..." class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed"></div><datalist id="subjectTeacherDatalist">${teachers.slice().sort((a,b) => a.name.localeCompare(b.name)).map(t => `<option value="${t.name}">`).join('')}</datalist><div><label class="block text-[10px] sm:text-xs font-bold mb-1">หน่วยกิต (คาบ)</label><select id="newSubCredit" onchange="window.renderScheduleInputs()" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm"><option value="0.5">0.5 (1 คาบ)</option><option value="1.0">1.0 (2 คาบ)</option><option value="1.5">1.5 (3 คาบ)</option><option value="2.0">2.0 (4 คาบ)</option><option value="2.5">2.5 (5 คาบ)</option><option value="3.0">3.0 (6 คาบ)</option></select></div></div><div id="scheduleContainer" class="grid grid-cols-1 sm:grid-cols-3 gap-2 border-t pt-3 mb-4"></div><div class="flex justify-end gap-2"><button onclick="window.closeSubjectModal()" class="bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded font-bold text-sm transition-colors">ยกเลิก</button><button onclick="window.saveSubjectForm()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded font-bold text-sm shadow-sm transition-colors"><i class="fas fa-save"></i> บันทึก</button></div></div></div></div>`;
+                html += `<div id="exportSubjectsModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-3 transition-opacity"><div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-md transform scale-95 opacity-0 transition-all duration-300" id="exportSubjectsModalBox"><div class="p-4 sm:p-6"><div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-extrabold text-lg"><i class="fas fa-file-export text-teal-500"></i> ส่งออกรายวิชาเป็น Excel</h4><button onclick="window.closeExportSubjectsModal()" class="text-slate-400 text-xl hover:text-rose-500 transition-colors"><i class="fas fa-times"></i></button></div><p class="text-[10px] sm:text-xs text-slate-500 font-medium mb-4">เลือกรูปแบบคอลัมน์ที่ต้องการส่งออก สำหรับห้อง <span class="font-bold text-slate-700">${formatRoomName(window.adminSelectedSubjectRoom)}</span></p><div class="space-y-2.5"><button onclick="window.doExportSubjects('basic')" class="w-full text-left bg-slate-50 hover:bg-teal-50 border-2 border-slate-200 hover:border-teal-300 rounded-xl p-3 transition-colors"><div class="font-bold text-sm text-slate-800"><i class="fas fa-list-ol text-teal-500"></i> แบบพื้นฐาน</div><div class="text-[10px] sm:text-xs text-slate-500 mt-0.5">รหัสวิชา, ชื่อวิชา, หน่วยกิต</div></button><button onclick="window.doExportSubjects('full')" class="w-full text-left bg-slate-50 hover:bg-teal-50 border-2 border-slate-200 hover:border-teal-300 rounded-xl p-3 transition-colors"><div class="font-bold text-sm text-slate-800"><i class="fas fa-table text-teal-500"></i> แบบละเอียด</div><div class="text-[10px] sm:text-xs text-slate-500 mt-0.5">รหัสวิชา, ชื่อวิชา, หน่วยกิต, ชื่อครู, คาบสอน</div></button></div></div></div></div>`;
+                html += `<div class="overflow-x-auto rounded-xl border border-slate-200 max-h-[500px] w-full"><table class="w-full text-left text-[10px] sm:text-sm min-w-[500px]"><thead class="bg-slate-100 sticky top-0 z-10 border-b"><tr>${isAllRooms ? '<th class="p-2 w-16 text-center">ห้อง</th>' : ''}<th class="p-2">วิชา</th><th class="p-2">ครู</th><th class="p-2 min-w-[120px]">ตาราง</th><th class="p-2 text-center w-16">จัดการ</th></tr></thead><tbody class="divide-y divide-slate-100" id="adminSubjectTableBody">`;
+                const filteredSubjects = isAllRooms ? activeSubjects(adminTerm(), adminYear()).slice() : getRoomSubjects(window.adminSelectedSubjectRoom, adminTerm(), adminYear());
+                if (filteredSubjects.length === 0) {
+                    html += `<tr><td colspan="${isAllRooms ? 5 : 4}" class="p-8 text-center text-slate-400 font-medium">ยังไม่มีข้อมูลวิชาในห้องนี้</td></tr>`;
+                } else {
+                    const dupSet = isAllRooms ? new Set() : findDuplicateSubjectsInRoom(window.adminSelectedSubjectRoom, adminTerm(), adminYear());
+                    const conflicts = findTeacherConflicts(adminTerm(), adminYear());
+                    filteredSubjects.sort((a,b) => a.roomId.localeCompare(b.roomId) || (!!b.systemType - !!a.systemType) || a.name.localeCompare(b.name)).forEach(sub => { let schedText = (sub.schedules||[]).map(sch => `<span class="bg-slate-100 px-1 py-0.5 rounded text-[8px] sm:text-[10px] border border-slate-200 mr-1 mb-1 inline-block whitespace-nowrap">${daysLabel[sch.day-1].replace('วัน','')} ค.${sch.period}</span>`).join('');
+                        const isDup = dupSet.has(sub.id); const conflictGroup = conflicts.find(g => g.some(x => x.subjectId === sub.id));
+                        const rowClass = conflictGroup ? 'bg-rose-50 hover:bg-rose-100' : (isDup ? 'bg-amber-50 hover:bg-amber-100' : 'hover:bg-slate-50');
+                        const warnBadges = `${isDup ? '<span class="inline-block bg-amber-100 text-amber-700 border border-amber-300 text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded mr-1 mb-1"><i class="fas fa-clone"></i> ซ้ำ</span>' : ''}${conflictGroup ? '<span class="inline-block bg-rose-100 text-rose-700 border border-rose-300 text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded mr-1 mb-1" title="ครูมีคาบสอนชนกัน"><i class="fas fa-exclamation-triangle"></i> คาบชน</span>' : ''}${sub.locked ? '<span class="inline-block bg-slate-200 text-slate-600 border border-slate-300 text-[8px] sm:text-[9px] font-black px-1.5 py-0.5 rounded mr-1 mb-1"><i class="fas fa-lock"></i> ล็อค</span>' : ''}`;
+                        html += `<tr class="${rowClass} transition-colors" data-room="${sub.roomId}" data-search="${sub.code || ''} ${sub.name} ${sub.teacher} ${sub.teacher2 || ''}">${isAllRooms ? `<td class="p-2 font-bold text-center">${formatRoomName(sub.roomId).replace('ม.','')}</td>` : ''}<td class="p-2">${warnBadges ? `<div class="mb-1">${warnBadges}</div>` : ''}<div class="font-bold text-indigo-700 line-clamp-2">${sub.name}</div>${sub.code ? `<div class="text-[9px] text-slate-500 font-mono mt-0.5">${sub.code}</div>` : ''}</td><td class="p-2 text-[9px] sm:text-sm">${sub.teacher}${sub.teacher2 ? '<br><span class="text-slate-400">' + sub.teacher2 + '</span>' : ''}</td><td class="p-2 whitespace-normal">${schedText}</td><td class="p-2 text-center flex justify-center gap-1">${sub.systemType ? `<span class="bg-slate-100 text-slate-500 border border-slate-200 text-[9px] px-2 py-1 rounded-full font-bold whitespace-nowrap" title="คาบระบบ สร้างอัตโนมัติจากครูที่ปรึกษา ลบไม่ได้"><i class="fas fa-shield-alt"></i> คาบระบบ</span><button onclick="window.prepareEditSubject('${sub.id}')" class="text-amber-500 bg-amber-50 hover:bg-amber-100 p-1.5 rounded transition-colors"><i class="fas fa-edit"></i></button>` : `<button onclick="window.toggleSubjectLock('${sub.id}')" title="${sub.locked ? 'ปลดล็อควิชา' : 'ล็อควิชา'}" class="${sub.locked ? 'text-slate-600 bg-slate-200 hover:bg-slate-300' : 'text-slate-400 bg-slate-50 hover:bg-slate-100'} p-1.5 rounded transition-colors"><i class="fas ${sub.locked ? 'fa-lock' : 'fa-lock-open'}"></i></button><button onclick="window.prepareEditSubject('${sub.id}')" class="text-amber-500 bg-amber-50 hover:bg-amber-100 p-1.5 rounded transition-colors"><i class="fas fa-edit"></i></button><button onclick="window.deleteSubject('${sub.id}')" class="text-rose-500 bg-rose-50 hover:bg-rose-100 p-1.5 rounded transition-colors"><i class="fas fa-trash"></i></button>`}</td></tr>`; });
+                }
+                html += `</tbody></table></div>`;
+                content.innerHTML = html;
+            }
+            else if (currentAdminTab === 'students') {
+                const roomList = getRoomList();
+                if(!window.adminSelectedRoom && roomList.length > 0) window.adminSelectedRoom = roomList[0];
+                let html = `<div class="mb-4 bg-purple-50/60 p-3 sm:p-4 rounded-xl border border-purple-200"><h4 class="font-extrabold text-purple-800 text-sm sm:text-base mb-1.5 flex items-center gap-2"><i class="fas fa-graduation-cap"></i> เลื่อนชั้นนักเรียนไปปีการศึกษาใหม่</h4><p class="text-[9px] sm:text-[11px] text-purple-600 font-medium mb-3">คัดลอกรายชื่อนักเรียนที่ยังเรียนอยู่จากปีการศึกษาต้นทาง ไปเป็นรายชื่อของชั้นถัดไปในปีการศึกษาปลายทางให้อัตโนมัติ (ม.3 และ ม.6 ถือว่าจบการศึกษาแล้ว จะไม่ถูกเลื่อนชั้นต่อ / นักเรียนที่ออก-ย้ายแล้วจะไม่ถูกเลื่อนชั้นไปด้วย) หลังเลื่อนชั้นแล้ว ต้องเพิ่มรายชื่อนักเรียน ม.1 และ ม.4 ใหม่เองด้วย เนื่องจากเป็นชั้นรับเข้าใหม่ ไม่มีรุ่นพี่เลื่อนชั้นขึ้นมา ไม่กระทบรายชื่อเดิมของปีต้นทาง สามารถแก้ไขรายชื่อในปีปลายทางเพิ่มเติมได้ตามปกติหลังเลื่อนชั้นแล้ว</p><div class="flex flex-wrap items-end gap-2"><div class="min-w-[150px]"><label class="block text-[10px] sm:text-xs font-bold text-purple-700 mb-1">จากปีการศึกษา</label><select id="promoteFromYear" class="w-full bg-white border border-purple-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-purple-400 outline-none">${sortedAcademicYears().map(y => `<option value="${y.year}" ${String(y.year) === String(settings.year) ? 'selected' : ''}>ปีการศึกษา ${y.year}</option>`).join('')}</select></div><div class="min-w-[150px]"><label class="block text-[10px] sm:text-xs font-bold text-purple-700 mb-1">ไปยังปีการศึกษา</label><select id="promoteToYear" class="w-full bg-white border border-purple-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-purple-400 outline-none">${sortedAcademicYears().map(y => `<option value="${y.year}" ${String(y.year) !== String(settings.year) ? 'selected' : ''} ${y.status === 'archived' ? 'disabled' : ''}>ปีการศึกษา ${y.year}${y.status === 'archived' ? ' (ถูกจัดเก็บแล้ว)' : ''}</option>`).join('')}</select></div><button onclick="window.promoteStudents()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-arrow-up"></i> เลื่อนชั้น</button></div>${settings.academicYears && settings.academicYears.length < 2 ? `<p class="text-[9px] sm:text-[11px] text-purple-500 font-bold mt-2"><i class="fas fa-info-circle"></i> ต้องมีปีการศึกษาอย่างน้อย 2 ปีในระบบก่อนจึงจะเลื่อนชั้นได้ (ไปเพิ่มปีที่แท็บ "ตั้งค่าภาคเรียน")</p>` : ''}</div>`;
+                html += `<div class="flex flex-col lg:flex-row justify-between lg:items-center mb-3 gap-2"><div class="flex items-center gap-1 w-full lg:w-auto"><div class="flex flex-col shrink-0"><button onclick="window.stepAdminRoom(-1)" title="ห้องก่อนหน้า" class="bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-500 rounded-t-lg px-2 py-1 text-xs leading-none"><i class="fas fa-chevron-up"></i></button><button onclick="window.stepAdminRoom(1)" title="ห้องถัดไป" class="bg-white border-2 border-t-0 border-slate-200 hover:bg-slate-50 text-slate-500 rounded-b-lg px-2 py-1 text-xs leading-none"><i class="fas fa-chevron-down"></i></button></div><select id="adminRoomSelect" onchange="window.adminSelectedRoom = this.value; window.renderAdminTab();" class="bg-white border-2 border-slate-200 rounded-lg px-3 py-1.5 font-bold text-sm w-full lg:w-auto outline-none focus:border-indigo-400 shadow-sm">${roomList.map(r => `<option value="${r}" ${window.adminSelectedRoom === r ? 'selected' : ''}>ห้อง ${formatRoomName(r)}</option>`).join('')}</select></div><div class="flex flex-wrap gap-1.5"><button onclick="window.openStudentModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-plus"></i> เพิ่ม 1 คน</button><button onclick="window.downloadStudentTemplate()" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-download"></i> โหลดฟอร์ม</button><label class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm cursor-pointer flex-1 sm:flex-none text-center shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-import"></i> นำเข้า Excel<input type="file" accept=".xlsx, .xls" class="hidden" onchange="window.handleImportStudents(event)"></label><button onclick="window.exportAllStudentsExcel('${window.adminSelectedRoom}')" class="bg-teal-600 hover:bg-teal-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-download"></i> โหลดสรุป</button><button onclick="window.deleteAllStudentsInRoom(window.adminSelectedRoom)" class="bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-600 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-user-times"></i> ลบนักเรียนทุกคน</button></div></div>`;
+                html += `<div class="mb-4 bg-indigo-50/60 p-3 sm:p-4 rounded-xl border border-indigo-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2"><div><h4 class="font-extrabold text-indigo-800 text-xs sm:text-sm flex items-center gap-1.5"><i class="fas fa-layer-group"></i> นำเข้ารายชื่อนักเรียนทุกห้องพร้อมกัน</h4><p class="text-[9px] sm:text-[11px] text-indigo-500 font-medium mt-0.5">ไฟล์เดียวใส่ได้หลายห้อง มีคอลัมน์ระบุห้องเรียนในตัวเอง เหมาะสำหรับตอนเริ่มต้นภาคเรียนที่ต้องลงรายชื่อทีเดียวหลายห้อง</p></div><div class="flex flex-wrap gap-1.5"><button onclick="window.downloadStudentTemplateAllRooms()" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-download"></i> โหลดฟอร์ม (ทุกห้อง)</button><label class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm cursor-pointer text-center shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-import"></i> นำเข้าทุกห้อง<input type="file" accept=".xlsx, .xls" class="hidden" onchange="window.handleImportStudentsAllRooms(event)"></label></div></div>`;
+                const roomStudentsForCount = getRoomStudents(window.adminSelectedRoom, adminYear());
+                const activeCountSm = roomStudentsForCount.filter(s => s.status !== 'resigned').length;
+                const resignedCountSm = roomStudentsForCount.filter(s => s.status === 'resigned').length;
+                html += `<div class="flex flex-wrap gap-2 mb-4"><span class="bg-slate-100 border border-slate-200 text-slate-700 text-[10px] sm:text-xs font-black px-2.5 py-1.5 rounded-full flex items-center gap-1.5"><i class="fas fa-users"></i> ทั้งหมด ${roomStudentsForCount.length} คน</span><span class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] sm:text-xs font-bold px-2.5 py-1.5 rounded-full flex items-center gap-1.5"><i class="fas fa-user-check"></i> เรียนอยู่ ${activeCountSm} คน</span><span class="bg-rose-50 border border-rose-200 text-rose-600 text-[10px] sm:text-xs font-bold px-2.5 py-1.5 rounded-full flex items-center gap-1.5"><i class="fas fa-user-minus"></i> ออก/ย้าย ${resignedCountSm} คน</span></div>`;
+                html += `<div class="mb-4 bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-sm"><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><i class="fas fa-search text-slate-400"></i></div><input type="text" id="searchStudentInput" onkeyup="window.filterAdminStudents()" class="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-400 shadow-inner" placeholder="ค้นหา เลขที่, ชื่อ-นามสกุล..."></div></div>`;
+                html += `<div id="studentModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-3 transition-opacity"><div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto transform scale-95 opacity-0 transition-all duration-300" id="studentModalBox"><div class="p-4 sm:p-6"><div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-extrabold text-lg" id="studentModalTitle">เพิ่ม</h4><button onclick="window.closeStudentModal()" class="text-slate-400 text-xl hover:text-rose-500 transition-colors"><i class="fas fa-times"></i></button></div><div class="grid grid-cols-2 gap-2.5 mb-4"><div><label class="block text-[10px] sm:text-xs font-bold mb-1">เลขที่</label><input type="number" id="newStuNum" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm outline-none focus:ring-1 focus:ring-indigo-400"></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">สถานะ</label><select id="newStuStatus" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm outline-none"><option value="active">เรียนอยู่</option><option value="resigned">ออก/ย้าย</option></select></div><div class="col-span-2"><label class="block text-[10px] sm:text-xs font-bold mb-1">คำนำหน้า + ชื่อ-นามสกุล</label><input type="text" id="newStuName" placeholder="เช่น นาย สมชาย ใจดี" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm outline-none focus:ring-1 focus:ring-indigo-400"></div></div><div class="flex justify-end gap-2"><button onclick="window.closeStudentModal()" class="bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded font-bold text-sm transition-colors">ยกเลิก</button><button onclick="window.saveStudentForm()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded font-bold text-sm shadow-sm transition-colors"><i class="fas fa-save"></i> บันทึก</button></div></div></div></div><div class="overflow-x-auto rounded-xl border border-slate-200 max-h-[500px] w-full"><table class="w-full text-left text-[10px] sm:text-sm min-w-[300px] sm:min-w-[400px]"><thead class="bg-slate-100 sticky top-0 z-10 border-b"><tr><th class="p-2 w-12 sm:w-16 text-center sticky left-0 bg-slate-100 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">เลขที่</th><th class="p-2">ชื่อ-นามสกุล</th><th class="p-2 text-center w-20">จัดการ</th></tr></thead><tbody class="divide-y divide-slate-100" id="adminStudentTableBody">`;
+                const roomStudents = getRoomStudents(window.adminSelectedRoom, adminYear()).sort((a,b) => parseInt(a.number) - parseInt(b.number));
+                if(roomStudents.length === 0) { html += `<tr><td colspan="3" class="p-8 text-center text-slate-400 font-medium">ยังไม่มีข้อมูลนักเรียน</td></tr>`;
+                } else { roomStudents.forEach(st => { const badge = st.status === 'resigned' ? `<span class="bg-rose-100 text-rose-700 px-1 py-0.5 rounded text-[8px] sm:text-[10px] ml-1 border border-rose-200 font-bold">ออก/ย้าย</span>` : ''; html += `<tr class="hover:bg-slate-50 transition-colors" data-search="${st.number} ${st.name}"><td class="p-2 text-center font-bold text-slate-500 sticky left-0 bg-white shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">${st.number}</td><td class="p-2 font-bold ${st.status==='resigned'?'text-slate-400':''} text-[11px] sm:text-sm">${st.name} ${badge}</td><td class="p-2 text-center flex justify-center gap-1"><button onclick="window.prepareEditStudent('${st.id}')" class="text-amber-500 bg-amber-50 hover:bg-amber-100 p-1.5 rounded transition-colors"><i class="fas fa-edit"></i></button><button onclick="window.deleteStudent('${st.id}')" class="text-rose-500 bg-rose-50 hover:bg-rose-100 p-1.5 rounded transition-colors"><i class="fas fa-trash"></i></button></td></tr>`;
+                }); }
+                html += `</tbody></table></div>`;
+                content.innerHTML = html;
+            }
+            else if (currentAdminTab === 'users') {
+                if (!currentUser || currentUser.role !== 'super_admin') {
+                    content.innerHTML = `<div class="text-center text-slate-400 py-16 font-bold"><i class="fas fa-lock text-3xl mb-3"></i><br>เฉพาะ Super Admin เท่านั้นที่จัดการผู้ใช้งานได้</div>`;
+                    return;
+                }
+                let html = `<div class="flex justify-between items-center mb-4 flex-wrap gap-2"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-user-cog text-indigo-500"></i> จัดการผู้ใช้งาน (แอดมิน)</h3><button onclick="window.openUserModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-user-plus"></i> เพิ่มผู้ใช้ใหม่</button></div>`;
+                html += `<div id="userModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-3 transition-opacity"><div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-md transform scale-95 opacity-0 transition-all duration-300" id="userModalBox"><div class="p-4 sm:p-6"><div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-extrabold text-lg" id="userModalTitle">เพิ่มผู้ใช้งาน</h4><button onclick="window.closeUserModal()" class="text-slate-400 text-xl hover:text-rose-500 transition-colors"><i class="fas fa-times"></i></button></div><div class="space-y-3 mb-4"><div><label class="block text-xs font-bold mb-1">ชื่อ-นามสกุล (แสดงในระบบ)</label><input type="text" id="newUserName" class="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-400" placeholder="เช่น เจ้าหน้าที่ทะเบียน"></div><div><label class="block text-xs font-bold mb-1">ชื่อผู้ใช้ (Username)</label><input type="text" id="newUserUsername" class="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-400" placeholder="username"></div><div><label class="block text-xs font-bold mb-1">รหัสผ่าน</label><input type="text" id="newUserPassword" class="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-400" placeholder="ตั้งรหัสผ่าน"></div><div class="bg-indigo-50 border border-indigo-200 text-indigo-700 text-[10px] sm:text-xs font-bold rounded-lg px-3 py-2 flex items-center gap-1.5"><i class="fas fa-info-circle"></i> ผู้ใช้ใหม่จะได้รับสิทธิ์ "เจ้าหน้าที่" (ไม่สามารถเพิ่ม/แก้ไข/ลบผู้ใช้งานอื่นได้)</div></div><div class="flex justify-end gap-2"><button onclick="window.closeUserModal()" class="bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded font-bold text-sm transition-colors">ยกเลิก</button><button onclick="window.saveUserForm()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded font-bold text-sm shadow-sm transition-colors"><i class="fas fa-save"></i> บันทึก</button></div></div></div></div>`;
+                html += `<div class="space-y-2.5">`;
+                (settings.users || []).forEach(u => {
+                    const isSuper = u.role === 'super_admin';
+                    html += `<div class="flex items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-xl p-3 sm:p-4"><div class="flex items-center gap-3 min-w-0"><div class="w-9 h-9 sm:w-11 sm:h-11 rounded-full flex items-center justify-center text-sm sm:text-lg shrink-0 ${isSuper ? 'bg-purple-100 text-purple-700' : 'bg-indigo-100 text-indigo-700'}"><i class="fas ${isSuper ? 'fa-crown' : 'fa-user'}"></i></div><div class="min-w-0"><div class="font-bold text-slate-800 text-sm sm:text-base truncate">${u.name} ${isSuper ? '<span class="bg-purple-100 text-purple-700 border border-purple-200 text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded-full ml-1">Super Admin</span>' : '<span class="bg-indigo-100 text-indigo-700 border border-indigo-200 text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded-full ml-1">เจ้าหน้าที่</span>'}</div><div class="text-[10px] sm:text-xs text-slate-500 font-medium truncate">Username: ${u.username}</div></div></div><div class="flex gap-1.5 shrink-0">${isSuper ? `<span class="text-slate-400 text-[10px] sm:text-xs font-bold px-2 flex items-center gap-1"><i class="fas fa-lock"></i> ล็อกไว้</span>` : `<button onclick="window.openUserModal('${u.id}')" class="text-amber-500 bg-amber-50 hover:bg-amber-100 p-2 rounded-lg transition-colors"><i class="fas fa-edit"></i></button><button onclick="window.deleteUser('${u.id}')" class="text-rose-500 bg-rose-50 hover:bg-rose-100 p-2 rounded-lg transition-colors"><i class="fas fa-trash"></i></button>`}</div></div>`;
+                });
+                html += `</div>`;
+                content.innerHTML = html;
+            }
+            else if (currentAdminTab === 'holidays') {
+                if (window.holidayCalYear === undefined) { const now = new Date(); window.holidayCalYear = now.getFullYear(); window.holidayCalMonth = now.getMonth(); }
+                const year = window.holidayCalYear, month = window.holidayCalMonth;
+                const monthNamesFull = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+                const dayNamesShort = ['อา','จ','อ','พ','พฤ','ศ','ส'];
+                const firstDay = new Date(year, month, 1);
+                const startWeekday = firstDay.getDay();
+                const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-2 flex items-center gap-2"><i class="fas fa-calendar-times text-rose-500"></i> จัดการวันหยุด / วันสอบ และประกาศ</h3><p class="text-[10px] sm:text-xs text-slate-500 font-medium mb-4"><i class="fas fa-info-circle"></i> คลิกวันที่ในปฏิทินเพื่อเพิ่ม/แก้ไข/ลบวันหยุด ระบบจะแสดงหมายเหตุในหน้าเช็คชื่อทุกรายวิชาของวันนั้น และขึ้นประกาศบนหน้าเว็บอัตโนมัติในวันนั้นด้วย (ใช้ได้ทั้งวันหยุดราชการและวันสอบ)</p>`;
+
+                html += `<div id="holidayModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-3 transition-opacity"><div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-md transform scale-95 opacity-0 transition-all duration-300" id="holidayModalBox"><div class="p-4 sm:p-6"><div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-extrabold text-lg" id="holidayModalTitle">เพิ่มวันหยุด</h4><button onclick="window.closeHolidayModal()" class="text-slate-400 text-xl hover:text-rose-500 transition-colors"><i class="fas fa-times"></i></button></div><div class="space-y-3 mb-4"><div><label class="block text-xs font-bold mb-1">วันที่</label><input type="text" id="holidayModalDate" disabled class="w-full bg-slate-100 text-slate-500 border border-slate-200 rounded px-3 py-2 text-sm font-bold outline-none"></div><div><label class="block text-xs font-bold mb-1">หมายเหตุ / เหตุผล</label><input type="text" id="holidayModalLabel" class="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-rose-400" placeholder="เช่น วันหยุดราชการ, วันสอบปลายภาค"></div></div><div class="flex justify-between items-center gap-2"><button id="holidayModalDeleteBtn" onclick="window.deleteHoliday(document.getElementById('holidayModalDate').value)" class="hidden bg-rose-50 hover:bg-rose-100 text-rose-600 px-3 py-1.5 rounded font-bold text-xs sm:text-sm transition-colors"><i class="fas fa-trash"></i> ลบวันหยุดนี้</button><div class="flex gap-2 ml-auto"><button onclick="window.closeHolidayModal()" class="bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded font-bold text-sm transition-colors">ยกเลิก</button><button onclick="window.saveHolidayForm()" class="bg-rose-600 hover:bg-rose-700 text-white px-4 py-1.5 rounded font-bold text-sm shadow-sm transition-colors"><i class="fas fa-save"></i> บันทึก</button></div></div></div></div></div>`;
+
+                html += `<div class="flex items-center justify-between mb-4 bg-slate-50 rounded-xl border border-slate-100 p-2 sm:p-3"><button onclick="window.changeHolidayMonth(-1)" class="w-9 h-9 sm:w-10 sm:h-10 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg flex items-center justify-center text-slate-600 shadow-sm transition-colors"><i class="fas fa-chevron-left"></i></button><span class="font-extrabold text-sm sm:text-lg text-slate-800">${monthNamesFull[month]} ${year + 543}</span><button onclick="window.changeHolidayMonth(1)" class="w-9 h-9 sm:w-10 sm:h-10 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg flex items-center justify-center text-slate-600 shadow-sm transition-colors"><i class="fas fa-chevron-right"></i></button></div>`;
+
+                // ===== [ใหม่] แนะนำวันหยุดราชการไทยของเดือนที่กำลังดูอยู่ - กดยืนยันทีเดียวเพิ่มเข้าปฏิทินได้เลย ไม่ต้องพิมพ์เอง =====
+                const yearRefList = THAI_HOLIDAYS_REFERENCE[year] || [];
+                const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}-`;
+                const existingHolidayDates = new Set((settings.holidays || []).map(h => h.date));
+                const suggestedThisMonth = yearRefList.filter(h => h.date.startsWith(monthPrefix) && !existingHolidayDates.has(h.date));
+                if (yearRefList.length === 0) {
+                    html += `<div class="mb-4 bg-slate-50 border border-slate-200 rounded-xl p-3 text-[10px] sm:text-xs text-slate-400 font-medium"><div class="flex flex-wrap items-center justify-between gap-2"><span><i class="fas fa-info-circle"></i> ยังไม่มีข้อมูลวันหยุดราชการอ้างอิงสำหรับปี ${year + 543} ในระบบ (มีให้พร้อมใช้เฉพาะ พ.ศ. 2568-2569)</span><button onclick="window.fetchExternalHolidaysForYear(${year})" id="fetchHolidayBtn" class="bg-slate-700 hover:bg-slate-800 text-white px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold shrink-0"><i class="fas fa-cloud-download-alt"></i> ดึงข้อมูลจากอินเทอร์เน็ต</button></div></div>`;
+                } else if (suggestedThisMonth.length > 0) {
+                    html += `<div class="mb-4 bg-indigo-50 border border-indigo-200 rounded-xl p-3 sm:p-4"><div class="flex flex-wrap items-center justify-between gap-2 mb-2"><h4 class="text-xs sm:text-sm font-extrabold text-indigo-700 flex items-center gap-1.5"><i class="fas fa-magic"></i> แนะนำวันหยุดราชการไทยเดือนนี้ (${suggestedThisMonth.length} วัน)</h4><button onclick="window.confirmAllSuggestedHolidays('${monthPrefix}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors"><i class="fas fa-check-double"></i> ยืนยันทั้งหมด</button></div><div class="flex flex-wrap gap-1.5">${suggestedThisMonth.map(h => `<button onclick="window.confirmSuggestedHoliday('${h.date}', '${h.label.replace(/'/g,"\\'")}')" class="bg-white border border-indigo-200 hover:bg-indigo-100 text-indigo-700 px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-colors flex items-center gap-1"><i class="fas fa-plus-circle"></i> ${h.date.split('-')[2]} - ${h.label}</button>`).join('')}</div></div>`;
+                }
+
+                html += `<div class="grid grid-cols-7 gap-1 sm:gap-1.5 mb-8">`;
+                dayNamesShort.forEach(d => { html += `<div class="text-center text-[9px] sm:text-xs font-black text-slate-400 py-1">${d}</div>`; });
+                for (let i = 0; i < startWeekday; i++) html += `<div></div>`;
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                    const holiday = getHolidayForDate(dateStr);
+                    const isToday = dateStr === todayDateStr();
+                    html += `<button onclick="window.openHolidayModal('${dateStr}')" class="aspect-square rounded-lg sm:rounded-xl border p-1 sm:p-1.5 flex flex-col items-center justify-start transition-all hover:shadow-md ${holiday ? 'bg-rose-50 border-rose-300' : 'bg-white border-slate-200 hover:border-indigo-300'} ${isToday ? 'ring-2 ring-indigo-400' : ''}"><span class="text-[10px] sm:text-sm font-black ${holiday ? 'text-rose-600' : 'text-slate-700'}">${day}</span>${holiday ? `<span class="text-[7px] sm:text-[9px] font-bold text-rose-500 leading-tight text-center hidden sm:block overflow-hidden" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${holiday.label}</span><i class="fas fa-circle text-rose-400 text-[5px] sm:hidden mt-0.5"></i>` : ''}</button>`;
+                }
+                html += `</div>`;
+
+                const allHolidays = (settings.holidays || []).slice().sort((a, b) => a.date.localeCompare(b.date));
+                html += `<h4 class="font-extrabold text-sm sm:text-lg text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-list text-rose-500"></i> รายการวันหยุดทั้งหมด (${allHolidays.length})</h4>`;
+                if (allHolidays.length === 0) {
+                    html += `<div class="text-center text-slate-400 py-8 text-xs sm:text-sm font-medium bg-slate-50 rounded-xl border border-slate-100">ยังไม่มีการตั้งวันหยุด</div>`;
+                } else {
+                    html += `<div class="space-y-1.5 max-h-80 overflow-y-auto pr-1">${allHolidays.map(h => `<div class="flex items-center justify-between gap-2 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2"><div class="min-w-0"><span class="font-black text-rose-700 text-xs sm:text-sm">${h.date.split('-').reverse().join('/')}</span><span class="text-rose-600 text-xs sm:text-sm font-bold ml-2">${h.label}</span></div><button onclick="window.deleteHoliday('${h.date}')" class="shrink-0 text-rose-500 hover:text-rose-700 p-1.5"><i class="fas fa-trash"></i></button></div>`).join('')}</div>`;
+                }
+                ensureAnnouncementsArray();
+                const annPriorityMeta = { high: { label: 'ด่วนมาก', badge: 'bg-rose-100 text-rose-700 border-rose-300' }, normal: { label: 'ทั่วไป', badge: 'bg-amber-100 text-amber-700 border-amber-300' }, low: { label: 'แจ้งเพื่อทราบ', badge: 'bg-blue-100 text-blue-700 border-blue-300' } };
+                html += `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-bullhorn text-amber-500"></i> ประกาศแจ้งเตือน (แสดงบนสุดของเว็บ)</h3><div class="mb-6 bg-amber-50/70 p-3 sm:p-4 rounded-xl border border-amber-200 space-y-3">`;
+                if (settings.announcements.length === 0) {
+                    html += `<p class="text-[10px] sm:text-xs text-slate-500 font-medium py-2">ยังไม่มีประกาศ — เพิ่มรายการใหม่ด้านล่างได้เลย</p>`;
+                } else {
+                    html += `<div class="space-y-2">${settings.announcements.map(a => {
+                        const active = isAnnouncementItemActive(a);
+                        const meta = annPriorityMeta[a.priority] || annPriorityMeta.normal;
+                        return `<div class="bg-white border border-amber-200 rounded-lg p-2.5 flex flex-wrap items-center gap-2"><span class="border ${meta.badge} text-[9px] sm:text-[10px] font-black px-2 py-0.5 rounded-full shrink-0">${meta.label}</span>${active ? `<span class="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9px] sm:text-[10px] font-black px-2 py-0.5 rounded-full shrink-0"><i class="fas fa-circle text-[6px]"></i> กำลังแสดง</span>` : `<span class="bg-slate-100 text-slate-500 border border-slate-200 text-[9px] sm:text-[10px] font-black px-2 py-0.5 rounded-full shrink-0">ไม่แสดง</span>`}<span class="flex-1 min-w-[10rem] text-xs sm:text-sm font-bold text-slate-700 truncate">${(a.text||'').replace(/</g,'&lt;')}</span><button onclick="window.deleteAnnouncement('${a.id}')" class="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-2.5 py-1 rounded-lg text-[10px] sm:text-xs font-bold shrink-0"><i class="fas fa-trash-alt"></i> ลบ</button></div>`;
+                    }).join('')}</div>`;
+                }
+                html += `<div class="border-t border-amber-200 pt-3 mt-1"><p class="text-[10px] sm:text-xs font-black text-amber-700 mb-2"><i class="fas fa-plus-circle"></i> เพิ่มประกาศใหม่</p><div><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ข้อความประกาศ</label><textarea id="setAnnouncement" rows="2" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-amber-400 outline-none resize-none" placeholder="เช่น ปิดเรียนวันที่ 5 กันยายน เนื่องในกิจกรรมกีฬาสี"></textarea></div><div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2"><div><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">ลำดับความสำคัญ</label><select id="setAnnouncementPriority" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-amber-400 outline-none"><option value="high">ด่วนมาก (สีแดง)</option><option value="normal" selected>ทั่วไป (สีเหลือง)</option><option value="low">แจ้งเพื่อทราบ (สีฟ้า)</option></select></div><div><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">เริ่มแสดงตั้งแต่ (เว้นว่าง = ทันที)</label><input type="datetime-local" id="setAnnouncementStart" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-amber-400 outline-none"></div><div><label class="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">สิ้นสุดการแสดง (เว้นว่าง = ไม่มีวันหมด)</label><input type="datetime-local" id="setAnnouncementEnd" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-amber-400 outline-none"></div></div><div class="flex flex-wrap gap-2 pt-3"><button onclick="window.addAnnouncement()" class="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-plus"></i> เพิ่มประกาศ</button></div></div></div><h3 class="text-lg sm:text-xl font-extrabold text-rose-600 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-bell"></i> ตั้งค่าการแจ้งเตือนติดตาม (ต่อเดือน)</h3><div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3 bg-rose-50 p-3 sm:p-4 rounded-xl border border-rose-100 shadow-inner"><div><label class="block text-[10px] sm:text-xs font-bold text-rose-700 mb-1">สายเกิน (วัน/เดือน)</label><input type="number" id="setLateThresh" value="${settings.thresholds?.late || 4}" class="w-full bg-white border border-rose-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none text-rose-700"></div><div><label class="block text-[10px] sm:text-xs font-bold text-rose-700 mb-1">ขาดเกิน (วัน/เดือน)</label><input type="number" id="setAbsentThresh" value="${settings.thresholds?.absent || 4}" class="w-full bg-white border border-rose-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none text-rose-700"></div></div><div class="mb-3 bg-orange-50 p-3 sm:p-4 rounded-xl border border-orange-100 shadow-inner"><p class="text-[10px] sm:text-xs font-bold text-orange-700 mb-2"><i class="fas fa-door-open"></i> เกณฑ์ "มาโรงเรียนแต่เข้าเรียนไม่ครบ" (นับจากขาดเรียนบางคาบทั้งที่มาโรงเรียน)</p><div class="grid grid-cols-1 sm:grid-cols-2 gap-3"><div><label class="block text-[10px] sm:text-xs font-bold text-orange-700 mb-1">ขาดตั้งแต่กี่คาบ ถึงนับว่า "ไม่ครบ" ในวันนั้น</label><input type="number" id="setIncompletePeriodsThresh" value="${settings.thresholds?.incompletePeriods || 4}" class="w-full bg-white border border-orange-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-orange-500 outline-none text-orange-700"></div><div><label class="block text-[10px] sm:text-xs font-bold text-orange-700 mb-1">เกิดซ้ำกี่วัน ภายใน 1 สัปดาห์ ถึงขึ้นแจ้งเตือน (นับต่อเนื่องได้ ไม่ติดเส้นแบ่งเดือน)</label><input type="number" id="setIncompleteDaysThresh" value="${settings.thresholds?.incompleteDays || 3}" class="w-full bg-white border border-orange-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-orange-500 outline-none text-orange-700"></div></div></div><div class="mb-3 bg-teal-50 p-3 sm:p-4 rounded-xl border border-teal-100 shadow-inner"><p class="text-[10px] sm:text-xs font-bold text-teal-700 mb-2"><i class="fas fa-user-md"></i> เกณฑ์ "ลาป่วย/ลากิจ ชนะสาย" (กรณีมีคาบยืนยันลาป่วย-ลากิจมากพอในวันเดียวกัน - ไม่มีผลกับขาด เพราะลาป่วยต้องแจ้งก่อน 8.00 น.)</p><div><label class="block text-[10px] sm:text-xs font-bold text-teal-700 mb-1">ลาป่วยหรือลากิจตั้งแต่กี่คาบ ถึงเปลี่ยนสถานะทั้งวันเป็นลาป่วย/ลากิจ (แทนที่จะเป็นสาย เท่านั้น)</label><input type="number" id="setLeaveOverrideThresh" value="${settings.thresholds?.leaveOverride || 4}" class="w-full bg-white border border-teal-200 rounded-lg px-3 py-2 text-base sm:text-sm font-bold focus:ring-2 focus:ring-teal-500 outline-none text-teal-700"></div><p class="text-[9px] sm:text-[10px] text-teal-500 font-medium mt-2">เช่น คาบ 0 เช็คว่าสายไว้ก่อน แต่พอถึงเวลาเรียนจริง เพื่อนแจ้งครูประจำวิชาว่าลาป่วย/ลากิจ ถ้าคาบที่เป็นลาป่วย/ลากิจรวมกันถึงเกณฑ์นี้ ระบบจะถือว่าทั้งวันเป็นลาป่วย/ลากิจแทน (ถ้าเช็คว่า "ขาด" ไว้ตั้งแต่แรก จะยังคงเป็น "ขาด" เสมอ ไม่ว่าจะมีคาบลาป่วย/ลากิจกี่คาบก็ตาม เพราะการลาป่วยที่ถูกต้องต้องแจ้งก่อน 8.00 น.)</p></div><div class="flex justify-end mb-6"><button onclick="window.saveThresholdSettings()" class="bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกเกณฑ์แจ้งเตือน</button></div>`;
+                content.innerHTML = html;
+            }
+            else if (currentAdminTab === 'logs') {
+                // ===== [ใหม่] log ไม่ได้ถูกส่งมาตอนโหลดหน้าแรกอีกต่อไป (เบากว่าเดิม) - โหลดแยกตอนเปิดแท็บนี้เท่านั้น =====
+                if (!window.__logsLoaded) {
+                    content.innerHTML = `<div class="flex items-center justify-center py-10 text-slate-400 gap-2"><i class="fas fa-spinner fa-spin"></i> กำลังโหลดประวัติการแก้ไข...</div>`;
+                    fetch(`${GOOGLE_APP_SCRIPT_URL}?action=get_logs`).then(r => r.json()).then(data => {
+                        if (data && data.status === 'success' && Array.isArray(data.logs)) logs = data.logs;
+                        window.__logsLoaded = true;
+                        if (currentAdminTab === 'logs') renderAdminTab();
+                    }).catch(() => { showToast("โหลดประวัติการแก้ไขไม่สำเร็จ", "error"); });
+                    return;
+                }
+                if (!window.logFilterCategory) window.logFilterCategory = 'all';
+                if (!window.logFilterUser) window.logFilterUser = 'all';
+                const catMeta = {
+                    all: { label: 'ทั้งหมด', icon: 'fa-list', color: 'slate' },
+                    settings: { label: 'ปรับตั้งค่าระบบ', icon: 'fa-cog', color: 'indigo' },
+                    data: { label: 'ลงข้อมูลต่างๆ', icon: 'fa-database', color: 'emerald' },
+                    account: { label: 'บัญชีผู้ใช้', icon: 'fa-user-shield', color: 'purple' },
+                };
+                const uniqueUsers = [...new Set(logs.map(l => l.name))].sort((a,b) => a.localeCompare(b));
+                const isSuperAdminLogs = currentUser && currentUser.role === 'super_admin';
+                // ===== ไม่แสดง Log ของ Super Admin ให้ Admin ทั่วไปเห็น =====
+                const superAdminUsernames = new Set((settings.users || []).filter(u => u.role === 'super_admin').map(u => u.username));
+                const visibleUniqueUsers = isSuperAdminLogs ? uniqueUsers : uniqueUsers.filter(name => {
+                    const matchLog = logs.find(l => l.name === name);
+                    return !matchLog || !superAdminUsernames.has(matchLog.username);
+                });
+                let html = `<div class="flex justify-between items-center mb-4 flex-wrap gap-2"><h3 class="text-lg sm:text-xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-history text-indigo-500"></i> Log</h3><div class="flex gap-1.5"><button onclick="window.refreshLogView(this)" class="bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-sync-alt" id="logRefreshIcon"></i> รีเฟรช Log</button>${isSuperAdminLogs && logs.length > 0 ? `<button onclick="window.clearAllLogs()" class="bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-600 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-trash-alt"></i> ล้างประวัติ Log ทั้งหมด</button>` : ''}</div></div>`;
+                html += `<div class="flex flex-wrap gap-1.5 mb-3">${Object.entries(catMeta).map(([key, m]) => `<button onclick="window.filterLogCategory('${key}')" class="px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-bold border transition-colors flex items-center gap-1.5 ${window.logFilterCategory === key ? `bg-${m.color}-600 text-white border-${m.color}-600` : `bg-white text-slate-600 border-slate-200 hover:bg-slate-50`}"><i class="fas ${m.icon}"></i> ${m.label}</button>`).join('')}</div>`;
+                if (window.logFilterCategory === 'account') { html += `<div class="mb-3 flex items-start gap-2 bg-purple-50 border border-purple-200 text-purple-700 rounded-lg px-3 py-2.5"><i class="fas fa-info-circle mt-0.5"></i><span class="text-[10px] sm:text-xs font-bold leading-relaxed">ระบบจะออกจากระบบให้อัตโนมัติหากไม่มีการใช้งานเกิน 30 นาที (เพื่อความปลอดภัยของบัญชี) เหตุการณ์นี้จะถูกบันทึกเป็น "ออกจากระบบอัตโนมัติ (หมดเวลา)" ในหมวดนี้เช่นกัน</span></div>`; }
+                html += `<div class="mb-4 flex items-center gap-2 flex-wrap"><label class="text-[10px] sm:text-xs font-bold text-slate-500 flex items-center gap-1.5"><i class="fas fa-user"></i> กรองเฉพาะบัญชี:</label><select onchange="window.filterLogUser(this.value)" class="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[10px] sm:text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-400"><option value="all" ${window.logFilterUser === 'all' ? 'selected' : ''}>ทุกบัญชี</option>${visibleUniqueUsers.map(u => `<option value="${u}" ${window.logFilterUser === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>`;
+                let filteredLogs = (window.logFilterCategory === 'all') ? logs.slice() : logs.filter(l => (l.category || 'data') === window.logFilterCategory);
+                if (!isSuperAdminLogs) filteredLogs = filteredLogs.filter(l => !superAdminUsernames.has(l.username));
+                if (window.logFilterUser !== 'all') filteredLogs = filteredLogs.filter(l => l.name === window.logFilterUser);
+                const sortedLogs = filteredLogs.slice().reverse().slice(0, 200);
+                html += `<div class="mb-3"><span class="text-[10px] sm:text-xs text-slate-400 font-bold">แสดงล่าสุด ${sortedLogs.length} จาก ${filteredLogs.length} รายการ${window.logFilterCategory !== 'all' ? ` (หมวด: ${catMeta[window.logFilterCategory].label})` : ''}${window.logFilterUser !== 'all' ? ` (บัญชี: ${window.logFilterUser})` : ''}</span></div>`;
+                if (sortedLogs.length === 0) {
+                    html += `<div class="text-center text-slate-400 py-16 font-medium"><i class="fas fa-inbox text-3xl mb-3"></i><br>ยังไม่มีประวัติในหมวดนี้</div>`;
+                } else {
+                    html += `<div class="space-y-2 max-h-[600px] overflow-y-auto pr-1">`;
+                    sortedLogs.forEach(l => {
+                        const d = new Date(l.timestamp);
+                        const dateStr = isNaN(d) ? '' : d.toLocaleString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                        const m = catMeta[l.category || 'data'] || catMeta.data;
+                        html += `<div class="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-start sm:items-center gap-1.5 sm:gap-3"><div class="shrink-0 text-[10px] sm:text-xs font-bold text-slate-400 sm:w-36">${dateStr}</div><div class="shrink-0 text-[10px] sm:text-xs font-black text-${m.color}-700 bg-${m.color}-50 border border-${m.color}-200 px-2 py-0.5 rounded-full w-max"><i class="fas ${m.icon}"></i> ${m.label}</div><div class="shrink-0 text-[10px] sm:text-xs font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full w-max">${l.name}</div><div class="flex-1 min-w-0"><span class="font-bold text-slate-700 text-xs sm:text-sm">${l.action}</span>${l.details ? `<span class="text-slate-500 text-[10px] sm:text-xs ml-1">— ${l.details}</span>` : ''}</div></div>`;
+                    });
+                    html += `</div>`;
+                }
+                content.innerHTML = html;
+            }
+        }
+        window.filterLogCategory = function(cat) { window.logFilterCategory = cat; renderAdminTab(); };
+        window.filterLogUser = function(name) { window.logFilterUser = name; renderAdminTab(); };
+        window.refreshLogView = async function(btn) {
+            const icon = document.getElementById('logRefreshIcon');
+            if (icon) icon.classList.add('fa-spin');
+            if (btn) btn.disabled = true;
+            await window.refreshData();
+        };
+        window.clearAllLogs = function() {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่ล้างประวัติ Log ได้", "error"); return; }
+            showConfirm("ล้างประวัติ Log ทั้งหมด", "ประวัติการแก้ไขทั้งหมดที่บันทึกไว้จะถูกลบอย่างถาวรและไม่สามารถกู้คืนได้ คุณแน่ใจหรือไม่?", () => {
+                logs = [];
+                logAction('ล้างประวัติ Log ทั้งหมด', '', 'account');
+                saveData('full'); showToast("ล้างประวัติ Log เรียบร้อยแล้ว"); renderAdminTab();
+            });
+        };
+
+        // ===== จัดการวันหยุด/วันสอบ =====
+        window.changeHolidayMonth = function(delta) {
+            if (window.holidayCalYear === undefined) { const now = new Date(); window.holidayCalYear = now.getFullYear(); window.holidayCalMonth = now.getMonth(); }
+            window.holidayCalMonth += delta;
+            if (window.holidayCalMonth > 11) { window.holidayCalMonth = 0; window.holidayCalYear++; }
+            if (window.holidayCalMonth < 0) { window.holidayCalMonth = 11; window.holidayCalYear--; }
+            renderAdminTab();
+        };
+        window.openHolidayModal = function(dateStr) {
+            const holiday = getHolidayForDate(dateStr);
+            document.getElementById('holidayModalTitle').innerText = holiday ? 'แก้ไขวันหยุด' : 'เพิ่มวันหยุด';
+            document.getElementById('holidayModalDate').value = dateStr;
+            document.getElementById('holidayModalLabel').value = holiday ? holiday.label : '';
+            document.getElementById('holidayModalDeleteBtn').classList.toggle('hidden', !holiday);
+            document.getElementById('holidayModal').classList.remove('hidden');
+            setTimeout(() => { document.getElementById('holidayModalBox').classList.remove('scale-95', 'opacity-0'); document.getElementById('holidayModalBox').classList.add('scale-100', 'opacity-100'); }, 10);
+        };
+        window.closeHolidayModal = function() {
+            document.getElementById('holidayModalBox').classList.remove('scale-100', 'opacity-100');
+            document.getElementById('holidayModalBox').classList.add('scale-95', 'opacity-0');
+            setTimeout(() => { document.getElementById('holidayModal').classList.add('hidden'); }, 300);
+        };
+        window.saveHolidayForm = function() {
+            const dateStr = document.getElementById('holidayModalDate').value;
+            const label = document.getElementById('holidayModalLabel').value.trim();
+            if (!label) { showToast("กรุณากรอกหมายเหตุ/เหตุผลของวันหยุด", "error"); return; }
+            if (!settings.holidays) settings.holidays = [];
+            const existing = settings.holidays.find(h => h.date === dateStr);
+            if (existing) { existing.label = label; } else { settings.holidays.push({ date: dateStr, label }); }
+            logAction('เพิ่ม/แก้ไขวันหยุด', `${dateStr.split('-').reverse().join('/')} - ${label}`, 'settings');
+            updateHolidayBar();
+            saveData('full'); showToast("บันทึกวันหยุดเรียบร้อย"); renderAdminTab(); closeHolidayModal();
+        };
+        // ===== [ใหม่] ยืนยันเพิ่มวันหยุดที่แนะนำ (จากตาราง THAI_HOLIDAYS_REFERENCE) เข้าปฏิทินจริง =====
+        // ===== [ใหม่] ตารางแปลชื่อวันหยุดจากภาษาอังกฤษ (ที่ได้จาก API ภายนอก) เป็นภาษาไทย - ถ้าไม่พบในตารางจะใช้ชื่อภาษาอังกฤษเดิมไปก่อน =====
+        const HOLIDAY_NAME_TRANSLATE = {
+            "New Year's Day": "วันขึ้นปีใหม่", "Makha Bucha": "วันมาฆบูชา", "Chakri Memorial Day": "วันจักรี",
+            "Songkran Festival": "วันสงกรานต์", "National Labor Day": "วันแรงงานแห่งชาติ", "Coronation Day": "วันฉัตรมงคล",
+            "Royal Ploughing Ceremony": "วันพืชมงคล", "Visakha Bucha": "วันวิสาขบูชา", "Asalha Bucha": "วันอาสาฬหบูชา",
+            "Buddhist Lent Day": "วันเข้าพรรษา", "Constitution Day": "วันรัฐธรรมนูญ", "New Year's Eve": "วันสิ้นปี",
+            "Chulalongkorn Memorial Day": "วันปิยมหาราช", "Awakening Day": "วันหยุดพิเศษ",
+        };
+        function translateHolidayName_(englishName) {
+            if (HOLIDAY_NAME_TRANSLATE[englishName]) return HOLIDAY_NAME_TRANSLATE[englishName];
+            const found = Object.keys(HOLIDAY_NAME_TRANSLATE).find(k => englishName.includes(k));
+            return found ? HOLIDAY_NAME_TRANSLATE[found] : englishName; // ไม่พบคำแปล - ใช้ชื่อเดิม (ยังกดยืนยันเพิ่มได้ปกติ)
+        }
+        window.fetchExternalHolidaysForYear = async function(year) {
+            const btn = document.getElementById('fetchHolidayBtn');
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังดึงข้อมูล...'; }
+            try {
+                const res = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=get_external_holidays&year=${year}`);
+                const data = await res.json();
+                if (data && data.status === 'success' && Array.isArray(data.holidays) && data.holidays.length > 0) {
+                    THAI_HOLIDAYS_REFERENCE[year] = data.holidays.map(h => ({ date: h.date, label: translateHolidayName_(h.label) }));
+                    showToast(`ดึงข้อมูลวันหยุดปี ${year + 543} มาแล้ว ${data.holidays.length} วัน`);
+                    renderAdminTab();
+                } else {
+                    showToast(data.message || "ไม่พบข้อมูลวันหยุดของปีนี้จากแหล่งข้อมูลภายนอก", "error");
+                    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-cloud-download-alt"></i> ดึงข้อมูลจากอินเทอร์เน็ต'; }
+                }
+            } catch (e) {
+                showToast("เชื่อมต่อแหล่งข้อมูลภายนอกไม่ได้", "error");
+                if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-cloud-download-alt"></i> ดึงข้อมูลจากอินเทอร์เน็ต'; }
+            }
+        };
+        window.confirmSuggestedHoliday = function(dateStr, label) {
+            if (!settings.holidays) settings.holidays = [];
+            if (settings.holidays.find(h => h.date === dateStr)) { showToast("มีวันหยุดนี้อยู่แล้ว", "error"); return; }
+            settings.holidays.push({ date: dateStr, label });
+            logAction('เพิ่มวันหยุด (แนะนำอัตโนมัติ)', `${dateStr.split('-').reverse().join('/')} - ${label}`, 'settings');
+            updateHolidayBar();
+            saveData('full'); showToast(`เพิ่มวันหยุด "${label}" เรียบร้อย`); renderAdminTab();
+        };
+        window.confirmAllSuggestedHolidays = function(monthPrefix) {
+            const yearNum = parseInt(monthPrefix.split('-')[0]);
+            const yearRefList = THAI_HOLIDAYS_REFERENCE[yearNum] || [];
+            const existingHolidayDates = new Set((settings.holidays || []).map(h => h.date));
+            const toAdd = yearRefList.filter(h => h.date.startsWith(monthPrefix) && !existingHolidayDates.has(h.date));
+            if (toAdd.length === 0) return;
+            showConfirm("ยืนยันเพิ่มวันหยุดทั้งหมด", `ต้องการเพิ่มวันหยุดที่แนะนำทั้ง ${toAdd.length} วันของเดือนนี้เข้าปฏิทินเลยใช่หรือไม่?`, () => {
+                if (!settings.holidays) settings.holidays = [];
+                toAdd.forEach(h => settings.holidays.push({ date: h.date, label: h.label }));
+                logAction('เพิ่มวันหยุดทั้งเดือน (แนะนำอัตโนมัติ)', `${toAdd.length} วัน (${monthPrefix.slice(0,7)})`, 'settings');
+                updateHolidayBar();
+                saveData('full'); showToast(`เพิ่มวันหยุด ${toAdd.length} วันเรียบร้อย`); renderAdminTab();
+            });
+        };
+        window.deleteHoliday = function(dateStr) {
+            const holiday = getHolidayForDate(dateStr);
+            if (!holiday) return;
+            showConfirm("ลบวันหยุด", `ต้องการลบวันหยุดวันที่ ${dateStr.split('-').reverse().join('/')} (${holiday.label}) ใช่หรือไม่?`, () => {
+                settings.holidays = settings.holidays.filter(h => h.date !== dateStr);
+                logAction('ลบวันหยุด', `${dateStr.split('-').reverse().join('/')} - ${holiday.label}`, 'settings');
+                updateHolidayBar();
+                saveData('full'); showToast("ลบวันหยุดเรียบร้อย"); renderAdminTab();
+                const modal = document.getElementById('holidayModal'); if (modal && !modal.classList.contains('hidden')) closeHolidayModal();
+            });
+        };
+
+        window.saveSiteTitleSettings = function() {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้", "error"); return; }
+            settings.title = document.getElementById('setSiteTitle').value.trim() || 'ระบบเช็คชื่อนักเรียนอัจฉริยะ';
+            document.getElementById('navTitle').innerText = settings.title;
+            document.title = settings.title;
+            logAction('แก้ไขชื่อหัวเรื่องระบบ', settings.title, 'settings');
+            saveData('full'); showToast("บันทึกชื่อระบบเรียบร้อย"); renderAdminTab();
+        };
+        // เลือกเทอมที่จะบังคับแสดงผลหน้าแรก (ยังไม่บันทึกจริง - แค่เลือกไว้ก่อน ต้องกด "บันทึก" ถึงจะมีผล)
+        window.selectPendingPublicTerm = function(term) {
+            window.__pendingPublicTerm = String(term);
+            renderAdminTab();
+        };
+        window.savePublicTermSetting = function() {
+            const newTerm = (window.__pendingPublicTerm !== undefined && window.__pendingPublicTerm !== null) ? String(window.__pendingPublicTerm) : String(settings.term);
+            if (newTerm === String(settings.term)) { showToast("เทอมที่แสดงผลหน้าแรกเป็นค่านี้อยู่แล้ว"); return; }
+            settings.term = newTerm;
+            window.__pendingPublicTerm = null;
+            window.__justSwitchedTerm = true;
+            document.getElementById('navSubtitle').innerText = `ปีการศึกษา ${settings.year}`;
+            logAction('เปลี่ยนเทอมที่แสดงผลหน้าแรก', `บังคับแสดงเทอม ${settings.term}/${settings.year} สำหรับผู้ใช้ทั่วไป`, 'settings');
+            saveData('full'); showToast(`บันทึกเทอมที่แสดงผลหน้าแรกเป็นเทอม ${settings.term} แล้ว`); renderAdminTab();
+            applyServerStatusBadge();
+        };
+        // เลือกจำนวนเทอมของระบบ (ยังไม่บันทึกจริง - แค่เลือกไว้ก่อน ต้องกด "บันทึก" ถึงจะมีผล)
+        window.selectPendingTermCount = function(n) {
+            n = Number(n);
+            if (![1, 2, 3].includes(n)) return;
+            window.__pendingTermCount = n;
+            renderAdminTab();
+        };
+        window.saveTermCountSetting = function() {
+            const n = (window.__pendingTermCount !== undefined && window.__pendingTermCount !== null) ? Number(window.__pendingTermCount) : Number(settings.termCount || 2);
+            if (![1, 2, 3].includes(n)) return;
+            if (n === Number(settings.termCount || 2)) { showToast("จำนวนเทอมเป็นค่านี้อยู่แล้ว"); return; }
+            settings.termCount = n;
+            window.__pendingTermCount = null;
+            // ถ้าเทอมที่แสดงผลหน้าแรก หรือเทอมที่แอดมินกำลังจัดการอยู่ เกินจำนวนเทอมใหม่ ให้ปรับกลับมาที่เทอม 1
+            if (Number(settings.term) > n) { settings.term = '1'; document.getElementById('navSubtitle').innerText = `ปีการศึกษา ${settings.year}`; }
+            if (adminWorkingTerm && Number(adminWorkingTerm) > n) { adminWorkingTerm = null; }
+            logAction('ปรับจำนวนเทอมของระบบ', `ตั้งจำนวนเทอมเป็น ${n} เทอม`, 'settings');
+            saveData('full'); showToast(`ตั้งจำนวนเทอมเป็น ${n} เทอมแล้ว`); renderAdminTab();
+        };
+        // ===== จัดการปีการศึกษา: เพิ่มปีใหม่ / เลือก+บันทึก / จัดเก็บ (archive) / ปลดล็อค (เฉพาะ Super Admin) =====
+        window.openAddYearPrompt = function() {
+            showPrompt("เพิ่มปีการศึกษาใหม่", "กรอกปีการศึกษาที่ต้องการเพิ่ม (เช่น 2570)", '', async (val) => {
+                const yr = (val || '').trim();
+                if (!/^\d{4}$/.test(yr)) { showToast("กรุณากรอกปีการศึกษาเป็นตัวเลข 4 หลัก", "error"); return; }
+                if (!settings.academicYears) settings.academicYears = [];
+                if (settings.academicYears.some(y => String(y.year) === yr)) { showToast("มีปีการศึกษานี้อยู่แล้วในระบบ", "error"); return; }
+                settings.academicYears.push({ year: yr, status: 'active' });
+                logAction('เพิ่มปีการศึกษาใหม่', `ปีการศึกษา ${yr}`, 'settings');
+                showToast("กำลังบันทึก...", "info");
+                const ok = await saveData('full');
+                if (ok) { showToast(`เพิ่มปีการศึกษา ${yr} แล้ว (ยังไม่ได้ตั้งเป็นปีที่แสดงผล ต้องเลือกแล้วกดบันทึก)`); }
+                else { settings.academicYears = settings.academicYears.filter(y => String(y.year) !== yr); showToast("บันทึกไม่สำเร็จ ยกเลิกการเพิ่มปีการศึกษานี้ กรุณาลองใหม่อีกครั้ง", "error"); }
+                renderAdminTab();
+            });
+        };
+        window.selectPendingYear = function(year) {
+            year = String(year);
+            if (getYearStatus(year) === 'archived') { showToast("ปีการศึกษานี้ถูกจัดเก็บแล้ว ต้องให้ Super Admin ปลดล็อคก่อนจึงจะเลือกใช้งานได้", "error"); return; }
+            window.__pendingYear = year;
+            renderAdminTab();
+        };
+        window.saveYearSetting = async function() {
+            const newYear = (window.__pendingYear !== undefined && window.__pendingYear !== null) ? String(window.__pendingYear) : String(settings.year);
+            if (getYearStatus(newYear) === 'archived') { showToast("ปีการศึกษานี้ถูกจัดเก็บแล้ว ไม่สามารถตั้งเป็นปีที่แสดงผลได้", "error"); return; }
+            if (newYear === String(settings.year) && !window.__pendingYear) { showToast("ปีการศึกษานี้ถูกตั้งเป็นปีที่แสดงผลอยู่แล้ว"); return; }
+            const previousYear = settings.year;
+            settings.year = newYear;
+            window.__pendingYear = null;
+            document.getElementById('navSubtitle').innerText = `ปีการศึกษา ${settings.year}`;
+            window.__justSwitchedTerm = true;
+            logAction('เปลี่ยนปีการศึกษาที่แสดงผล', `ตั้งปีการศึกษาที่แสดงผลหน้าแรกเป็น ${settings.year}`, 'settings');
+            showToast("กำลังบันทึก...", "info");
+            const ok = await saveData('full');
+            if (ok) { showToast(`บันทึกปีการศึกษาที่แสดงผลเป็น ${settings.year} แล้ว`); }
+            else { settings.year = previousYear; document.getElementById('navSubtitle').innerText = `ปีการศึกษา ${settings.year}`; showToast(`บันทึกไม่สำเร็จ ยกเลิกการเปลี่ยนแปลงและกลับไปใช้ปีการศึกษา ${previousYear} ตามเดิม กรุณาลองใหม่อีกครั้ง`, "error"); }
+            renderAdminTab();
+            applyServerStatusBadge();
+        };
+        window.archiveAcademicYear = function(year) {
+            year = String(year);
+            if (String(settings.year) === year) { showToast("ไม่สามารถจัดเก็บปีการศึกษาที่กำลังแสดงผลอยู่ในขณะนี้ได้ กรุณาเปลี่ยนปีที่แสดงผลก่อน", "error"); return; }
+            if (getYearStatus(year) === 'archived') { showToast("ปีการศึกษานี้ถูกจัดเก็บไปแล้ว", "error"); return; }
+            showConfirm("ยืนยันการจัดเก็บปีการศึกษา", `ปีการศึกษา ${year} พร้อมจัดเก็บหรือไม่? ข้อมูลการเช็คชื่อทั้งหมดของปีนี้ (ทุกเทอม) จะถูกเก็บถาวรไว้บนเซิร์ฟเวอร์และส่งออกเป็นไฟล์ Excel สำรอง แล้วลบออกจากระบบที่ใช้งานอยู่ทันที หากจัดเก็บแล้วจะไม่สามารถนำปีนี้กลับมาใช้งานได้ (ต้องให้ Super Admin ปลดล็อคเท่านั้น)`, async () => {
+                const subjIds = new Set(subjects.filter(s => String(s.year) === year).map(s => s.id));
+                const toArchive = attendanceData.filter(a => subjIds.has(a.subjectId));
+                if (toArchive.length > 0) {
+                    showToast("กำลังเก็บถาวร...", "info");
+                    const ok = await saveManualArchiveToServer(toArchive, `attendance_archive_year_${year}`);
+                    if (!ok) { showToast("เก็บถาวรไปยังเซิร์ฟเวอร์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง (ยังไม่มีการจัดเก็บปีนี้)", "error"); return; }
+                    downloadAttendanceExcel(toArchive, `เก็บถาวรข้อมูลเช็คชื่อ_ปีการศึกษา_${year}.xlsx`);
+                    attendanceData = attendanceData.filter(a => !subjIds.has(a.subjectId));
+                }
+                if (!settings.academicYears) settings.academicYears = [];
+                let entry = settings.academicYears.find(y => String(y.year) === year);
+                if (!entry) { entry = { year, status: 'active' }; settings.academicYears.push(entry); }
+                entry.status = 'archived';
+                logAction('จัดเก็บปีการศึกษา (เก็บถาวร)', `ปีการศึกษา ${year} - เก็บถาวรข้อมูลเช็คชื่อ ${toArchive.length} รายการ`, 'settings');
+                await saveData('full'); showToast(`จัดเก็บปีการศึกษา ${year} เรียบร้อย${toArchive.length > 0 ? ' (บันทึกบนเซิร์ฟเวอร์ + ดาวน์โหลดไฟล์สำรองแล้ว)' : ''}`); renderAdminTab();
+            });
+        };
+        window.unlockAcademicYear = function(year) {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่ปลดล็อคปีการศึกษาได้", "error"); return; }
+            year = String(year);
+            showConfirm("ปลดล็อคปีการศึกษา", `ต้องการปลดล็อคปีการศึกษา ${year} เพื่อนำกลับมาใช้งานหรือไม่? (ข้อมูลเช็คชื่อเก่าที่เคยเก็บถาวรไปแล้วจะไม่ถูกนำกลับมา มีเฉพาะไฟล์ Excel ที่ดาวน์โหลดไว้เท่านั้น)`, () => {
+                const entry = settings.academicYears && settings.academicYears.find(y => String(y.year) === year);
+                if (entry) entry.status = 'active';
+                logAction('ปลดล็อคปีการศึกษา', `ปีการศึกษา ${year}`, 'settings');
+                saveData('full'); showToast(`ปลดล็อคปีการศึกษา ${year} แล้ว`); renderAdminTab();
+            });
+        };
+        // ซ่อน/แสดงปีการศึกษาจากแอดมินทั่วไป (เฉพาะ Super Admin เห็น/สลับได้) - กันแอดมินหลงเข้าไปเพิ่มข้อมูลในปีเก่าโดยไม่ตั้งใจ ไม่กระทบข้อมูลใดๆ แค่ซ่อนจากตัวเลือกเทอม/ปีเท่านั้น
+        window.toggleYearVisibility = function(year) {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่ซ่อน/แสดงปีการศึกษาได้", "error"); return; }
+            year = String(year);
+            const entry = settings.academicYears && settings.academicYears.find(y => String(y.year) === year);
+            if (!entry) return;
+            const willHide = !entry.hidden;
+            entry.hidden = willHide;
+            logAction(willHide ? 'ซ่อนปีการศึกษาจากแอดมินทั่วไป' : 'แสดงปีการศึกษาให้แอดมินทั่วไปเห็นอีกครั้ง', `ปีการศึกษา ${year}`, 'settings');
+            saveData('full'); showToast(willHide ? `ซ่อนปีการศึกษา ${year} จากแอดมินทั่วไปแล้ว` : `แสดงปีการศึกษา ${year} ให้แอดมินทั่วไปเห็นอีกครั้งแล้ว`); renderAdminTab();
+        };
+        // ลบปีการศึกษาที่เพิ่มผิดพลาดออกจากรายการ (เผื่อกรณีสร้างผิด) — บล็อกถ้าเป็นปีที่กำลังใช้แสดงผลอยู่ หรือมีข้อมูลวิชา/นักเรียนผูกอยู่แล้ว เพื่อความปลอดภัย
+        window.deleteAcademicYear = function(year) {
+            year = String(year);
+            if (String(settings.year) === year) { showToast("ไม่สามารถลบปีการศึกษาที่กำลังแสดงผลอยู่ในขณะนี้ได้ กรุณาเปลี่ยนปีที่แสดงผลก่อน", "error"); return; }
+            const hasSubjects = subjects.some(s => String(s.year) === year);
+            const hasStudents = students.some(s => String(s.year) === year);
+            if (hasSubjects || hasStudents) { showToast("ปีการศึกษานี้มีข้อมูลวิชาหรือนักเรียนผูกอยู่แล้ว ไม่สามารถลบได้ (ใช้ปุ่ม \"จัดเก็บ\" แทนหากต้องการเก็บถาวร)", "error"); return; }
+            showConfirm("ลบปีการศึกษา", `ต้องการลบปีการศึกษา ${year} ออกจากรายการหรือไม่? (ใช้สำหรับกรณีเพิ่มปีผิดพลาด ยังไม่เคยมีการใช้งานจริง)`, () => {
+                settings.academicYears = (settings.academicYears || []).filter(y => String(y.year) !== year);
+                logAction('ลบปีการศึกษา', `ปีการศึกษา ${year}`, 'settings');
+                saveData('full'); showToast(`ลบปีการศึกษา ${year} แล้ว`); renderAdminTab();
+            });
+        };
+        // เลือกสถานะของเทอมใดเทอมหนึ่งโดยเฉพาะ (ยังไม่บันทึกจริง - แค่เลือกไว้ก่อน ต้องกด "บันทึก" ถึงจะมีผล)
+        window.selectPendingTermStatusFor = function(term, status) {
+            if (!['open', 'not_opened', 'locked', 'maintenance'].includes(status)) return;
+            window.__pendingTermStatusByTerm = window.__pendingTermStatusByTerm || {};
+            window.__pendingTermStatusByTerm[term] = status;
+            renderAdminTab();
+        };
+        window.saveTermStatusSettingFor = function(term) {
+            window.__pendingTermStatusByTerm = window.__pendingTermStatusByTerm || {};
+            const current = getTermStatus(term, settings.year);
+            const status = window.__pendingTermStatusByTerm[term] || current;
+            if (!['open', 'not_opened', 'locked', 'maintenance'].includes(status)) return;
+            if (status === current && !window.__pendingTermStatusByTerm[term]) { showToast("สถานะเทอมนี้เป็นค่านี้อยู่แล้ว"); return; }
+            if (!settings.termLocks) settings.termLocks = {};
+            const key = termKeyOf(term, settings.year);
+            settings.termLocks[key] = status;
+            delete window.__pendingTermStatusByTerm[term];
+            const labels = { open: 'เปิดใช้งาน', not_opened: 'ยังไม่เปิดใช้งาน', locked: 'ล็อคข้อมูล', maintenance: 'ปิดปรับปรุงชั่วคราว' };
+            logAction('เปลี่ยนสถานะเทอม', `เทอม ${term}/${settings.year} => ${labels[status]}`, 'settings');
+            saveData('full'); showToast(`ตั้งสถานะเทอม ${term}/${settings.year} เป็น "${labels[status]}" แล้ว`); renderAdminTab();
+            applyServerStatusBadge();
+        };
+        window.goToNotification = function(idx) {
+            const n = window.__pendingNotifs && window.__pendingNotifs[idx]; if (n && n.action) n.action(); else window.navigate('admin', { tab: 'subjects' });
+        };
+        window.toggleNotifBar = function() {
+            window.__notifBarExpanded = !window.__notifBarExpanded;
+            renderAdmin();
+        };
+        window.stepAdminSubjectRoom = function(dir) {
+            const list = getRoomList();
+            if (window.adminSelectedSubjectRoom === 'all' || !list.includes(window.adminSelectedSubjectRoom)) {
+                window.adminSelectedSubjectRoom = dir > 0 ? list[0] : list[list.length - 1];
+            } else {
+                let idx = list.indexOf(window.adminSelectedSubjectRoom) + dir;
+                idx = Math.max(0, Math.min(list.length - 1, idx));
+                window.adminSelectedSubjectRoom = list[idx];
+            }
+            renderAdminTab();
+        };
+        window.stepAdminRoom = function(dir) {
+            const list = getRoomList();
+            let idx = list.indexOf(window.adminSelectedRoom) + dir;
+            idx = Math.max(0, Math.min(list.length - 1, idx));
+            window.adminSelectedRoom = list[idx];
+            renderAdminTab();
+        };
+        window.setTeacherLogMode = function(mode, teacherName) {
+            window.__teacherLogState = { mode, teacherFilter: teacherName, search: (window.__teacherLogState && window.__teacherLogState.search) || '' };
+            renderAdminTab();
+        };
+        window.setTeacherViewMode = function(mode) {
+            window.__teacherViewMode = mode;
+            renderAdminTab();
+        };
+        window.toggleTeacherLogExpand = function(recordId) {
+            if (!window.__teacherLogExpanded) window.__teacherLogExpanded = {};
+            window.__teacherLogExpanded[recordId] = !window.__teacherLogExpanded[recordId];
+            renderAdminTab();
+        };
+        window.setTeacherLogSearch = function(value) {
+            if (!window.__teacherLogState) window.__teacherLogState = { mode: 'all', teacherFilter: null, search: '' };
+            window.__teacherLogState.search = value;
+            const activeEl = document.activeElement;
+            const selPos = activeEl && typeof activeEl.selectionStart === 'number' ? activeEl.selectionStart : null;
+            renderAdminTab();
+            const newInput = document.querySelector('#adminContent input[type="text"]');
+            if (newInput) { newInput.focus(); if (selPos !== null) { try { newInput.setSelectionRange(selPos, selPos); } catch (e) {} } }
+        };
+        window.refreshTeacherLog = async function() {
+            window.__teacherLogRefreshing = true; renderAdminTab();
+            try {
+                const response = await fetch(GOOGLE_APP_SCRIPT_URL);
+                const data = await response.json();
+                if (data) {
+                    if (data.attendanceData) attendanceData = data.attendanceData;
+                    if (data.subjects) subjects = data.subjects;
+                    if (data.teachers) teachers = data.teachers;
+                    showToast("รีเฟรชข้อมูลล่าสุดแล้ว", "success");
+                }
+            } catch (e) { showToast("รีเฟรชไม่สำเร็จ (เชื่อมต่อเซิร์ฟเวอร์ไม่ได้)", "error"); }
+            window.__teacherLogRefreshing = false; renderAdminTab();
+        };
+        // ดูตัวอย่างเทอมอื่นชั่วคราวที่หน้าแรก - ไม่บันทึกลงเซิร์ฟเวอร์ ไม่มีผลกับผู้ใช้คนอื่น และรีเฟรชหน้าเว็บแล้วจะรีเซ็ตกลับไปเทอมเริ่มต้นที่แอดมินตั้งไว้เสมอ
+        window.previewSwitchTerm = function(term) {
+            term = String(term);
+            if (term === String(viewTerm())) return;
+            const status = getTermStatus(term, settings.year);
+            if (status === 'not_opened' && !isAdmin) { showToast('เทอมนี้ยังไม่เปิดใช้งาน', 'error'); return; }
+            guestPreviewTerm = (term === String(settings.term)) ? null : term; // ถ้าเลือกกลับมาที่เทอมเริ่มต้นพอดี ก็เคลียร์ค่ากลับเป็น null
+            window.__justSwitchedTerm = true;
+            renderDashboard();
+        };
+        window.saveRoomCountsSettings = function() {
+            for(let i=1; i<=6; i++) { settings.roomCounts[`m${i}`] = parseInt(document.getElementById(`setCountM${i}`).value) || 0;
+            }
+            logAction('แก้ไขจำนวนห้องเรียน', '', 'settings');
+            saveData('full'); showToast("บันทึกจำนวนห้องเรียบร้อย"); renderAdminTab();
+        };
+        window.saveThresholdSettings = function() {
+            settings.thresholds = {
+                late: parseInt(document.getElementById('setLateThresh').value) || 4,
+                absent: parseInt(document.getElementById('setAbsentThresh').value) || 4,
+                incompletePeriods: parseInt(document.getElementById('setIncompletePeriodsThresh').value) || 4,
+                incompleteDays: parseInt(document.getElementById('setIncompleteDaysThresh').value) || 3,
+                leaveOverride: parseInt(document.getElementById('setLeaveOverrideThresh').value) || 4
+            };
+            logAction('แก้ไขเกณฑ์การแจ้งเตือนติดตาม', `สาย ${settings.thresholds.late} / ขาด ${settings.thresholds.absent} วัน, เข้าเรียนไม่ครบ ${settings.thresholds.incompletePeriods} คาบ x ${settings.thresholds.incompleteDays} วัน, ลาป่วย/ลากิจชนะสาย-ขาดที่ ${settings.thresholds.leaveOverride} คาบ`, 'settings');
+            saveData('full'); showToast("บันทึกเกณฑ์แจ้งเตือนเรียบร้อย"); renderAdminTab();
+        };
+        // ===== [ใหม่] บังคับล้างข้อมูลเช็คชื่อค้างในไฟล์หลักทันที (ปกติล้างอัตโนมัติอยู่แล้วทุกครั้งที่มีการใช้งาน) =====
+        window.forceCleanMainFile = async function() {
+            showToast("กำลังล้างข้อมูล...", "info");
+            try {
+                const res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'force_clean_main_file' }) });
+                const data = await res.json();
+                if (data && data.status === 'success') {
+                    showToast(data.cleaned ? "ล้างข้อมูลค้างในไฟล์หลักเรียบร้อย" : "ไฟล์หลักสะอาดอยู่แล้ว ไม่มีอะไรให้ล้าง");
+                    window.__storageInfo = null; // บังคับให้ดึงขนาดไฟล์ใหม่มาแสดง
+                    renderAdminTab();
+                } else { showToast("ล้างข้อมูลไม่สำเร็จ", "error"); }
+            } catch (e) { showToast("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้", "error"); }
+        };
+        // ===== [ใหม่] สร้างไฟล์เช็คชื่อล่วงหน้าให้ครบทุกห้องของเทอม/ปีที่แอดมินกำลังจัดการอยู่ (ไม่บังคับ - แค่เพื่อความสะดวกในการดู/จัดระเบียบ) =====
+        window.ensureRoomFilesForCurrentTerm = async function() {
+            const roomIds = [...new Set(subjects.filter(s => String(s.term) === String(adminTerm()) && String(s.year) === String(adminYear())).map(s => s.roomId))];
+            if (roomIds.length === 0) { showToast("ยังไม่มีวิชาลงไว้ในเทอมนี้ ไม่ทราบว่ามีห้องอะไรบ้าง", "error"); return; }
+            showToast(`กำลังสร้างไฟล์ล่วงหน้าให้ ${roomIds.length} ห้อง...`, "info");
+            try {
+                const res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'ensure_room_files', term: adminTerm(), year: adminYear(), roomIds }) });
+                const data = await res.json();
+                if (data && data.status === 'success') {
+                    showToast(data.createdRooms.length > 0 ? `สร้างไฟล์ใหม่ ${data.createdRooms.length} ห้องเรียบร้อย` : "มีไฟล์ครบทุกห้องอยู่แล้ว");
+                    window.__storageInfo = null;
+                    renderAdminTab();
+                } else { showToast("สร้างไฟล์ไม่สำเร็จ", "error"); }
+            } catch (e) { showToast("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้", "error"); }
+        };
+        window.saveStorageLimit = function() {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้", "error"); return; }
+            const val = parseInt(document.getElementById('setStorageLimit').value);
+            if (!val || val < 1000) { showToast("กรุณากรอกตัวเลขที่มากกว่า 1,000 ตัวอักษร", "error"); return; }
+            settings.storageLimitChars = val;
+            logAction('แก้ไขขีดจำกัดพื้นที่จัดเก็บข้อมูล', `${val.toLocaleString()} ตัวอักษร`, 'settings');
+            saveData('full'); showToast("บันทึกขีดจำกัดเรียบร้อย"); renderAdminTab();
+        };
+
+        // เพิ่มประกาศใหม่เข้าไปในลิสต์ (รองรับหลายรายการ พร้อมลำดับความสำคัญ)
+        window.addAnnouncement = function() {
+            const text = document.getElementById('setAnnouncement').value.trim();
+            const start = document.getElementById('setAnnouncementStart').value || '';
+            const end = document.getElementById('setAnnouncementEnd').value || '';
+            const priority = document.getElementById('setAnnouncementPriority').value || 'normal';
+            if (!text) { showToast("กรุณากรอกข้อความประกาศ", "error"); return; }
+            if (start && end && new Date(end) < new Date(start)) { showToast("เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่มต้น", "error"); return; }
+            ensureAnnouncementsArray();
+            settings.announcements.push({ id: generateId(), text, start, end, priority });
+            updateAnnouncementBar();
+            logAction('เพิ่มประกาศ', `ตั้งข้อความ (${priority}): "${text.substring(0,60)}"`, 'settings');
+            saveData('full'); showToast("เพิ่มประกาศเรียบร้อย"); renderAdminTab();
+        };
+
+        // ลบประกาศทีละรายการ (เฉพาะแอดมิน)
+        window.deleteAnnouncement = function(id) {
+            showConfirm("ลบประกาศ", "ต้องการลบประกาศรายการนี้ทันทีใช่หรือไม่?", () => {
+                ensureAnnouncementsArray();
+                settings.announcements = settings.announcements.filter(a => a.id !== id);
+                updateAnnouncementBar();
+                logAction('ลบประกาศ', '', 'settings');
+                saveData('full'); showToast("ลบประกาศแล้ว"); renderAdminTab();
+            });
+        };
+
+        // อัปโหลดไอคอนเว็บไซต์ (Favicon) - เฉพาะแอดมิน ปรับขนาดภาพให้เล็กลงก่อนบันทึกเพื่อไม่ให้ข้อมูลหนักเกินไป
+        window.handleFaviconUpload = function(event) {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้", "error"); return; }
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            if (!file.type.startsWith('image/')) { showToast("กรุณาเลือกไฟล์รูปภาพเท่านั้น", "error"); return; }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const SIZE = 128;
+                    const canvas = document.createElement('canvas');
+                    canvas.width = SIZE; canvas.height = SIZE;
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, SIZE, SIZE);
+                    const scale = Math.max(SIZE / img.width, SIZE / img.height);
+                    const w = img.width * scale, h = img.height * scale;
+                    ctx.drawImage(img, (SIZE - w) / 2, (SIZE - h) / 2, w, h);
+                    const dataUrl = canvas.toDataURL('image/png', 0.9);
+                    settings.faviconDataUrl = dataUrl;
+                    applyFavicon();
+                    const preview = document.getElementById('faviconPreview'); if (preview) preview.src = dataUrl;
+                    logAction('เปลี่ยนไอคอนเว็บไซต์ (Favicon)', '', 'settings');
+                    saveData('full');
+                    showToast("บันทึกไอคอนเว็บไซต์เรียบร้อย");
+                };
+                img.onerror = () => showToast("ไม่สามารถอ่านไฟล์รูปภาพนี้ได้", "error");
+                img.src = e.target.result;
+            };
+            reader.onerror = () => showToast("เกิดข้อผิดพลาดในการอ่านไฟล์", "error");
+            reader.readAsDataURL(file);
+            event.target.value = '';
+        };
+
+        window.handleHeaderLogoUpload = function(event) {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้", "error"); return; }
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            if (!file.type.startsWith('image/')) { showToast("กรุณาเลือกไฟล์รูปภาพเท่านั้น", "error"); return; }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const SIZE = 160;
+                    const canvas = document.createElement('canvas');
+                    canvas.width = SIZE; canvas.height = SIZE;
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, SIZE, SIZE);
+                    const scale = Math.max(SIZE / img.width, SIZE / img.height);
+                    const w = img.width * scale, h = img.height * scale;
+                    ctx.drawImage(img, (SIZE - w) / 2, (SIZE - h) / 2, w, h);
+                    const dataUrl = canvas.toDataURL('image/png', 0.9);
+                    settings.logoDataUrl = dataUrl;
+                    applyHeaderLogo();
+                    logAction('เปลี่ยนโลโก้บนแถบหัวเว็บไซต์', '', 'settings');
+                    saveData('full');
+                    showToast("บันทึกโลโก้หัวเว็บไซต์เรียบร้อย");
+                    renderAdminTab();
+                };
+                img.onerror = () => showToast("ไม่สามารถอ่านไฟล์รูปภาพนี้ได้", "error");
+                img.src = e.target.result;
+            };
+            reader.onerror = () => showToast("เกิดข้อผิดพลาดในการอ่านไฟล์", "error");
+            reader.readAsDataURL(file);
+            event.target.value = '';
+        };
+
+        window.removeHeaderLogo = function() {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้", "error"); return; }
+            settings.logoDataUrl = '';
+            applyHeaderLogo();
+            logAction('ลบโลโก้บนแถบหัวเว็บไซต์', '', 'settings');
+            saveData('full');
+            showToast("ลบโลโก้แล้ว กลับไปใช้ไอคอนเริ่มต้น");
+            renderAdminTab();
+        };
+        
+        function saveAdvisors() {
+            if (!settings.advisors) settings.advisors = {};
+            if (!settings.staffs) settings.staffs = {};
+            const key = termKeyOf(adminTerm(), adminYear());
+            if (!settings.advisors[key]) settings.advisors[key] = {};
+            if (!settings.staffs[key]) settings.staffs[key] = {};
+            getRoomList().forEach(roomId => {
+                settings.advisors[key][roomId] = [ document.getElementById(`adv1_${roomId}`).value.trim(), document.getElementById(`adv2_${roomId}`).value.trim() ];
+                settings.staffs[key][roomId] = document.getElementById(`staff_${roomId}`).value;
+            });
+            logAction('แก้ไขครูที่ปรึกษา/เจ้าหน้าที่ประจำห้อง', `เทอม ${adminTerm()}/${adminYear()}`, 'settings');
+            saveData('full'); showToast("บันทึกบุคลากรประจำห้องเรียบร้อย"); renderAdminTab();
+        }
+
+        window.openTeacherModal = function() {
+            editingTeacherId = null;
+            document.getElementById('teacherModalTitle').innerText = 'เพิ่มครูใหม่';
+            document.getElementById('newTcName').value = ''; document.getElementById('newTcDept').value = departmentsList[0];
+            document.getElementById('teacherModal').classList.remove('hidden');
+            setTimeout(() => { document.getElementById('teacherModalBox').classList.remove('scale-95', 'opacity-0'); document.getElementById('teacherModalBox').classList.add('scale-100', 'opacity-100'); }, 10);
+        };
+        window.closeTeacherModal = function() {
+            document.getElementById('teacherModalBox').classList.remove('scale-100', 'opacity-100'); document.getElementById('teacherModalBox').classList.add('scale-95', 'opacity-0');
+            setTimeout(() => { document.getElementById('teacherModal').classList.add('hidden'); }, 300);
+        };
+        window.prepareEditTeacher = function(id) {
+            editingTeacherId = id;
+            const t = teachers.find(x => x.id === id); if(!t) return;
+            document.getElementById('teacherModalTitle').innerText = 'แก้ไขข้อมูลครู';
+            document.getElementById('newTcName').value = t.name; document.getElementById('newTcDept').value = t.department || 'ระบบ/อื่นๆ';
+            document.getElementById('teacherModal').classList.remove('hidden');
+            setTimeout(() => { document.getElementById('teacherModalBox').classList.remove('scale-95', 'opacity-0'); document.getElementById('teacherModalBox').classList.add('scale-100', 'opacity-100'); }, 10);
+        };
+        window.saveTeacherForm = function() {
+            const name = document.getElementById('newTcName').value.trim();
+            const dept = document.getElementById('newTcDept').value;
+            if (!name) { showToast("กรุณากรอกชื่อครู", "error"); return;
+            }
+            let logMsg = '';
+            if (editingTeacherId) {
+                const t = teachers.find(x => x.id === editingTeacherId);
+                if (t) {
+                    const oldName = t.name;
+                    if (teachers.find(x => x.name === name && x.id !== editingTeacherId)) { showToast("มีชื่อนี้แล้ว", "error"); return;
+                    }
+                    t.name = name;
+                    t.department = dept;
+                    if (oldName !== name) { subjects.forEach(s => { if (s.teacher === oldName) s.teacher = name; if (s.teacher2 === oldName) s.teacher2 = name; });
+                    }
+                    logMsg = `แก้ไขข้อมูลครู: ${oldName} -> ${name}`;
+                }
+            } else {
+                if (teachers.find(x => x.name === name)) { showToast("มีชื่อนี้แล้ว", "error");
+                return; }
+                teachers.push({ id: generateId(), name, department: dept });
+                logMsg = `เพิ่มครูใหม่: ${name}`;
+            }
+            logAction('จัดการข้อมูลครู', logMsg);
+            saveData('full'); showToast("บันทึกข้อมูลครูสำเร็จ"); renderAdminTab(); closeTeacherModal();
+        };
+        function deleteTeacher(id, subjectCount) { if (subjectCount > 0) { showToast("ไม่สามารถลบได้ มีวิชาที่สอนอยู่", "error"); return;
+        } const t = teachers.find(x => x.id === id); showConfirm("ลบ", "แน่ใจหรือไม่ที่จะลบครูท่านนี้?", () => { teachers = teachers.filter(x => x.id !== id); logAction('ลบข้อมูลครู', t ? t.name : id); saveData('full'); showToast("ลบเรียบร้อย"); renderAdminTab(); });
+        }
+        
+        window.resetAllAttendanceData = function() { showConfirm("ยืนยันล้างข้อมูลทั้งหมด", "คำเตือน: ข้อมูลการเช็คชื่อของนักเรียนทุกคนและวิชาทั้งหมดจะถูกลบอย่างถาวรและไม่สามารถกู้คืนได้ คุณแน่ใจหรือไม่?", async () => { showToast("กำลังล้างข้อมูล... (อัปเดตแบบเรียลไทม์)", "info"); document.body.style.pointerEvents = 'none'; logAction('ล้างข้อมูลการเช็คชื่อทั้งหมด', 'รีเซ็ตข้อมูลการเช็คชื่อ/ติดตามทั้งระบบ'); await saveData('reset_all'); document.body.style.pointerEvents = 'auto'; showToast("ล้างข้อมูลทั้งหมดเรียบร้อยแล้ว", "success"); renderAdminTab(); });
+        };
+
+        // ===== เก็บถาวรข้อมูลเช็คชื่อเก่า: ส่งออก Excel แล้วลบออกจากข้อมูลที่ใช้งานจริง (ลดขนาดไฟล์ระยะยาว) =====
+        window.updateArchivePreview = function() {
+            const cutoff = document.getElementById('archiveCutoffDate').value;
+            const textEl = document.getElementById('archivePreviewText');
+            if (!cutoff) { textEl.innerText = 'เลือกวันที่เพื่อดูจำนวนข้อมูลที่จะถูกเก็บถาวร'; return; }
+            const matching = attendanceData.filter(a => a.date && a.date < cutoff);
+            if (matching.length === 0) { textEl.innerText = `ไม่พบข้อมูลก่อนวันที่ ${cutoff.split('-').reverse().join('/')}`; return; }
+            textEl.innerHTML = `พบข้อมูล <b>${matching.length}</b> รายการเช็คชื่อ (${matching.length} คาบ) ก่อนวันที่ ${cutoff.split('-').reverse().join('/')} ที่จะถูกเก็บถาวร`;
+        };
+        // สร้างแถวข้อมูล Excel จากอาร์เรย์ของ attendance record (ใช้ร่วมกันทั้งตอนเก็บถาวรและตอนดูข้อมูลเก่า)
+        function buildAttendanceExcelRows(records) {
+            const rows = [["วันที่", "คาบ", "รหัสวิชา", "ชื่อวิชา", "ห้อง", "เลขที่", "ชื่อ-นามสกุล", "สถานะ"]];
+            records.forEach(a => {
+                const sub = subjects.find(s => s.id === a.subjectId);
+                const roomName = sub ? formatRoomName(sub.roomId) : '-';
+                const dateDisp = (a.date || '').split('-').reverse().join('/');
+                Object.keys(a.records || {}).forEach(stId => {
+                    const st = students.find(s => s.id === stId);
+                    rows.push([dateDisp, a.period, sub ? (sub.code || '') : '', sub ? sub.name : '(วิชาถูกลบแล้ว)', roomName, st ? st.number : '-', st ? st.name : '(ไม่พบข้อมูลนักเรียน)', a.records[stId]]);
+                });
+            });
+            return rows;
+        }
+        function downloadAttendanceExcel(records, filename) {
+            const rows = buildAttendanceExcelRows(records);
+            const ws = XLSX.utils.aoa_to_sheet(rows); ws['!cols'] = [{wch:10},{wch:6},{wch:10},{wch:22},{wch:10},{wch:8},{wch:28},{wch:14}];
+            const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Archive");
+            XLSX.writeFile(wb, filename);
+        }
+        // บันทึกข้อมูลที่เก็บถาวรแบบแมนวล (เก็บด่วน/จัดเก็บรายปี) ไว้บนเซิร์ฟเวอร์ด้วย ไม่ใช่แค่ดาวน์โหลดไฟล์ลงเครื่อง
+        // เพื่อให้กู้คืน/ดูย้อนหลังได้จากส่วน "ดูข้อมูลเช็คชื่อที่เก็บถาวรแล้ว" เหมือนกับข้อมูลที่ถูกเก็บถาวรอัตโนมัติทุก 2 ปี
+        // (ต้องมีโค้ดฝั่ง Apps Script รองรับ __mode: 'save_manual_archive' - ดูรายละเอียดที่ให้ไว้แยกต่างหาก)
+        async function saveManualArchiveToServer(records, filenamePrefix) {
+            if (!records || records.length === 0) return true;
+            try {
+                const res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'save_manual_archive', filenamePrefix, records }) });
+                if (!res.ok) return false;
+                const j = await res.json().catch(() => null);
+                return !j || j.status !== 'error';
+            } catch (e) { return false; }
+        }
+
+        window.archiveOldAttendance = function() {
+            const cutoff = document.getElementById('archiveCutoffDate').value;
+            if (!cutoff) { showToast("กรุณาเลือกวันที่ก่อน", "error"); return; }
+            const toArchive = attendanceData.filter(a => a.date && a.date < cutoff);
+            if (toArchive.length === 0) { showToast("ไม่พบข้อมูลก่อนวันที่ที่เลือก", "error"); return; }
+            showConfirm("ยืนยันการเก็บถาวร", `จะเก็บถาวรข้อมูลเช็คชื่อ ${toArchive.length} รายการ (ก่อนวันที่ ${cutoff.split('-').reverse().join('/')}) ไว้บนเซิร์ฟเวอร์ พร้อมดาวน์โหลดไฟล์ Excel สำรอง แล้วลบออกจากระบบที่ใช้งานอยู่ทันที คุณแน่ใจหรือไม่?`, async () => {
+                showToast("กำลังเก็บถาวร...", "info");
+                const ok = await saveManualArchiveToServer(toArchive, `attendance_archive_manual_${cutoff}`);
+                if (!ok) { showToast("เก็บถาวรไปยังเซิร์ฟเวอร์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง (ยังไม่มีการลบข้อมูลออก)", "error"); return; }
+                downloadAttendanceExcel(toArchive, `เก็บถาวรข้อมูลเช็คชื่อ_ก่อน_${cutoff}.xlsx`);
+                attendanceData = attendanceData.filter(a => !(a.date && a.date < cutoff));
+                logAction('เก็บถาวรข้อมูลเช็คชื่อเก่า', `เก็บถาวร ${toArchive.length} รายการ (ก่อนวันที่ ${cutoff})`);
+                await saveData('full');
+                showToast(`เก็บถาวร ${toArchive.length} รายการสำเร็จ (บันทึกบนเซิร์ฟเวอร์ + ดาวน์โหลดไฟล์แล้ว)`, "success");
+                renderAdminTab();
+            });
+        };
+
+        // ===== ดูข้อมูลเช็คชื่อที่เก็บถาวรแล้ว (ดึงรายชื่อไฟล์ archive จาก Google Drive ผ่าน backend) =====
+        window.loadArchiveList = async function() {
+            const listEl = document.getElementById('archiveListContainer');
+            if (!listEl) return;
+            listEl.innerHTML = `<div class="text-center text-purple-400 py-6 text-xs sm:text-sm font-bold"><i class="fas fa-spinner fa-spin"></i> กำลังโหลดรายชื่อไฟล์เก็บถาวร...</div>`;
+            try {
+                const res = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=list_archives`);
+                const data = await res.json();
+                if (data.status !== 'success' || !data.archives || data.archives.length === 0) {
+                    listEl.innerHTML = `<div class="text-center text-slate-400 py-6 text-xs sm:text-sm font-medium">ยังไม่มีไฟล์เก็บถาวรในระบบ</div>`;
+                    return;
+                }
+                const fmtSize = (b) => b < 1024 ? `${b} B` : (b < 1024*1024 ? `${(b/1024).toFixed(1)} KB` : `${(b/1024/1024).toFixed(2)} MB`);
+                listEl.innerHTML = data.archives.map(f => {
+                    const d = new Date(f.dateCreated);
+                    const dateStr = isNaN(d) ? '' : d.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                    return `<div class="flex items-center justify-between gap-2 bg-white border border-purple-200 rounded-lg px-3 py-2.5"><div class="min-w-0"><div class="font-bold text-slate-700 text-xs sm:text-sm truncate">${f.name}</div><div class="text-[10px] sm:text-xs text-slate-400 font-medium">สร้างเมื่อ ${dateStr} · ${fmtSize(f.sizeBytes)}</div></div><button onclick="window.downloadArchiveFile('${f.name}')" class="shrink-0 bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-file-excel"></i> Excel</button></div>`;
+                }).join('<div class="h-1.5"></div>');
+            } catch (err) {
+                listEl.innerHTML = `<div class="text-center text-rose-400 py-6 text-xs sm:text-sm font-bold"><i class="fas fa-exclamation-circle"></i> โหลดรายชื่อไฟล์ไม่สำเร็จ ลองใหม่อีกครั้ง</div>`;
+            }
+        };
+        window.downloadArchiveFile = async function(fileName) {
+            showToast("กำลังดึงข้อมูลเก็บถาวร กรุณารอสักครู่...", "success");
+            try {
+                const res = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=get_archive&file=${encodeURIComponent(fileName)}`);
+                const records = await res.json();
+                if (!Array.isArray(records)) { showToast("รูปแบบข้อมูลไม่ถูกต้อง", "error"); return; }
+                if (records.length === 0) { showToast("ไฟล์นี้ไม่มีข้อมูล", "error"); return; }
+                downloadAttendanceExcel(records, `${fileName.replace('.json', '')}.xlsx`);
+                showToast("ดาวน์โหลดไฟล์ Excel สำเร็จ", "success");
+            } catch (err) { showToast("ดึงข้อมูลไม่สำเร็จ ลองใหม่อีกครั้ง", "error"); }
+        };
+
+        // ===== กู้คืนฐานข้อมูลจาก Snapshot (สำรองอัตโนมัติรายสัปดาห์) - เฉพาะ Super Admin =====
+        window.loadSnapshotList = async function() {
+            const listEl = document.getElementById('snapshotListContainer');
+            if (!listEl) return;
+            listEl.innerHTML = `<div class="text-center text-rose-400 py-6 text-xs sm:text-sm font-bold"><i class="fas fa-spinner fa-spin"></i> กำลังโหลดรายชื่อไฟล์สำรอง...</div>`;
+            try {
+                const res = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=list_snapshots`);
+                const data = await res.json();
+                if (data.status !== 'success' || !data.snapshots || data.snapshots.length === 0) {
+                    listEl.innerHTML = `<div class="text-center text-slate-400 py-6 text-xs sm:text-sm font-medium">ยังไม่พบไฟล์สำรอง Snapshot ในระบบ (อาจยังไม่เคยตั้งเวลาให้รันอัตโนมัติ หรือยังไม่ถึงรอบแรก)</div>`;
+                    return;
+                }
+                const fmtSize = (b) => b < 1024 ? `${b} B` : (b < 1024*1024 ? `${(b/1024).toFixed(1)} KB` : `${(b/1024/1024).toFixed(2)} MB`);
+                listEl.innerHTML = data.snapshots.map(f => {
+                    const d = new Date(f.dateCreated);
+                    const dateStr = isNaN(d) ? '' : d.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                    return `<div class="flex items-center justify-between gap-2 bg-white border ${f.corrupted ? 'border-rose-400' : 'border-rose-200'} rounded-lg px-3 py-2.5"><div class="min-w-0"><div class="font-bold text-slate-700 text-xs sm:text-sm truncate">${f.name}${f.corrupted ? ' <span class="text-rose-500 text-[9px] font-black">(ไฟล์นี้ข้อมูลเสีย ห้ามกู้คืน)</span>' : ''}</div><div class="text-[10px] sm:text-xs text-slate-400 font-medium">สำรองเมื่อ ${dateStr} · ${fmtSize(f.sizeBytes)}</div></div>${f.corrupted ? '' : `<button onclick="window.restoreSnapshot('${f.name}')" class="shrink-0 bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-undo"></i> กู้คืนไฟล์นี้</button>`}</div>`;
+                }).join('<div class="h-1.5"></div>');
+            } catch (err) {
+                listEl.innerHTML = `<div class="text-center text-rose-400 py-6 text-xs sm:text-sm font-bold"><i class="fas fa-exclamation-circle"></i> โหลดรายชื่อไฟล์ไม่สำเร็จ ลองใหม่อีกครั้ง</div>`;
+            }
+        };
+        window.restoreSnapshot = function(fileName) {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่กู้คืนข้อมูลได้", "error"); return; }
+            showConfirm("ยืนยันการกู้คืนข้อมูล", `จะเขียนทับข้อมูลปัจจุบันทั้งหมด (ห้อง/วิชา/นักเรียน/การเช็คชื่อ) ด้วยไฟล์สำรอง "${fileName}" การกระทำนี้ไม่สามารถยกเลิกได้ทันที (แต่ระบบจะสำรองสถานะปัจจุบันไว้ก่อนกู้คืนให้อัตโนมัติ) แน่ใจหรือไม่?`, async () => {
+                showProgressModal("กำลังกู้คืนข้อมูล", "กรุณารอสักครู่ ห้ามปิดหน้านี้...");
+                try {
+                    updateProgressModal(30, "กำลังส่งคำขอกู้คืนไปยังเซิร์ฟเวอร์...");
+                    const res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'restore_snapshot', file: fileName }) });
+                    const result = await res.json().catch(() => null);
+                    if (!res.ok || !result || result.status === 'error') {
+                        errorProgressModal(result && result.message ? result.message : "กู้คืนข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+                        return;
+                    }
+                    updateProgressModal(100, "กู้คืนสำเร็จ กำลังโหลดหน้าเว็บใหม่...");
+                    completeProgressModal("กู้คืนข้อมูลสำเร็จ", "ระบบจะโหลดหน้าเว็บใหม่เพื่อดึงข้อมูลที่กู้คืนแล้ว");
+                    setTimeout(() => { location.reload(); }, 1500);
+                } catch (err) { errorProgressModal("เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง"); }
+            });
+        };
+
+        window.scheduleDayColorMap = { 1: 'border-yellow-400', 2: 'border-pink-400', 3: 'border-green-500', 4: 'border-orange-400', 5: 'border-sky-400' };
+        window.__scheduleGridDayBg = { 1: { bg: 'bg-yellow-50', text: 'text-yellow-800' }, 2: { bg: 'bg-pink-50', text: 'text-pink-800' }, 3: { bg: 'bg-green-50', text: 'text-green-800' }, 4: { bg: 'bg-orange-50', text: 'text-orange-800' }, 5: { bg: 'bg-sky-50', text: 'text-sky-800' } };
+        window.renderScheduleInputs = function(existingSchedules = null) {
+            const credit = parseFloat(document.getElementById('newSubCredit').value) || 0.5; const count = credit * 2;
+            if (existingSchedules) window.__scheduleSelection = existingSchedules.slice(0, count).map(s => ({ day: parseInt(s.day), period: parseInt(s.period) }));
+            else if (!Array.isArray(window.__scheduleSelection)) window.__scheduleSelection = [];
+            else window.__scheduleSelection = window.__scheduleSelection.slice(0, count); // ตัดส่วนเกินถ้าลดหน่วยกิตลง
+            window.renderScheduleGrid(count);
+        };
+        // ===== ตารางคลิกเลือกคาบสอน (แทนดรอปดาวน์) - คลิกช่องเพื่อเลือก/ยกเลิก เตือนทันทีถ้าชนกับวิชาอื่นในห้องเดียวกัน =====
+        window.renderScheduleGrid = function(count) {
+            const roomId = document.getElementById('newSubRoom') ? document.getElementById('newSubRoom').value : null;
+            const otherSubs = roomId ? getRoomSubjects(roomId, adminTerm(), adminYear()).filter(s => s.id !== editingSubjectId && s.systemType !== 'homeroom') : [];
+            const homeroomSub = roomId ? getRoomSubjects(roomId, adminTerm(), adminYear()).find(s => s.systemType === 'homeroom' && s.id !== editingSubjectId) : null;
+            const gridPeriods = timeSlots.filter(t => t.period >= 0);
+            let html = `<div class="col-span-full"><div class="flex items-center justify-between mb-2"><span class="text-[10px] sm:text-xs font-bold text-slate-600">คลิกช่องเพื่อเลือกคาบสอน <span class="text-indigo-600">(เลือกแล้ว ${window.__scheduleSelection.length}/${count})</span></span>${window.__scheduleSelection.length > 0 ? `<button type="button" onclick="window.clearScheduleSelection()" class="text-[10px] sm:text-xs font-bold text-rose-500 hover:underline"><i class="fas fa-eraser"></i> ล้างทั้งหมด</button>` : ''}</div><div class="overflow-x-auto rounded-xl border border-slate-200"><table class="w-full text-center text-[9px] sm:text-[11px] border-collapse min-w-[600px]"><thead><tr class="bg-slate-100"><th class="p-1.5 border border-slate-200 sticky left-0 bg-slate-100 z-10">วัน\\คาบ</th>${gridPeriods.map(p => `<th class="p-1.5 border border-slate-200 font-bold">${p.period}${p.period === 0 ? '<div class="font-normal text-slate-400 text-[8px]">(แถว)</div>' : ''}</th>${p.period === 4 ? `<th class="p-1 border border-amber-200 bg-amber-50 text-amber-500 w-5" title="พักกลางวัน"><i class="fas fa-utensils"></i></th>` : ''}`).join('')}</tr></thead><tbody>`;
+            for (let d = 1; d <= 5; d++) {
+                const dc = window.__scheduleGridDayBg[d];
+                html += `<tr><td class="p-1.5 border border-slate-200 font-bold ${dc.bg} ${dc.text} sticky left-0 z-10">${daysLabel[d-1].replace('วัน','')}</td>`;
+                gridPeriods.forEach(p => {
+                    const idx = window.__scheduleSelection.findIndex(s => s.day === d && s.period === p.period);
+                    const isSelected = idx > -1;
+                    const clash = otherSubs.find(s => (s.schedules || []).some(os => os.day === d && os.period === p.period));
+                    const isHomeroom = homeroomSub && (homeroomSub.schedules || []).some(os => os.day === d && os.period === p.period);
+                    let cellClass, content, titleAttr = '';
+                    if (isSelected) { cellClass = 'bg-indigo-500 text-white'; content = `<span class="font-black">${idx + 1}</span>`; if (isHomeroom) titleAttr = `title="ซ้อนกับคาบโฮมรูม (ลงซ้อนได้ตามปกติ)"`; }
+                    else if (clash) { cellClass = 'bg-rose-100 text-rose-500 hover:bg-rose-200'; content = `<i class="fas fa-exclamation-triangle text-[8px]"></i>`; titleAttr = `title="ชนกับวิชา: ${clash.name}"`; }
+                    else if (isHomeroom) { cellClass = 'bg-orange-100 text-orange-500 hover:bg-orange-200'; content = `<i class="fas fa-user-friends text-[8px]"></i>`; titleAttr = `title="ตรงกับคาบโฮมรูม - ลงวิชาซ้อนคาบนี้ได้ตามปกติ"`; }
+                    else { cellClass = 'bg-white hover:bg-indigo-50'; content = ''; }
+                    html += `<td class="p-1.5 border border-slate-200 ${cellClass} cursor-pointer transition-colors" onclick="window.toggleScheduleCell(${d}, ${p.period}, ${count})" ${titleAttr}>${content}</td>`;
+                    if (p.period === 4) html += `<td class="p-1 border border-amber-100 bg-amber-50/50 text-amber-300"><i class="fas fa-utensils text-[7px]"></i></td>`;
+                });
+                html += `</tr>`;
+            }
+            html += `</tbody></table></div><p class="text-[9px] sm:text-[10px] font-medium mt-1.5 space-x-3"><span class="text-rose-400"><i class="fas fa-exclamation-triangle"></i> สีแดงอ่อน = ชนกับวิชาอื่น</span><span class="text-orange-400"><i class="fas fa-user-friends"></i> สีส้ม = ตรงกับคาบโฮมรูม (ลงซ้อนได้)</span></p>`;
+            for (let i = 0; i < count; i++) { const s = window.__scheduleSelection[i]; html += `<input type="hidden" id="newSubDay_${i}" value="${s ? s.day : ''}"><input type="hidden" id="newSubPeriod_${i}" value="${s ? s.period : ''}">`; }
+            html += `</div>`;
+            document.getElementById('scheduleContainer').innerHTML = html;
+        };
+        window.toggleScheduleCell = function(day, period, count) {
+            const idx = window.__scheduleSelection.findIndex(s => s.day === day && s.period === period);
+            if (idx > -1) { window.__scheduleSelection.splice(idx, 1); }
+            else {
+                if (window.__scheduleSelection.length >= count) { showToast(`เลือกได้สูงสุด ${count} คาบ ตามหน่วยกิตที่ตั้งไว้ (ถ้าต้องการคาบนี้ ให้ยกเลิกคาบอื่นก่อน)`, "error"); return; }
+                window.__scheduleSelection.push({ day, period });
+            }
+            window.renderScheduleGrid(count);
+        };
+        window.clearScheduleSelection = function() {
+            const count = (parseFloat(document.getElementById('newSubCredit').value) || 0.5) * 2;
+            window.__scheduleSelection = [];
+            window.renderScheduleGrid(count);
+        };
+
+        window.openSubjectModal = function(prefillDay, prefillPeriod) { if (guardTermLock('เพิ่มวิชาใหม่')) return; editingSubjectId = null; document.getElementById('subjectModalTitle').innerText = 'เพิ่มวิชาใหม่';
+        const __defSubRoom = (window.adminSelectedSubjectRoom && window.adminSelectedSubjectRoom !== 'all' && getRoomList().includes(window.adminSelectedSubjectRoom)) ? window.adminSelectedSubjectRoom : (getRoomList()[0] || ''); document.getElementById('newSubRoom').value = __defSubRoom;
+        document.getElementById('newSubCode').value = ''; document.getElementById('newSubName').value = ''; if(teachers.length > 0) document.getElementById('newSubTeacher').value = teachers[0].name; document.getElementById('newSubTeacher2').value = ''; document.getElementById('newSubCredit').value = '0.5';
+        ['newSubRoom', 'newSubCode', 'newSubName', 'newSubTeacher', 'newSubTeacher2'].forEach(fid => { const el = document.getElementById(fid); if (el) el.disabled = false; });
+        const sysNote0 = document.getElementById('subjectSystemNote'); if (sysNote0) sysNote0.classList.add('hidden');
+        if (prefillDay !== undefined && prefillPeriod !== undefined) { window.renderScheduleInputs([{ day: prefillDay, period: prefillPeriod }]); } else { window.__scheduleSelection = []; window.renderScheduleInputs(); }
+        document.getElementById('subjectModal').classList.remove('hidden');
+        document.getElementById('subjectTemplatePickerWrap').classList.remove('hidden'); window.populateSubjectTemplateOptions();
+        setTimeout(() => { document.getElementById('subjectModalBox').classList.remove('scale-95', 'opacity-0'); document.getElementById('subjectModalBox').classList.add('scale-100', 'opacity-100'); }, 10); };
+        window.closeSubjectModal = function() { document.getElementById('subjectModalBox').classList.remove('scale-100', 'opacity-100'); document.getElementById('subjectModalBox').classList.add('scale-95', 'opacity-0');
+        setTimeout(() => { document.getElementById('subjectModal').classList.add('hidden'); }, 300); };
+        window.prepareEditSubject = function(id) { if (guardTermLock('แก้ไขวิชา')) return; editingSubjectId = id;
+        const sub = subjects.find(s => s.id === id); if(!sub) return; document.getElementById('subjectModalTitle').innerText = sub.systemType ? `แก้ไขคาบระบบ: ${sub.name}` : 'แก้ไขวิชา'; document.getElementById('newSubRoom').value = sub.roomId; document.getElementById('newSubCode').value = sub.code || ''; document.getElementById('newSubName').value = sub.name; document.getElementById('newSubTeacher').value = sub.teacher; document.getElementById('newSubTeacher2').value = sub.teacher2 || ''; document.getElementById('newSubCredit').value = parseFloat(sub.credits || 0.5).toFixed(1); window.renderScheduleInputs(sub.schedules); document.getElementById('subjectModal').classList.remove('hidden');
+        // ===== คาบระบบ (เข้าแถวเช้า/โฮมรูม) แก้ได้แค่หน่วยกิตกับตารางคาบเท่านั้น ล็อคช่องอื่นไว้ =====
+        ['newSubRoom', 'newSubCode', 'newSubName', 'newSubTeacher', 'newSubTeacher2'].forEach(fid => { const el = document.getElementById(fid); if (el) el.disabled = !!sub.systemType; });
+        const sysNote = document.getElementById('subjectSystemNote'); if (sysNote) sysNote.classList.toggle('hidden', !sub.systemType);
+        document.getElementById('subjectTemplatePickerWrap').classList.add('hidden');
+        setTimeout(() => { document.getElementById('subjectModalBox').classList.remove('scale-95', 'opacity-0'); document.getElementById('subjectModalBox').classList.add('scale-100', 'opacity-100'); }, 10); };
+        // คัดลอกข้อมูลวิชาที่เคยสร้างไว้แล้วในระดับชั้นเดียวกัน (ช่วยลดการพิมพ์ซ้ำ) - เฉพาะเทอมที่แอดมินกำลังจัดการอยู่
+        window.populateSubjectTemplateOptions = function() {
+            const picker = document.getElementById('subjectTemplatePicker'); if (!picker) return;
+            const roomId = document.getElementById('newSubRoom').value; const level = (roomId || '').split('_')[0];
+            const seen = new Set(); const candidates = [];
+            activeSubjects(adminTerm(), adminYear()).filter(s => (s.roomId || '').split('_')[0] === level).sort((a,b) => a.name.localeCompare(b.name)).forEach(s => {
+                const key = s.name + '|' + (s.teacher || ''); if (seen.has(key)) return; seen.add(key); candidates.push(s);
+            });
+            picker.innerHTML = `<option value="">-- พิมพ์ข้อมูลใหม่เอง --</option>` + candidates.map(s => `<option value="${s.id}">${s.name}${s.teacher ? ' (ครู' + s.teacher + ')' : ''}</option>`).join('');
+        };
+        window.applySubjectTemplate = function(subId) {
+            if (!subId) return;
+            const sub = subjects.find(s => s.id === subId); if (!sub) return;
+            document.getElementById('newSubCode').value = sub.code || '';
+            document.getElementById('newSubName').value = sub.name || '';
+            if (sub.teacher) document.getElementById('newSubTeacher').value = sub.teacher;
+            document.getElementById('newSubTeacher2').value = sub.teacher2 || '';
+            document.getElementById('newSubCredit').value = parseFloat(sub.credits || 0.5).toFixed(1);
+            window.renderScheduleInputs(sub.schedules);
+            showToast("คัดลอกข้อมูลวิชาแล้ว ตรวจสอบตารางเรียนก่อนบันทึก");
+        };
+        window.saveSubjectForm = async function() {
+            if (guardTermLock('บันทึกวิชา')) return;
+            const roomId = document.getElementById('newSubRoom').value, code = document.getElementById('newSubCode').value.trim(), name = document.getElementById('newSubName').value, teacher = document.getElementById('newSubTeacher').value, teacher2 = document.getElementById('newSubTeacher2').value, credit = parseFloat(document.getElementById('newSubCredit').value) || 0.5;
+            if (!name) { showToast("กรอกชื่อวิชา", "error"); return; }
+            let count = credit * 2;
+            if (!Array.isArray(window.__scheduleSelection) || window.__scheduleSelection.length < count) {
+                showToast(`กรุณาคลิกเลือกคาบสอนให้ครบ ${count} คาบ ตามหน่วยกิตที่ตั้งไว้ (ตอนนี้เลือกแล้ว ${window.__scheduleSelection ? window.__scheduleSelection.length : 0} คาบ)`, "error");
+                return;
+            }
+            let schedules = [];
+            for (let i = 0; i < count; i++) { schedules.push({ day: parseInt(document.getElementById(`newSubDay_${i}`).value), period: parseInt(document.getElementById(`newSubPeriod_${i}`).value) }); }
+
+            // ===== [ใหม่] เช็คว่ามีวิชาอื่น (คนละวิชา) ในห้องเดียวกัน ลงคาบสอนชนกันไหม - ถ้ามีให้เตือนก่อนบันทึก =====
+            const roomSubjectsForConflict = getRoomSubjects(roomId, adminTerm(), adminYear()).filter(s => s.id !== editingSubjectId && s.systemType !== 'homeroom');
+            const conflicts = [];
+            schedules.forEach(sch => {
+                const clash = roomSubjectsForConflict.find(s => (s.schedules || []).some(os => os.day === sch.day && os.period === sch.period));
+                if (clash) conflicts.push({ day: sch.day, period: sch.period, withName: clash.name });
+            });
+
+            const doActualSave = async () => {
+                showToast("กำลังบันทึกข้อมูลวิชา...", "info");
+                document.body.style.pointerEvents = 'none';
+                const __prefetch1 = await refreshBeforeEdit(['subjects']); // ดึงข้อมูลล่าสุดก่อนบันทึก กันชนกับแอดมินคนอื่นที่แก้ไขพร้อมกัน
+                if (editingSubjectId) {
+                    const sub = subjects.find(s => s.id === editingSubjectId);
+                    if (sub) {
+                        sub.roomId = roomId; sub.code = code; sub.name = name; sub.teacher = teacher; sub.teacher2 = teacher2; sub.credits = credit; sub.schedules = schedules;
+                        logAction('แก้ไขข้อมูลวิชา', `${name} (${formatRoomName(roomId)})`);
+                    } else {
+                        document.body.style.pointerEvents = 'auto'; showToast("ไม่พบวิชานี้แล้ว (อาจถูกลบไปโดยผู้ใช้อื่น) กรุณาลองใหม่", "error"); renderAdminTab(); return;
+                    }
+                } else {
+                    subjects.push({ id: generateId(), roomId, name, code, teacher, teacher2, credits: credit, schedules, term: adminTerm(), year: adminYear(), locked: false });
+                    logAction('เพิ่มวิชาใหม่', `${name} (${formatRoomName(roomId)})`);
+                }
+                await saveData('full', null, __prefetch1); document.body.style.pointerEvents = 'auto'; showToast("บันทึกสำเร็จ"); renderAdminTab(); closeSubjectModal();
+            };
+
+            if (conflicts.length > 0) {
+                const conflictListText = conflicts.map(c => `${daysLabel[c.day-1] || ''} คาบ ${c.period} ชนกับวิชา "${c.withName}"`).join('\n');
+                showConfirm("พบคาบสอนชนกันในห้องนี้", `ห้อง ${formatRoomName(roomId)} มีคาบที่ชนกับวิชาอื่นในตารางเดียวกัน:\n\n${conflictListText}\n\nต้องการบันทึกต่อไปหรือไม่? (ระบบจะยังบันทึกให้ แต่ทั้งสองวิชาจะซ้อนกันในตาราง)`, doActualSave);
+            } else {
+                await doActualSave();
+            }
+        };
+        window.toggleSubjectLock = async function(id) {
+            showToast("กำลังบันทึก...", "info");
+            document.body.style.pointerEvents = 'none';
+            const __prefetch2 = await refreshBeforeEdit(['subjects']);
+            const sub = subjects.find(s => s.id === id);
+            if (!sub) { document.body.style.pointerEvents = 'auto'; showToast("ไม่พบวิชานี้แล้ว", "error"); renderAdminTab(); return; }
+            sub.locked = !sub.locked;
+            logAction(sub.locked ? 'ล็อควิชา (ป้องกันการลบ)' : 'ปลดล็อควิชา', `${sub.name} (${formatRoomName(sub.roomId)})`);
+            await saveData('full', null, __prefetch2); document.body.style.pointerEvents = 'auto'; showToast(sub.locked ? "ล็อควิชานี้แล้ว" : "ปลดล็อควิชานี้แล้ว"); renderAdminTab();
+        };
+        window.clearRoomSubjects = function(roomId) {
+            if (!roomId || roomId === 'all') { showToast("กรุณาเลือกห้องก่อน", "error"); return; }
+            if (guardTermLock('ลบวิชา')) return;
+            const all = getRoomSubjects(roomId, adminTerm(), adminYear()); const targets = all.filter(s => !s.locked); const lockedCount = all.length - targets.length;
+            if (targets.length === 0) { showToast("ไม่มีวิชาที่สามารถลบได้ (อาจถูกล็อคไว้ทั้งหมด หรือห้องนี้ยังไม่มีวิชา)", "error"); return; }
+            showConfirm("ลบวิชาทั้งหมดในห้องนี้", `จะลบวิชาที่ไม่ได้ล็อคไว้ ${targets.length} รายการ พร้อมข้อมูลการเช็คชื่อที่เกี่ยวข้อง ของห้อง ${formatRoomName(roomId)} เทอม ${adminTerm()}/${adminYear()}${lockedCount > 0 ? ` (วิชาที่ล็อคไว้ ${lockedCount} รายการจะไม่ถูกลบ)` : ''} แน่ใจหรือไม่?`, async () => {
+                showToast("กำลังลบวิชา...", "info");
+                document.body.style.pointerEvents = 'none';
+                const __prefetch3 = await refreshBeforeEdit(['subjects']);
+                const freshTargets = getRoomSubjects(roomId, adminTerm(), adminYear()).filter(s => !s.locked);
+                const ids = new Set(freshTargets.map(s => s.id));
+                subjects = subjects.filter(s => !ids.has(s.id));
+                attendanceData = attendanceData.filter(a => !ids.has(a.subjectId));
+                logAction('ลบวิชาทั้งหมดในห้อง', `${formatRoomName(roomId)} เทอม ${adminTerm()}/${adminYear()} (${freshTargets.length} วิชา)`);
+                await saveData('full', null, __prefetch3); document.body.style.pointerEvents = 'auto'; showToast("ลบวิชาทั้งหมดในห้องเรียบร้อย"); renderAdminTab();
+            });
+        };
+
+        window.openExportSubjectsModal = function() {
+            if (!window.adminSelectedSubjectRoom || window.adminSelectedSubjectRoom === 'all') { showToast("กรุณาเลือกห้องก่อนส่งออก", "error"); return; }
+            document.getElementById('exportSubjectsModal').classList.remove('hidden');
+            setTimeout(() => { document.getElementById('exportSubjectsModalBox').classList.remove('scale-95', 'opacity-0'); document.getElementById('exportSubjectsModalBox').classList.add('scale-100', 'opacity-100'); }, 10);
+        };
+        window.closeExportSubjectsModal = function() {
+            document.getElementById('exportSubjectsModalBox').classList.remove('scale-100', 'opacity-100'); document.getElementById('exportSubjectsModalBox').classList.add('scale-95', 'opacity-0');
+            setTimeout(() => { document.getElementById('exportSubjectsModal').classList.add('hidden'); }, 300);
+        };
+        window.doExportSubjects = function(mode) {
+            const roomId = window.adminSelectedSubjectRoom;
+            const roomName = formatRoomName(roomId);
+            const subs = getRoomSubjects(roomId, adminTerm(), adminYear()).slice().sort((a,b) => (a.code||'').localeCompare(b.code||'') || a.name.localeCompare(b.name));
+            let ws_data, colWidths, sheetName;
+            if (mode === 'full') {
+                ws_data = [["รหัสวิชา", "ชื่อวิชา", "หน่วยกิต", "ครู (หลัก)", "ครู (ร่วมสอน)", "คาบสอน"]];
+                subs.forEach(s => {
+                    const schedText = (s.schedules || []).map(sch => `${(daysLabel[sch.day-1]||'').replace('วัน','')} คาบ ${sch.period}`).join(', ');
+                    ws_data.push([s.code || '', s.name, s.credits || '', s.teacher || '', s.teacher2 || '', schedText]);
+                });
+                colWidths = [{wch:10},{wch:30},{wch:8},{wch:22},{wch:22},{wch:35}];
+                sheetName = "รายวิชา (ละเอียด)";
+            } else {
+                ws_data = [["รหัสวิชา", "ชื่อวิชา", "หน่วยกิต"]];
+                subs.forEach(s => { ws_data.push([s.code || '', s.name, s.credits || '']); });
+                colWidths = [{wch:10},{wch:30},{wch:8}];
+                sheetName = "รายวิชา";
+            }
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); ws['!cols'] = colWidths;
+            const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, sheetName);
+            XLSX.writeFile(wb, `รายวิชา_${roomName}_${mode === 'full' ? 'ละเอียด' : 'พื้นฐาน'}.xlsx`);
+            logAction('ส่งออกรายวิชาเป็น Excel', `${roomName} (${mode === 'full' ? 'แบบละเอียด' : 'แบบพื้นฐาน'})`);
+            window.closeExportSubjectsModal();
+            showToast("ส่งออกไฟล์เรียบร้อย");
+        };
+        window.downloadSubjectTemplate = function() {
+            if (!window.adminSelectedSubjectRoom || window.adminSelectedSubjectRoom === 'all') { showToast("กรุณาเลือกห้องก่อนโหลดฟอร์ม", "error"); return; }
+            const roomName = formatRoomName(window.adminSelectedSubjectRoom);
+            const ws_data = [
+                ["รหัสวิชา", "ชื่อวิชา", "หน่วยกิต"],
+                ["ว31101", "คณิตศาสตร์พื้นฐาน", "1.0"],
+                ["", "เช็คแถวเช้า", "0.5"],
+                [],
+                ["หมายเหตุ: นำเข้าได้เฉพาะ รหัสวิชา, ชื่อวิชา และ หน่วยกิต เท่านั้น (รหัสวิชาจะเว้นว่างไว้ก็ได้, หน่วยกิตเว้นว่างไว้จะใช้ค่าเริ่มต้น 0.5)"],
+                ["หน่วยกิตที่ใช้ได้: 0.5 / 1.0 / 1.5 / 2.0 / 2.5 / 3.0 (เว้นว่างหรือใส่ค่าอื่นจะปัดเป็น 0.5 อัตโนมัติ)"],
+                ["ส่วนที่เหลือ (ครูผู้สอน / ตารางเรียน) เจ้าหน้าที่ต้องเข้ามาแก้ไขเพิ่มเติมเองทีหลังในหน้าเว็บ"],
+                ["วิชาที่นำเข้าใหม่จะยังไม่มีตารางเรียน จะไม่นับรวมในการเช็คสถานะ \"ตารางเต็ม\" จนกว่าจะแก้ไขตารางให้ครบ"]
+            ];
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); ws['!cols'] = [{wch: 12}, {wch: 32}, {wch: 10}];
+            const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Template");
+            XLSX.writeFile(wb, `แบบฟอร์มนำเข้ารายวิชา_${roomName}.xlsx`);
+            showToast("ดาวน์โหลดแบบฟอร์มรายวิชาสำเร็จ", "success");
+        };
+
+        window.handleImportSubjects = function(e) {
+            if (!window.adminSelectedSubjectRoom || window.adminSelectedSubjectRoom === 'all') { showToast("กรุณาเลือกห้องก่อนนำเข้า", "error"); e.target.value = ''; return; }
+            if (guardTermLock('นำเข้ารายวิชา')) { e.target.value = ''; return; }
+            const targetRoom = window.adminSelectedSubjectRoom;
+            const VALID_CREDITS = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0];
+            const file = e.target.files[0];
+            if (!file) return; showProgressModal("กำลังนำเข้ารายวิชา", "กำลังอ่านไฟล์..."); const reader = new FileReader();
+            reader.onload = async function(evt) {
+                try {
+                    updateProgressModal(20, "กำลังตรวจสอบข้อมูลในไฟล์...");
+                    const data = new Uint8Array(evt.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'}); const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
+                    let startIndex = (jsonData.length > 0 && (String(jsonData[0][0] || '').includes("รหัสวิชา") || String(jsonData[0][1] || '').includes("ชื่อวิชา"))) ? 1 : 0;
+                    let imported = 0;
+                    updateProgressModal(40, "กำลังดึงข้อมูลล่าสุดจากเซิร์ฟเวอร์...");
+                    const __prefetch4 = await refreshBeforeEdit(['subjects']); // ดึงข้อมูลล่าสุดก่อนนำเข้า กันชนกับแอดมินคนอื่น
+                    updateProgressModal(60, "กำลังนำเข้าข้อมูลรายวิชา...");
+                    for (let i = startIndex; i < jsonData.length; i++) {
+                        const row = jsonData[i];
+                        if (!row || !row[1] || !String(row[1]).trim()) continue;
+                        const name = String(row[1]).trim();
+                        if (name.startsWith('หมายเหตุ') || name.startsWith('ส่วนที่เหลือ') || name.startsWith('วิชาที่นำเข้าใหม่') || name.startsWith('หน่วยกิตที่ใช้ได้')) continue;
+                        const code = String(row[0] || '').trim();
+                        const creditsRaw = parseFloat(row[2]);
+                        const credits = VALID_CREDITS.includes(creditsRaw) ? creditsRaw : 0.5;
+                        const roomActive = getRoomSubjects(targetRoom, adminTerm(), adminYear());
+                        const exists = code ? roomActive.find(s => s.code && s.code === code) : roomActive.find(s => s.name === name && !s.teacher);
+                        if (exists) { exists.name = name; exists.code = code; exists.credits = credits;
+                        } else { subjects.push({ id: generateId(), roomId: targetRoom, name, code, teacher: '', teacher2: '', credits, schedules: [], term: adminTerm(), year: adminYear(), locked: false }); } imported++;
+                    }
+                    if (imported > 0) { updateProgressModal(85, "กำลังบันทึกขึ้นเซิร์ฟเวอร์..."); await saveData('full', null, __prefetch4); logAction('นำเข้ารายวิชาจาก Excel (ชื่อ+รหัส+หน่วยกิต)', `นำเข้า ${imported} วิชา ห้อง ${formatRoomName(targetRoom)} - รอเจ้าหน้าที่เพิ่มครู/ตารางเรียน`);
+                        completeProgressModal("นำเข้าสำเร็จ", `นำเข้า ${imported} วิชา สำเร็จ! กรุณาเข้าไปเพิ่มครูผู้สอนและตารางเรียนให้ครบต่อไป`); renderAdminTab(); } else { errorProgressModal("ไม่พบข้อมูลที่ถูกต้องในไฟล์ (ต้องมีอย่างน้อยคอลัมน์ชื่อวิชา)");
+                    }
+                } catch (err) { errorProgressModal("เกิดข้อผิดพลาดในการอ่านไฟล์ กรุณาตรวจสอบรูปแบบไฟล์");
+                } e.target.value = '';
+            }; reader.readAsArrayBuffer(file);
+        };
+
+        // ===== นำเข้ารายชื่อครู (ชื่อครู + กลุ่มสาระการเรียนรู้) =====
+        window.downloadTeacherTemplate = function() {
+            const deptList = departmentsList.join(' / ');
+            const ws_data = [
+                ["ชื่อ-นามสกุล ครูผู้สอน", "กลุ่มสาระการเรียนรู้"],
+                ["ครูสมใจ รักเรียน", departmentsList[0] || 'ระบบ/อื่นๆ'],
+                ["ครูสมหญิง ใจดี", departmentsList[1] || 'ระบบ/อื่นๆ'],
+                [],
+                ["หมายเหตุ: กลุ่มสาระการเรียนรู้ต้องพิมพ์ให้ตรงกับที่มีอยู่ในระบบเป๊ะ ไม่เช่นนั้นจะถูกจัดเป็น \"ระบบ/อื่นๆ\" โดยอัตโนมัติ"],
+                [`กลุ่มสาระที่มีในระบบ: ${deptList}`],
+                ["ถ้ามีชื่อครูซ้ำกับที่มีอยู่แล้ว ระบบจะอัปเดตกลุ่มสาระให้ตามไฟล์ที่นำเข้าแทนการเพิ่มซ้ำ"]
+            ];
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); ws['!cols'] = [{wch: 28}, {wch: 30}];
+            const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Template");
+            XLSX.writeFile(wb, `แบบฟอร์มนำเข้ารายชื่อครู.xlsx`);
+            showToast("ดาวน์โหลดแบบฟอร์มครูสำเร็จ", "success");
+        };
+        window.handleImportTeachers = function(e) {
+            const file = e.target.files[0];
+            if (!file) return; showProgressModal("กำลังนำเข้ารายชื่อครู", "กำลังอ่านไฟล์..."); const reader = new FileReader();
+            reader.onload = async function(evt) {
+                try {
+                    updateProgressModal(20, "กำลังตรวจสอบข้อมูลในไฟล์...");
+                    const data = new Uint8Array(evt.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'}); const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
+                    let startIndex = (jsonData.length > 0 && (String(jsonData[0][0] || '').includes("ชื่อ") || String(jsonData[0][1] || '').includes("กลุ่มสาระ"))) ? 1 : 0;
+                    let imported = 0, updated = 0;
+                    updateProgressModal(50, "กำลังนำเข้าข้อมูลครู...");
+                    for (let i = startIndex; i < jsonData.length; i++) {
+                        const row = jsonData[i];
+                        if (!row || !row[0] || !String(row[0]).trim()) continue;
+                        const name = String(row[0]).trim();
+                        if (name.startsWith('หมายเหตุ') || name.startsWith('กลุ่มสาระที่มีในระบบ') || name.startsWith('ถ้ามีชื่อครูซ้ำ')) continue;
+                        const deptRaw = String(row[1] || '').trim();
+                        const department = departmentsList.includes(deptRaw) ? deptRaw : 'ระบบ/อื่นๆ';
+                        const existing = teachers.find(t => t.name === name);
+                        if (existing) { existing.department = department; updated++; }
+                        else { teachers.push({ id: generateId(), name, department }); imported++; }
+                    }
+                    if (imported > 0 || updated > 0) { updateProgressModal(85, "กำลังบันทึกขึ้นเซิร์ฟเวอร์..."); await saveData('full'); logAction('นำเข้ารายชื่อครูจาก Excel', `เพิ่มใหม่ ${imported} คน อัปเดต ${updated} คน`);
+                        completeProgressModal("นำเข้าสำเร็จ", `เพิ่มครูใหม่ ${imported} คน${updated > 0 ? ` และอัปเดตกลุ่มสาระของครูเดิม ${updated} คน` : ''}`); renderAdminTab(); } else { errorProgressModal("ไม่พบข้อมูลที่ถูกต้องในไฟล์ (ต้องมีอย่างน้อยคอลัมน์ชื่อครู)");
+                    }
+                } catch (err) { errorProgressModal("เกิดข้อผิดพลาดในการอ่านไฟล์ กรุณาตรวจสอบรูปแบบไฟล์");
+                } e.target.value = '';
+            }; reader.readAsArrayBuffer(file);
+        };
+
+        window.openStudentModal = function() { editingStudentId = null; document.getElementById('studentModalTitle').innerText = 'เพิ่มนักเรียนใหม่'; document.getElementById('newStuNum').value = ''; document.getElementById('newStuName').value = '';
+        document.getElementById('newStuStatus').value = 'active'; document.getElementById('studentModal').classList.remove('hidden'); setTimeout(() => { document.getElementById('studentModalBox').classList.remove('scale-95', 'opacity-0'); document.getElementById('studentModalBox').classList.add('scale-100', 'opacity-100'); }, 10); };
+        window.closeStudentModal = function() { document.getElementById('studentModalBox').classList.remove('scale-100', 'opacity-100');
+        document.getElementById('studentModalBox').classList.add('scale-95', 'opacity-0'); setTimeout(() => { document.getElementById('studentModal').classList.add('hidden'); }, 300); };
+        window.prepareEditStudent = function(id) { editingStudentId = id;
+        const st = students.find(s => s.id === id); if(!st) return; document.getElementById('studentModalTitle').innerText = 'แก้ไขข้อมูลนักเรียน'; document.getElementById('newStuNum').value = st.number;
+        document.getElementById('newStuName').value = st.name; document.getElementById('newStuStatus').value = st.status || 'active'; document.getElementById('studentModal').classList.remove('hidden'); setTimeout(() => { document.getElementById('studentModalBox').classList.remove('scale-95', 'opacity-0'); document.getElementById('studentModalBox').classList.add('scale-100', 'opacity-100'); }, 10); };
+        window.promoteStudents = function() {
+            const fromYear = document.getElementById('promoteFromYear').value;
+            const toYear = document.getElementById('promoteToYear').value;
+            if (!fromYear || !toYear) { showToast("กรุณาเลือกปีการศึกษาต้นทางและปลายทาง", "error"); return; }
+            if (fromYear === toYear) { showToast("ปีต้นทางและปลายทางต้องไม่ใช่ปีเดียวกัน", "error"); return; }
+            if (getYearStatus(toYear) === 'archived') { showToast("ปีปลายทางถูกจัดเก็บแล้ว ไม่สามารถเลื่อนชั้นเข้าไปได้", "error"); return; }
+            const roomList = getRoomList();
+            const GRADUATING_LEVELS = [3, 6]; // ม.3 จบการศึกษาภาคบังคับ และ ม.6 จบการศึกษาขั้นสูงสุด ทั้งสองระดับไม่ถูกเลื่อนชั้นต่อ
+            let toPromote = 0, graduating = 0;
+            roomList.forEach(r => {
+                const level = parseInt(r.split('_')[0].replace('m', ''));
+                const roomStu = getRoomStudents(r, fromYear).filter(s => s.status !== 'resigned');
+                if (GRADUATING_LEVELS.includes(level)) graduating += roomStu.length; else toPromote += roomStu.length;
+            });
+            if (toPromote === 0 && graduating === 0) { showToast(`ไม่พบรายชื่อนักเรียนในปีการศึกษา ${fromYear} ที่จะเลื่อนชั้นได้`, "error"); return; }
+            showConfirm("ยืนยันการเลื่อนชั้นนักเรียน", `จะเลื่อนชั้นนักเรียน ${toPromote} คน จากปีการศึกษา ${fromYear} ไปเป็นรายชื่อในปีการศึกษา ${toYear}${graduating > 0 ? ` (ม.3 และ ม.6 ที่จบการศึกษาแล้ว รวม ${graduating} คน จะไม่ถูกเลื่อนชั้น)` : ''} หลังเลื่อนชั้นแล้ว อย่าลืมเพิ่มรายชื่อนักเรียน ม.1 และ ม.4 ใหม่สำหรับปีการศึกษา ${toYear} ด้วยตนเอง (เนื่องจากเป็นชั้นรับเข้าใหม่ ไม่มีรุ่นพี่เลื่อนชั้นขึ้นมา) ข้อมูลเดิมของปี ${fromYear} จะไม่ถูกเปลี่ยนแปลงหรือลบทิ้ง คุณแน่ใจหรือไม่?`, () => {
+                // ตรึงปีให้กับนักเรียนเก่าที่ยังไม่มีปีระบุ (ข้อมูลก่อนใช้ระบบเลื่อนชั้น) ให้อยู่ที่ปีต้นทางเสมอ ป้องกันไม่ให้ไปปนกับปีอื่นในอนาคต
+                students.forEach(s => { if ((s.year === undefined || s.year === null) && roomList.includes(s.roomId)) s.year = fromYear; });
+                let added = 0;
+                roomList.forEach(r => {
+                    const level = parseInt(r.split('_')[0].replace('m', ''));
+                    if (GRADUATING_LEVELS.includes(level)) return; // ม.3 และ ม.6 จบการศึกษาแล้ว ไม่เลื่อนชั้นต่อ
+                    const roomStu = getRoomStudents(r, fromYear).filter(s => s.status !== 'resigned');
+                    if (roomStu.length === 0) return;
+                    const newRoomId = `m${level + 1}_${r.split('_')[1]}`;
+                    roomStu.forEach(s => {
+                        const dup = students.find(x => x.roomId === newRoomId && String(x.year) === String(toYear) && x.number === s.number && x.name === s.name);
+                        if (dup) return;
+                        students.push({ id: generateId(), roomId: newRoomId, number: s.number, name: s.name, status: 'active', year: toYear });
+                        added++;
+                    });
+                });
+                logAction('เลื่อนชั้นนักเรียน', `จากปีการศึกษา ${fromYear} ไปปีการศึกษา ${toYear} (เลื่อนชั้น ${added} คน${graduating > 0 ? `, จบการศึกษา ${graduating} คน` : ''})`, 'settings');
+                saveData('full'); showToast(`เลื่อนชั้นนักเรียนสำเร็จ ${added} คน${graduating > 0 ? ` (ม.3 และ ม.6 จบการศึกษาไปแล้ว รวม ${graduating} คน)` : ''} อย่าลืมเพิ่มรายชื่อ ม.1 และ ม.4 ใหม่สำหรับปีการศึกษา ${toYear}`); renderAdminTab();
+            });
+        };
+        window.saveStudentForm = async function() {
+            const number = document.getElementById('newStuNum').value, name = document.getElementById('newStuName').value.trim(), status = document.getElementById('newStuStatus').value;
+            if (!number || !name) { showToast("กรอกข้อมูลให้ครบ", "error"); return; }
+            showToast("กำลังบันทึกข้อมูลนักเรียน...", "info");
+            document.body.style.pointerEvents = 'none';
+            const __prefetch5 = await refreshBeforeEdit(['students']); // ดึงข้อมูลล่าสุดก่อนบันทึก กันชนกับแอดมินคนอื่นที่เพิ่ม/แก้ไขนักเรียนพร้อมกัน
+            if (editingStudentId) {
+                const st = students.find(s => s.id === editingStudentId);
+                if (st) { st.number = number; st.name = name; st.status = status; logAction('แก้ไขข้อมูลนักเรียน', `${name} (เลขที่ ${number}, ${formatRoomName(st.roomId)})`); }
+                else { document.body.style.pointerEvents = 'auto'; showToast("ไม่พบนักเรียนคนนี้แล้ว (อาจถูกลบไปโดยผู้ใช้อื่น)", "error"); renderAdminTab(); return; }
+            } else {
+                students.push({ id: generateId(), roomId: window.adminSelectedRoom, number, name, status });
+                logAction('เพิ่มนักเรียนใหม่', `${name} (เลขที่ ${number}, ${formatRoomName(window.adminSelectedRoom)})`);
+            }
+            await saveData('full', null, __prefetch5); document.body.style.pointerEvents = 'auto'; showToast("บันทึกสำเร็จ"); renderAdminTab(); closeStudentModal();
+        };
+        function deleteSubject(id) {
+            if (guardTermLock('ลบวิชา')) return;
+            const subCheck = subjects.find(s => s.id === id);
+            if (subCheck && subCheck.systemType) { showToast("วิชานี้เป็นคาบระบบ (เข้าแถวเช้า/โฮมรูม) ไม่สามารถลบได้", "error"); return; }
+            if (subCheck && subCheck.locked) { showToast("วิชานี้ถูกล็อคไว้ กรุณาปลดล็อคก่อนลบ", "error"); return; }
+            showConfirm("ลบวิชา", "ข้อมูลการเช็คชื่อทั้งหมดในวิชานี้จะถูกลบไปด้วย แน่ใจหรือไม่?", async () => {
+                showToast("กำลังลบวิชา...", "info");
+                document.body.style.pointerEvents = 'none';
+                const __prefetch6 = await refreshBeforeEdit(['subjects']);
+                const sub = subjects.find(s => s.id === id);
+                subjects = subjects.filter(s => s.id !== id);
+                attendanceData = attendanceData.filter(a => a.subjectId !== id);
+                logAction('ลบวิชา', sub ? sub.name : id);
+                await saveData('full', null, __prefetch6); document.body.style.pointerEvents = 'auto'; renderAdminTab();
+            });
+        }
+        function deleteStudent(id) {
+            showConfirm("ลบนักเรียน", "แน่ใจหรือไม่ที่จะลบนักเรียนคนนี้?", async () => {
+                showToast("กำลังลบนักเรียน...", "info");
+                document.body.style.pointerEvents = 'none';
+                const __prefetch7 = await refreshBeforeEdit(['students']);
+                const st = students.find(s => s.id === id);
+                students = students.filter(s => s.id !== id);
+                logAction('ลบนักเรียน', st ? `${st.name} (${formatRoomName(st.roomId)})` : id);
+                await saveData('full', null, __prefetch7); document.body.style.pointerEvents = 'auto'; renderAdminTab();
+            });
+        }
+        window.deleteAllStudentsInRoom = function(roomId) {
+            if (!roomId || roomId === 'all') { showToast("กรุณาเลือกห้องก่อน", "error"); return; }
+            const targets = getRoomStudents(roomId, adminYear());
+            if (targets.length === 0) { showToast("ห้องนี้ยังไม่มีรายชื่อนักเรียน", "error"); return; }
+            showConfirm("ลบนักเรียนทุกคนในห้องนี้", `จะลบรายชื่อนักเรียนทั้งหมด ${targets.length} คน ของห้อง ${formatRoomName(roomId)} ออกจากระบบ (ประวัติการเช็คชื่อเก่าของนักเรียนกลุ่มนี้จะยังคงอยู่ในไฟล์แต่จะไม่ผูกกับชื่อใครแล้ว) การกระทำนี้ไม่สามารถยกเลิกได้ แน่ใจหรือไม่?`, async () => {
+                showToast("กำลังลบนักเรียน...", "info");
+                document.body.style.pointerEvents = 'none';
+                const __prefetch9 = await refreshBeforeEdit(['students']);
+                const freshTargets = getRoomStudents(roomId, adminYear());
+                const ids = new Set(freshTargets.map(s => s.id));
+                students = students.filter(s => !ids.has(s.id));
+                logAction('ลบนักเรียนทุกคนในห้อง', `${formatRoomName(roomId)} (${freshTargets.length} คน)`);
+                await saveData('full', null, __prefetch9); document.body.style.pointerEvents = 'auto'; showToast("ลบนักเรียนทุกคนในห้องเรียบร้อย"); renderAdminTab();
+            });
+        };
+
+        // ===== จัดการผู้ใช้งาน (เฉพาะ Super Admin) =====
+        window.openUserModal = function(id = null) {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่จัดการผู้ใช้งานได้", "error"); return; }
+            editingUserId = id;
+            const u = id ? (settings.users || []).find(x => x.id === id) : null;
+            document.getElementById('userModalTitle').innerText = id ? 'แก้ไขผู้ใช้งาน' : 'เพิ่มผู้ใช้งานใหม่';
+            document.getElementById('newUserName').value = u ? u.name : '';
+            document.getElementById('newUserUsername').value = u ? u.username : '';
+            document.getElementById('newUserPassword').value = u ? u.password : '';
+            document.getElementById('userModal').classList.remove('hidden');
+            setTimeout(() => { document.getElementById('userModalBox').classList.remove('scale-95', 'opacity-0'); document.getElementById('userModalBox').classList.add('scale-100', 'opacity-100'); }, 10);
+        };
+        window.closeUserModal = function() {
+            document.getElementById('userModalBox').classList.remove('scale-100', 'opacity-100');
+            document.getElementById('userModalBox').classList.add('scale-95', 'opacity-0');
+            setTimeout(() => { document.getElementById('userModal').classList.add('hidden'); }, 300);
+        };
+        window.saveUserForm = function() {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่จัดการผู้ใช้งานได้", "error"); return; }
+            const name = document.getElementById('newUserName').value.trim();
+            const username = document.getElementById('newUserUsername').value.trim();
+            const password = document.getElementById('newUserPassword').value;
+            if (!name || !username || !password) { showToast("กรอกข้อมูลให้ครบ", "error"); return; }
+            if (!settings.users) settings.users = [];
+            const dup = settings.users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.id !== editingUserId);
+            if (dup) { showToast("ชื่อผู้ใช้นี้มีอยู่แล้ว", "error"); return; }
+            if (editingUserId) {
+                const u = settings.users.find(x => x.id === editingUserId);
+                if (u && u.role === 'super_admin') { showToast("ไม่สามารถแก้ไข Super Admin ได้", "error"); return; }
+                if (u) { u.name = name; u.username = username; u.password = password; logAction('แก้ไขข้อมูลผู้ใช้งาน', `${name} (${username})`, 'account'); }
+            } else {
+                settings.users.push({ id: generateId(), username, password, name, role: 'admin', createdAt: new Date().toISOString() });
+                logAction('เพิ่มผู้ใช้งานใหม่', `${name} (${username}) สิทธิ์เจ้าหน้าที่`, 'account');
+            }
+            saveData('full'); showToast("บันทึกสำเร็จ"); renderAdminTab(); closeUserModal();
+        };
+        window.deleteUser = function(id) {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่จัดการผู้ใช้งานได้", "error"); return; }
+            const u = (settings.users || []).find(x => x.id === id);
+            if (!u || u.role === 'super_admin') { showToast("ไม่สามารถลบ Super Admin ได้", "error"); return; }
+            showConfirm("ลบผู้ใช้งาน", `ต้องการลบผู้ใช้ "${u.name}" ใช่หรือไม่?`, () => {
+                settings.users = settings.users.filter(x => x.id !== id);
+                logAction('ลบผู้ใช้งาน', `${u.name} (${u.username})`, 'account');
+                saveData('full'); showToast("ลบผู้ใช้งานแล้ว"); renderAdminTab();
+            });
+        };
+        
+        window.filterSubjects = function() {
+            const searchInput = document.getElementById('searchSubjectInput');
+            if (!searchInput) return;
+            const searchText = searchInput.value.toLowerCase();
+            const rows = document.querySelectorAll('#adminSubjectTableBody tr');
+            rows.forEach(row => {
+                const searchContent = row.getAttribute('data-search');
+                if (!searchContent) return;
+                row.style.display = searchContent.toLowerCase().includes(searchText) ? '' : 'none';
+            });
+        };
+
+        window.filterTeachers = function() {
+            const searchText = document.getElementById('searchTeacherInput').value.toLowerCase();
+            const cards = document.querySelectorAll('#adminTeacherGrid .teacher-card');
+            
+            cards.forEach(card => {
+                const searchContent = card.getAttribute('data-search');
+                if (searchContent) {
+                    if (searchContent.toLowerCase().includes(searchText)) {
+                        card.style.display = '';
+                    } else {
+                        card.style.display = 'none';
+                    }
+                }
+            });
+        };
+
+        window.filterAdminStudents = function() {
+            const searchText = document.getElementById('searchStudentInput').value.toLowerCase();
+            const rows = document.querySelectorAll('#adminStudentTableBody tr');
+            
+            rows.forEach(row => {
+                const searchContent = row.getAttribute('data-search');
+                if (searchContent) {
+                    if (searchContent.toLowerCase().includes(searchText)) {
+                        row.style.display = '';
+                    } else {
+                        row.style.display = 'none';
+                    }
+                }
+            });
+        };
+
+        window.handleImportStudents = function(e) {
+            const file = e.target.files[0];
+            if (!file) return; showProgressModal("กำลังนำเข้ารายชื่อนักเรียน", "กำลังอ่านไฟล์..."); const reader = new FileReader();
+            reader.onload = async function(evt) {
+                try {
+                    updateProgressModal(25, "กำลังตรวจสอบข้อมูลในไฟล์...");
+                    const data = new Uint8Array(evt.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'}); const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
+                    let startIndex = (jsonData.length > 0 && String(jsonData[0][0]).includes("เลขที่")) ? 1 : 0; let imported = 0;
+                    updateProgressModal(55, "กำลังนำเข้ารายชื่อนักเรียน...");
+                    for(let i = startIndex; i < jsonData.length; i++) {
+                        const row = jsonData[i];
+                        if(row && row.length >= 2 && row[0] && row[1]) {
+                            const number = String(row[0]).trim(), name = String(row[1]).trim();
+                            const exists = students.find(s => s.roomId === window.adminSelectedRoom && s.number === number);
+                            if(exists) { exists.name = name;
+                            } else { students.push({ id: generateId(), roomId: window.adminSelectedRoom, number, name, status: 'active' }); } imported++;
+                        }
+                    }
+                    if (imported > 0) { updateProgressModal(85, "กำลังบันทึกขึ้นเซิร์ฟเวอร์..."); await saveData('full'); logAction('นำเข้ารายชื่อนักเรียนจาก Excel', `นำเข้า ${imported} คน ห้อง ${formatRoomName(window.adminSelectedRoom)}`);
+                        completeProgressModal("นำเข้าสำเร็จ", `นำเข้า ${imported} คน สำเร็จ!`); renderAdminTab(); } else { errorProgressModal("ไม่พบข้อมูลที่ถูกต้องในไฟล์");
+                    }
+                } catch (err) { errorProgressModal("เกิดข้อผิดพลาดในการอ่านไฟล์ กรุณาตรวจสอบรูปแบบไฟล์");
+                } e.target.value = '';
+            }; reader.readAsArrayBuffer(file);
+        };
+
+        window.downloadStudentTemplate = function() {
+            const ws_data = [ ["เลขที่", "คำนำหน้า+ชื่อ-นามสกุล"], ["1", "ด.ช.รักเรียน เพียรศึกษา"], ["2", "ด.ญ.ใจดี มีเมตตา"] ];
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); ws['!cols'] = [{wch: 10}, {wch: 35}];
+            const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Template");
+            XLSX.writeFile(wb, "แบบฟอร์มนำเข้านักเรียน.xlsx");
+            showToast("ดาวน์โหลดแบบฟอร์มสำเร็จ", "success");
+        };
+
+        // แปลงป้ายห้อง เช่น "ม.1/1" กลับเป็น roomId เช่น "m1_1" (รองรับช่องว่างและรูปแบบเขียนต่างกันเล็กน้อย)
+        function parseRoomLabel_(label) {
+            if (!label) return null;
+            const m = String(label).trim().match(/ม\.?\s*(\d+)\s*\/\s*(\d+)/);
+            if (!m) return null;
+            const roomId = `m${m[1]}_${m[2]}`;
+            return getRoomList().includes(roomId) ? roomId : null;
+        }
+
+        window.downloadStudentTemplateAllRooms = function() {
+            const sampleRooms = getRoomList().slice(0, 2);
+            const ws_data = [ ["ห้อง", "เลขที่", "คำนำหน้า+ชื่อ-นามสกุล"] ];
+            if (sampleRooms[0]) ws_data.push([formatRoomName(sampleRooms[0]), "1", "ด.ช.รักเรียน เพียรศึกษา"], [formatRoomName(sampleRooms[0]), "2", "ด.ญ.ใจดี มีเมตตา"]);
+            if (sampleRooms[1]) ws_data.push([formatRoomName(sampleRooms[1]), "1", "ด.ช.ขยัน ตั้งใจดี"]);
+            ws_data.push([], ["หมายเหตุ: คอลัมน์ \"ห้อง\" ต้องเป็นรูปแบบ ม.X/Y เช่น ม.1/1, ม.4/2 ให้ตรงกับห้องที่มีอยู่ในระบบ"], ["สามารถใส่นักเรียนได้หลายห้องในไฟล์เดียว โดยเรียงแถวสลับห้องกันได้ตามสะดวก"]);
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); ws['!cols'] = [{wch: 12}, {wch: 10}, {wch: 35}];
+            const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Template");
+            XLSX.writeFile(wb, "แบบฟอร์มนำเข้านักเรียนทุกห้อง.xlsx");
+            showToast("ดาวน์โหลดแบบฟอร์ม (ทุกห้อง) สำเร็จ", "success");
+        };
+
+        window.handleImportStudentsAllRooms = function(e) {
+            const file = e.target.files[0];
+            if (!file) return; showProgressModal("กำลังนำเข้ารายชื่อนักเรียนทุกห้อง", "กำลังอ่านไฟล์..."); const reader = new FileReader();
+            reader.onload = async function(evt) {
+                try {
+                    updateProgressModal(15, "กำลังตรวจสอบข้อมูลในไฟล์...");
+                    const data = new Uint8Array(evt.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'}); const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
+                    let startIndex = (jsonData.length > 0 && String(jsonData[0][0] || '').includes("ห้อง")) ? 1 : 0;
+                    let imported = 0, skippedRoom = 0;
+                    const roomsTouched = new Set();
+                    updateProgressModal(35, "กำลังดึงข้อมูลล่าสุดจากเซิร์ฟเวอร์...");
+                    const __prefetch8 = await refreshBeforeEdit(['students']);
+                    updateProgressModal(55, "กำลังนำเข้ารายชื่อนักเรียน...");
+                    for (let i = startIndex; i < jsonData.length; i++) {
+                        const row = jsonData[i];
+                        if (!row || row.length < 3 || !row[0] || !row[1] || !row[2]) continue;
+                        if (String(row[0]).trim().startsWith('หมายเหตุ') || String(row[0]).trim().startsWith('สามารถ')) continue;
+                        const roomId = parseRoomLabel_(row[0]);
+                        if (!roomId) { skippedRoom++; continue; }
+                        const number = String(row[1]).trim(), name = String(row[2]).trim();
+                        const exists = students.find(s => s.roomId === roomId && s.number === number);
+                        if (exists) { exists.name = name; } else { students.push({ id: generateId(), roomId, number, name, status: 'active' }); }
+                        roomsTouched.add(roomId); imported++;
+                    }
+                    if (imported > 0) { updateProgressModal(85, "กำลังบันทึกขึ้นเซิร์ฟเวอร์..."); await saveData('full', null, __prefetch8); logAction('นำเข้ารายชื่อนักเรียนทุกห้องจาก Excel', `นำเข้า ${imported} คน ใน ${roomsTouched.size} ห้อง`);
+                        completeProgressModal("นำเข้าสำเร็จ", `นำเข้า ${imported} คน ใน ${roomsTouched.size} ห้อง สำเร็จ!${skippedRoom > 0 ? ' (ข้าม ' + skippedRoom + ' แถวที่ระบุห้องไม่ถูกต้อง)' : ''}`); renderAdminTab();
+                    } else { errorProgressModal("ไม่พบข้อมูลที่ถูกต้อง หรือชื่อห้องในไฟล์ไม่ตรงกับห้องในระบบ"); }
+                } catch (err) { errorProgressModal("เกิดข้อผิดพลาดในการอ่านไฟล์ กรุณาตรวจสอบรูปแบบไฟล์");
+                } e.target.value = '';
+            }; reader.readAsArrayBuffer(file);
+        };
+
+        window.exportAllStudentsExcel = function(roomId) {
+            const roomName = formatRoomName(roomId), roomStudents = getRoomStudents(roomId).sort((a,b) => parseInt(a.number) - parseInt(b.number)), roomSubjects = getRoomSubjects(roomId);
+            let ws_data = [ ["รายงานสรุปภาพรวมทั้งหมด", `ห้อง ${roomName}`], [], ["เลขที่", "คำนำหน้า+ชื่อ-นามสกุล", "สถานะ"] ]; roomSubjects.forEach(sub => ws_data[2].push(`รวม ${sub.name}`));
+            roomStudents.forEach(st => {
+                let row = [st.number, st.name, st.status === 'resigned' ? 'ออก/ย้าย' : 'เรียนอยู่'];
+                roomSubjects.forEach(sub => { let count = 0; attendanceData.filter(a => a.subjectId === sub.id).forEach(att => { if (att.records[st.id] === 'มา' || att.records[st.id] === 'ร่วมกิจกรรม' || att.records[st.id] === 'สาย') count++; }); row.push(count); });
+                ws_data.push(row);
+            });
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Summary"); XLSX.writeFile(wb, `สรุปทั้งหมด_ห้อง_${roomName}.xlsx`);
+        };
+        window.exportSubjectExcel = function(subjectId) {
+            const subject = subjects.find(s => s.id === subjectId), roomStudents = getRoomStudents(subject.roomId).sort((a, b) => parseInt(a.number) - parseInt(b.number)), subjectAtt = attendanceData.filter(a => a.subjectId === subjectId).sort((a, b) => new Date(a.date) - new Date(b.date) || parseInt(a.period || 0) - parseInt(b.period || 0));
+            let uniqueCols = []; subjectAtt.forEach(att => { const key = `${att.date}_${att.period}`; if (!uniqueCols.find(c => c.key === key)) uniqueCols.push({ date: att.date, period: att.period, data: att.records, subTeacher: att.substituteTeacher }); });
+            let ws_data = []; let header = ["เลขที่", "ชื่อ-นามสกุล", "สถานะ"]; uniqueCols.forEach(col => header.push(`${col.date} (ค.${col.period||'-'})${col.subTeacher ? `\n[แทน: ${col.subTeacher}]` : ''}`)); header.push("รวมมาเรียน");
+            header.push("หมายเหตุ"); ws_data.push(header);
+            roomStudents.forEach(st => {
+                let row = [st.number, `${st.name}`, st.status === 'resigned' ? 'ออก/ย้าย' : 'เรียนอยู่']; let valid = 0, late = 0, absent = 0;
+                uniqueCols.forEach(col => { const status = col.data[st.id] || '-'; if(status === 'มา' || status === 'ร่วมกิจกรรม') valid++; if(status === 'สาย') late++; if(status === 'ขาด') absent++; row.push(status); }); row.push(valid); 
+                let remarks = []; if(late >= (settings.thresholds?.late||4)) remarks.push(`สาย ${late}`); if(absent >= (settings.thresholds?.absent||4)) remarks.push(`ขาด ${absent}`); row.push(remarks.length > 0 ? remarks.join(', ') + ' ครั้ง' : '');
+                ws_data.push(row);
+            });
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Attendance"); XLSX.writeFile(wb, `วิชา_${subject.name}_ห้อง_${formatRoomName(subject.roomId)}.xlsx`);
+        }
+
+        window.exportRoomMonthlyExcel = function(roomId, month) {
+            const report = window.tempRoomReport;
+            if(!report || report.roomId !== roomId) return; const roomName = formatRoomName(roomId);
+            let ws_data = [ ["รายงานห้องเรียน", `ห้อง ${roomName}`, `เดือน ${month}`], [], ["เลขที่", "ชื่อ-นามสกุล", "สถานะ", "ส.1", "ส.2", "ส.3", "ส.4", "ส.5", "รวมมาเรียน", "สาย(แยก)", "ลาป่วย", "ลากิจ", "ขาด", "โดด"] ];
+            report.data.forEach(row => { let valid = row.monthly['มา'] + row.monthly['ร่วมกิจกรรม'] + row.monthly['สาย']; ws_data.push([ row.student.number, `${row.student.name}`, row.student.status === 'resigned' ? 'ออก/ย้าย' : 'เรียนอยู่', row.weekly[1]||0, row.weekly[2]||0, row.weekly[3]||0, row.weekly[4]||0, row.weekly[5]||0, valid||0, row.monthly['สาย']||0, row.monthly['ลาป่วย']||0, row.monthly['ลากิจ']||0, row.monthly['ขาด']||0, row.monthly['โดดเรียน']||0 ]); });
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, `Summary`); XLSX.writeFile(wb, `สรุปภาพรวมห้อง_${roomName}_${month}.xlsx`);
+        }
+        
+        window.exportRoomDailyExcel = function(roomId, date) {
+            const roomName = formatRoomName(roomId), roomStudents = getRoomStudents(roomId).sort((a,b) => parseInt(a.number) - parseInt(b.number)), roomSubjects = getRoomSubjects(roomId);
+            const dObj = new Date(date); const dayOfWeek = dObj.getDay(); let dayIndexForSched = (dayOfWeek >= 1 && dayOfWeek <= 5) ? dayOfWeek : 1;
+            const subjectsToday = []; roomSubjects.forEach(s => { if (s.schedules) { s.schedules.forEach(sch => { if (parseInt(sch.day) === dayIndexForSched) { subjectsToday.push({ ...s, period: parseInt(sch.period) }); } }); } });
+            subjectsToday.sort((a,b) => a.period - b.period);
+            const dailyAttRecords = attendanceData.filter(a => a.date === date && subjectsToday.some(st => st.id === a.subjectId && String(st.period) === String(a.period)));
+            let ws_data = [ ["รายงานการเช็คชื่อประจำวัน", `ห้อง ${roomName}`, `ประจำวันที่ ${date}`], [], ["เลขที่", "ชื่อ-นามสกุล", "สถานะ"] ];
+            if (subjectsToday.length === 0) { ws_data[2].push("ไม่มีวิชาเรียน");
+            } else { subjectsToday.forEach(sub => ws_data[2].push(`${sub.name} (ค.${sub.period})`)); }
+            roomStudents.forEach(st => {
+                let row = [st.number, `${st.name}`, st.status === 'resigned' ? 'ออก/ย้าย' : 'เรียนอยู่'];
+                if (subjectsToday.length === 0) { row.push("-"); } else { subjectsToday.forEach(sub => { const attRecord = dailyAttRecords.find(a => a.subjectId === sub.id && String(a.period) === String(sub.period)); if (attRecord && attRecord.records[st.id]) { row.push(attRecord.records[st.id]); } else { row.push("-"); } }); 
+                }
+                ws_data.push(row);
+            });
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, `Daily`); XLSX.writeFile(wb, `สรุปรายวัน_ห้อง_${roomName}_${date}.xlsx`);
+        };
+        window.exportStudentExcel = function(studentId, month) {
+            const data = window.tempStudentReport;
+            if(!data) return;
+            let ws_data = [ ["รายงานส่วนบุคคล", `เดือน ${month}`], ["ชื่อ:", `${data.student.name}`, "เลขที่:", data.student.number, "ห้อง:", data.room], [], ["สรุปรายเดือน", "มา", "กิจกรรม", "สาย", "ป่วย", "ลากิจ", "ขาด", "โดด"], ["", data.monthly['มา'], data.monthly['ร่วมกิจกรรม'], data.monthly['สาย'], data.monthly['ลาป่วย'], data.monthly['ลากิจ'], data.monthly['ขาด'], data.monthly['โดดเรียน']], [], ["สรุปสัปดาห์", "มา", "กิจกรรม", "สาย", "ป่วย", "ลากิจ", "ขาด", "โดด"] ];
+            for(let i=1; i<=5; i++) ws_data.push([`สัปดาห์ ${i}`, data.weekly[i]['มา'], data.weekly[i]['ร่วมกิจกรรม'], data.weekly[i]['สาย'], data.weekly[i]['ลาป่วย'], data.weekly[i]['ลากิจ'], data.weekly[i]['ขาด'], data.weekly[i]['โดดเรียน']]);
+            ws_data.push([]); ws_data.push(["ประวัติรายวัน (อิงจากคาบ)"]); ws_data.push(["วันที่", "สถานะ"]);
+            data.dates.forEach(d => { ws_data.push([d, data.daily[d].status]); });
+            const ws = XLSX.utils.aoa_to_sheet(ws_data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Student"); XLSX.writeFile(wb, `รายงาน_${data.student.name}_${month}.xlsx`);
+        }
+
+        // ===== ส่งออกส่วนกราฟ/ภาพรวมเป็น Infographic แบบทั่วไป (PDF หรือรูปภาพ) ใช้ได้กับทุกส่วนที่มีกราฟ =====
+        window.exportSectionInfographicPDF = async function(elementId, filenameBase, format = 'pdf') {
+            const el = document.getElementById(elementId);
+            if (!el) { showToast("ไม่พบข้อมูลสำหรับส่งออก", "error"); return; }
+            showToast(`กำลังสร้างไฟล์ ${format === 'image' ? 'รูปภาพ' : 'PDF'} กรุณารอสักครู่...`, "success");
+            const __wasDark = document.documentElement.classList.contains('dark'); if (__wasDark) document.documentElement.classList.remove('dark');
+            await document.fonts.ready; await new Promise(resolve => setTimeout(resolve, 400));
+            try {
+                const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false });
+                if (format === 'image') {
+                    const pngData = canvas.toDataURL('image/png', 1.0);
+                    const link = document.createElement('a');
+                    link.href = pngData; link.download = `${filenameBase}.png`;
+                    document.body.appendChild(link); link.click(); link.remove();
+                } else {
+                    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                    const pdfW = 595.28; const pdfH = pdfW * (canvas.height / canvas.width);
+                    const orientation = pdfH > pdfW ? 'p' : 'l';
+                    const pdfDoc = new jspdf.jsPDF({ orientation, unit: 'pt', format: [pdfW, pdfH] });
+                    pdfDoc.addImage(imgData, 'JPEG', 0, 0, pdfW, pdfH);
+                    pdfDoc.save(`${filenameBase}.pdf`);
+                }
+                showToast(`สร้างไฟล์ ${format === 'image' ? 'รูปภาพ' : 'PDF'} สำเร็จ!`, "success");
+            } catch (err) { showToast("เกิดข้อผิดพลาดในการสร้างไฟล์ Infographic", "error"); }
+            if (__wasDark) document.documentElement.classList.add('dark');
+        };
+
+        // สร้างช่องลงนามแบบทางการ แสดงเฉพาะผู้ที่มีชื่อจริงเท่านั้น (กรองคนที่ยังไม่มีข้อมูลออกไปเลย ไม่ใช่โชว์ช่องว่างงงๆ)
+        // ใช้เส้นขีดจริง (border) แทนการเคาะวรรค เพราะเบราว์เซอร์จะยุบช่องว่างต่อเนื่องอยู่ดี ทำให้เส้นที่เคาะด้วยวรรคแทบมองไม่เห็นจริงในไฟล์ที่ปริ้นออกมา
+        function buildPdfSignatureBlock(signers) {
+            const valid = (signers || []).filter(s => s && s.name && String(s.name).trim());
+            if (valid.length === 0) {
+                return `<div class="mt-auto pt-6 pb-6 text-center border-t border-dashed border-slate-300"><p class="text-[11px] text-slate-400 font-medium italic">— ยังไม่มีข้อมูลผู้รับผิดชอบสำหรับลงนามในเอกสารฉบับนี้ —</p></div>`;
+            }
+            const cols = valid.map(s => `<div class="flex-1 min-w-[150px] px-2"><p class="mb-1 text-[10px] text-slate-400 font-medium tracking-wide">ลงชื่อ</p><div class="h-12"></div><p class="font-bold">( ${s.name} )</p><p class="text-slate-500 mt-1 text-[11px] font-bold">${s.role}</p><p class="text-slate-400 mt-3 text-[10px] tracking-wide">วันที่ ____ / ____ / ____</p></div>`).join('');
+            return `<div class="mt-auto pt-8 flex flex-wrap justify-around gap-y-6 px-2 text-center text-sm font-bold pb-8 border-t border-slate-200">${cols}</div>`;
+        }
+        // บรรทัดข้อมูลกำกับความเป็นทางการของเอกสาร (ชื่อระบบ + วันที่ออกรายงาน)
+        function pdfDocMeta() {
+            const now = new Date();
+            const genDate = now.toLocaleDateString('th-TH', { day: '2-digit', month: 'long', year: 'numeric' });
+            return `<p class="text-[10px] text-slate-400 font-semibold mb-1.5 tracking-wide">${settings.title || 'ระบบเช็คชื่อนักเรียนอัจฉริยะ'} · ออกรายงานเมื่อวันที่ ${genDate}</p>`;
+        }
+        // โลโก้โรงเรียน/เว็บ (ถ้ามีอัปโหลดไว้) แสดงกลางหัวรายงาน
+        function pdfLogoHtml() {
+            if (!settings.logoDataUrl) return '';
+            return `<img src="${settings.logoDataUrl}" style="width:52px; height:52px; object-fit:cover; border-radius:9999px; margin:0 auto 10px auto; display:block; border:2px solid #e2e8f0;">`;
+        }
+        // ป้ายเลขหน้า มุมขวาบนของกระดาษ (แยกออกจากหัวเรื่องหลัก กันไม่ให้หัวเรื่องยาวจนตัวอักษรชนกับกล่องด้านล่าง)
+        function pdfPageBadge(pageLabel) {
+            if (!pageLabel) return '';
+            return `<div style="position:absolute; top:18px; right:18px;" class="bg-slate-100 border border-slate-300 text-slate-500 text-[10px] font-bold px-2.5 py-1 rounded-lg">${pageLabel}</div>`;
+        }
+        window.downloadStudentPDF = async function(studentId, month) {
+            const pdfType = document.getElementById('studentPdfType').value;
+            const data = window.tempStudentReport; if (!data || data.student.id !== studentId) return;
+            showToast("กำลังประมวลผล PDF กรุณารอสักครู่...", "success");
+            const __wasDark = document.documentElement.classList.contains('dark'); if (__wasDark) document.documentElement.classList.remove('dark');
+            const advData = getRoomAdvisors(data.student.roomId);
+            const adv1 = advData[0] || '';
+            const staffName = getRoomStaff(data.student.roomId);
+            const pdfDoc = new jspdf.jsPDF('p', 'pt', 'a4');
+            let htmlContainer = `<div id="pdf-student-container" class="a4-export-container text-slate-800" style="font-family: 'Sarabun', sans-serif;"><div id="pdf-student-page" class="a4-page flex flex-col justify-between bg-white"><div><div class="text-center mb-6 border-b-2 border-slate-700 pb-4">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-3xl font-black" style="margin-bottom:22px; line-height:1.5;">รายงานสรุปเวลาเรียนส่วนบุคคล</h1><h2 class="text-xl font-bold bg-blue-100 px-4 py-1.5 rounded-full inline-block border border-blue-300">ประจำเดือน: ${month.split('-')[1]}/${parseInt(month.split('-')[0])+543} | รูปแบบ: ${pdfType === 'daily' ? 'รายวัน' : (pdfType === 'weekly' ? 'รายสัปดาห์' : 'รายเดือน')}</h2></div><div class="flex justify-between items-center mb-6 text-sm font-bold bg-slate-50 p-4 rounded-xl border border-slate-300"><div><span class="text-slate-500">ชื่อ-นามสกุล:</span> ${data.student.name}</div><div><span class="text-slate-500">เลขที่:</span> ${data.student.number}</div><div><span class="text-slate-500">ห้อง:</span> ${data.room}</div></div>`;
+            if (pdfType === 'monthly') {
+                htmlContainer += `<table class="w-full text-center border-collapse border border-slate-500 text-base mb-6"><thead class="bg-slate-100"><tr><th class="border border-slate-500 p-3" colspan="2">สรุปสถิติประจำเดือน</th></tr></thead><tbody class="divide-y divide-slate-400 font-bold"><tr><td class="border border-slate-500 p-3 w-1/2 text-right pr-6">มาเรียน</td><td class="border border-slate-500 p-3 w-1/2 text-left pl-6 text-emerald-600">${data.monthly['มา']} ครั้ง</td></tr><tr><td class="border border-slate-500 p-3 text-right pr-6">ร่วมกิจกรรม</td><td class="border border-slate-500 p-3 text-left pl-6 text-cyan-600">${data.monthly['ร่วมกิจกรรม']} ครั้ง</td></tr><tr><td class="border border-slate-500 p-3 text-right pr-6">สาย</td><td class="border border-slate-500 p-3 text-left pl-6 text-amber-600">${data.monthly['สาย']} ครั้ง</td></tr><tr><td class="border border-slate-500 p-3 text-right pr-6">ลาป่วย</td><td class="border border-slate-500 p-3 text-left pl-6 text-blue-600">${data.monthly['ลาป่วย']} ครั้ง</td></tr><tr><td class="border border-slate-500 p-3 text-right pr-6">ลากิจ</td><td class="border border-slate-500 p-3 text-left pl-6 text-indigo-600">${data.monthly['ลากิจ']} ครั้ง</td></tr><tr><td class="border border-slate-500 p-3 text-right pr-6">ขาดเรียน</td><td class="border border-slate-500 p-3 text-left pl-6 text-rose-600">${data.monthly['ขาด']} ครั้ง</td></tr><tr><td class="border border-slate-500 p-3 text-right pr-6">โดดเรียน</td><td class="border border-slate-500 p-3 text-left pl-6 text-purple-600">${data.monthly['โดดเรียน']} ครั้ง</td></tr></tbody></table>`;
+            } else if (pdfType === 'weekly') {
+                htmlContainer += `<table class="w-full text-center border-collapse border border-slate-500 text-[14px] mb-6"><thead class="bg-slate-100"><tr><th class="border border-slate-500 p-2">สัปดาห์ที่</th><th class="border border-slate-500 p-2 text-emerald-700">มา</th><th class="border border-slate-500 p-2 text-cyan-700">กิจกรรม</th><th class="border border-slate-500 p-2 text-amber-700">สาย</th><th class="border border-slate-500 p-2 text-blue-700">ลาป่วย</th><th class="border border-slate-500 p-2 text-indigo-700">ลากิจ</th><th class="border border-slate-500 p-2 text-rose-700">ขาด</th><th class="border border-slate-500 p-2 text-purple-700">โดด</th></tr></thead><tbody class="divide-y divide-slate-400 font-bold">${[1,2,3,4,5].map(w => `<tr><td class="border border-slate-500 p-2 bg-slate-50">สัปดาห์ ${w}</td><td class="border border-slate-500 p-2 text-emerald-600">${data.weekly[w]['มา']}</td><td class="border border-slate-500 p-2 text-cyan-600">${data.weekly[w]['ร่วมกิจกรรม']}</td><td class="border border-slate-500 p-2 text-amber-600">${data.weekly[w]['สาย']}</td><td class="border border-slate-500 p-2 text-blue-600">${data.weekly[w]['ลาป่วย']}</td><td class="border border-slate-500 p-2 text-indigo-600">${data.weekly[w]['ลากิจ']}</td><td class="border border-slate-500 p-2 text-rose-600">${data.weekly[w]['ขาด']}</td><td class="border border-slate-500 p-2 text-purple-600">${data.weekly[w]['โดดเรียน']}</td></tr>`).join('')}</tbody></table>`;
+            } else if (pdfType === 'daily') {
+                htmlContainer += `<table class="w-full text-center border-collapse border border-slate-500 text-[13px] mb-6"><thead class="bg-slate-100"><tr><th class="border border-slate-500 p-2 w-1/2">วันที่</th><th class="border border-slate-500 p-2 w-1/2">สถานะการมาเรียน</th></tr></thead><tbody class="divide-y divide-slate-400 font-bold">${data.dates.map(d => { const stat = data.daily[d].status; let cl = ''; if(stat==='มา'||stat==='ร่วมกิจกรรม') cl='text-emerald-600'; else if(stat==='สาย') cl='text-amber-600'; else cl='text-rose-600'; return `<tr><td class="border border-slate-500 p-2">${d.split('-').reverse().join('/')}</td><td class="border border-slate-500 p-2 ${cl}">${stat}</td></tr>`; }).join('')}${data.dates.length === 0 ? `<tr><td class="border border-slate-500 p-4 text-slate-400" colspan="2">ไม่มีข้อมูลในเดือนนี้</td></tr>` : ''}</tbody></table>`;
+            }
+
+            htmlContainer += `</div>${buildPdfSignatureBlock([{ name: adv1, role: 'ครูที่ปรึกษา' }, { name: staffName, role: 'เจ้าหน้าที่ / ฝ่ายวิชาการ' }])}</div></div>`;
+            document.body.insertAdjacentHTML('beforeend', htmlContainer);
+
+            await document.fonts.ready; await new Promise(resolve => setTimeout(resolve, 1500));
+
+            try {
+                const el = document.getElementById(`pdf-student-page`);
+                const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false });
+                const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                pdfDoc.addImage(imgData, 'JPEG', 0, 0, 595.28, 841.89);
+                pdfDoc.save(`StudentReport_${data.student.name}_${month}_${pdfType}.pdf`); showToast("สร้างไฟล์ PDF สำเร็จ!", "success");
+            } catch (err) { showToast("เกิดข้อผิดพลาดในการสร้าง PDF", "error");
+            }
+            document.getElementById('pdf-student-container').remove();
+            if (__wasDark) document.documentElement.classList.add('dark');
+        };
+        window.downloadInfographicPDF = async function(subjectId) {
+            showToast("กำลังประมวลผล PDF กรุณารอสักครู่...", "success");
+            const __wasDark = document.documentElement.classList.contains('dark'); if (__wasDark) document.documentElement.classList.remove('dark');
+            const subject = subjects.find(s => s.id === subjectId); const roomStudents = getRoomStudents(subject.roomId).sort((a,b) => parseInt(a.number) - parseInt(b.number));
+            const subjectAtt = attendanceData.filter(a => a.subjectId === subjectId);
+            
+            let uniqueCols = [];
+            subjectAtt.forEach(att => { const key = `${att.date}_${att.period}`; if (!uniqueCols.find(c => c.key === key)) uniqueCols.push({ key, data: att.records, subTeacher: att.substituteTeacher }); });
+            const totalClasses = uniqueCols.length;
+            const staffName = getRoomStaff(subject.roomId);
+            let subNotes = uniqueCols.filter(c => c.subTeacher).map(c => `วันที่ ${c.key.split('_')[0].split('-').reverse().join('/')} คาบ ${c.key.split('_')[1]} (แทนโดย: ${c.subTeacher})`);
+            let subNotesHtml = '';
+            if (subNotes.length > 0) { subNotesHtml = `<div class="mb-4 text-[10px] font-bold text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-200"><span class="text-amber-800 underline mr-1">หมายเหตุการสอนแทน:</span> ${subNotes.join(', ')}</div>`;
+            }
+
+            const STUDENTS_PER_PAGE = 24; // ลดจาก 30 เพื่อกันเนื้อหาล้นหน้า A4 แล้วถูกบีบเล็กลงตอนแปลงเป็น PDF (ทำให้แต่ละหน้าดูสัดส่วนไม่เท่ากัน)
+            const pagesCount = Math.ceil(roomStudents.length / STUDENTS_PER_PAGE) || 1;
+            const pdfDoc = new jspdf.jsPDF('p', 'pt', 'a4');
+            let htmlContainer = `<div id="pdf-export-container" class="a4-export-container text-slate-800" style="font-family: 'Sarabun', sans-serif;">`;
+            for (let page = 0; page < pagesCount; page++) {
+                const studentsChunk = roomStudents.slice(page * STUDENTS_PER_PAGE, (page + 1) * STUDENTS_PER_PAGE);
+                let studentTable = `<table class="w-full text-center border-collapse border border-slate-500 text-[13px] mb-6" style="table-layout: fixed; width: 100%;"><thead class="bg-slate-100"><tr><th class="border border-slate-500 p-2" style="width: 8%;">เลขที่</th><th class="border border-slate-500 p-2 text-left" style="width: 32%;">ชื่อ-นามสกุล</th><th class="border border-slate-500 p-2 text-emerald-700" style="width: 15%;">มา/กิจกรรม</th><th class="border border-slate-500 p-2 text-amber-700" style="width: 15%;">สาย</th><th class="border border-slate-500 p-2 text-blue-700" style="width: 15%;">ลา</th><th class="border border-slate-500 p-2 text-rose-700" style="width: 15%;">ขาด/โดด</th></tr></thead><tbody class="divide-y divide-slate-400">`;
+                studentsChunk.forEach(st => {
+                    let valid = 0, late = 0, leave = 0, absent = 0; 
+                    uniqueCols.forEach(col => { const s = col.data[st.id]; if(s === 'มา' || s === 'ร่วมกิจกรรม') valid++; else if(s === 'สาย') late++; else if(s === 'ลาป่วย' || s === 'ลากิจ') leave++; else if(s === 'ขาด' || s === 'โดดเรียน') absent++; });
+                    const isRes = st.status === 'resigned'; const calcPct = (val) => totalClasses > 0 ? Math.round((val/totalClasses)*100) : 0;
+                    const validPct = calcPct(valid), latePct = calcPct(late), leavePct = calcPct(leave), absentPct = calcPct(absent);
+                    studentTable += `<tr class="${isRes ? 'bg-slate-50' : 'bg-white'}"><td class="border border-slate-500 p-1.5 font-bold text-slate-600">${st.number}</td><td class="border border-slate-500 p-1.5 font-bold text-left">${st.name} ${isRes?'(ออก/ย้าย)':''}</td><td class="border border-slate-500 p-1.5 font-black text-emerald-600">${valid} <span class="text-[10px] text-emerald-700/70">(${validPct}%)</span></td><td class="border border-slate-500 p-1.5 font-black text-amber-600">${late} <span class="text-[10px] text-amber-700/70">(${latePct}%)</span></td><td class="border border-slate-500 p-1.5 font-black text-blue-600">${leave} <span class="text-[10px] text-blue-700/70">(${leavePct}%)</span></td><td class="border border-slate-500 p-1.5 font-black text-rose-600">${absent} <span class="text-[10px] text-rose-700/70">(${absentPct}%)</span></td></tr>`;
+                });
+                studentTable += '</tbody></table>';
+                htmlContainer += `<div id="pdf-page-${page}" class="a4-page flex flex-col justify-between bg-white">${pdfPageBadge(pagesCount > 1 ? `หน้า ${page+1}/${pagesCount}` : '')}<div><div class="text-center mb-6 border-b-2 border-slate-700 pb-4">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-3xl font-black" style="margin-bottom:22px; line-height:1.5;">สรุปเวลาเรียนรายบุคคล</h1><h2 class="text-xl font-bold bg-indigo-100 px-4 py-1.5 rounded-full inline-block border border-indigo-200">วิชา: ${subject.name} | ห้อง: ${formatRoomName(subject.roomId)}</h2></div><div class="flex justify-around mb-6 text-sm font-bold bg-slate-50 p-4 rounded-xl border border-slate-300"><div><span class="text-slate-500">ครูผู้สอน:</span> ${subject.teacher || '-'}${subject.teacher2 ? ' / ' + subject.teacher2 : ''}</div><div><span class="text-slate-500">คาบที่สอนแล้ว:</span> ${totalClasses} คาบ</div></div>${subNotesHtml}${studentTable}</div>${page === pagesCount - 1 ? buildPdfSignatureBlock([{ name: subject.teacher, role: subject.teacher2 ? 'ครูผู้สอน (หลัก)' : 'ครูผู้สอน / ผู้รับผิดชอบ' }, { name: subject.teacher2, role: 'ครูผู้สอน (ร่วมสอน)' }, { name: staffName, role: 'เจ้าหน้าที่ / ฝ่ายวิชาการ' }]) : ''}</div>`;
+            }
+            htmlContainer += `</div>`; document.body.insertAdjacentHTML('beforeend', htmlContainer);
+            await document.fonts.ready;
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            try {
+                for (let page = 0; page < pagesCount; page++) {
+                    const el = document.getElementById(`pdf-page-${page}`);
+                    const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false }); const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                    if (page > 0) pdfDoc.addPage(); pdfDoc.addImage(imgData, 'JPEG', 0, 0, 595.28, 841.89);
+                }
+                pdfDoc.save(`Report_${subject.name}_${formatRoomName(subject.roomId)}.pdf`);
+                showToast("สร้างไฟล์ PDF สำเร็จ!", "success");
+            } catch (err) { showToast("เกิดข้อผิดพลาดในการสร้าง PDF", "error"); } document.getElementById('pdf-export-container').remove();
+            if (__wasDark) document.documentElement.classList.add('dark');
+        }
+
+        window.downloadRoomInfographicPDF = async function(roomId, month) {
+            showToast("กำลังประมวลผล PDF กรุณารอสักครู่...", "success");
+            const __wasDark = document.documentElement.classList.contains('dark'); if (__wasDark) document.documentElement.classList.remove('dark');
+            const report = window.tempRoomReport; if(!report || report.roomId !== roomId) return; const roomName = formatRoomName(roomId);
+            const monthNames = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+            const displayMonthYear = `${monthNames[parseInt(month.split('-')[1])-1]} ${parseInt(month.split('-')[0])+543}`;
+            const advData = getRoomAdvisors(roomId); let advisorText = Array.isArray(advData) ? advData.filter(a => a.trim()).join(' และ ') : "ยังไม่ระบุ";
+            const staffName = getRoomStaff(roomId);
+            const signerList = [];
+            if (advData[0]) signerList.push({ name: advData[0], role: advData[1] ? 'ครูที่ปรึกษาคนที่ 1' : 'ครูที่ปรึกษา' });
+            if (advData[1]) signerList.push({ name: advData[1], role: 'ครูที่ปรึกษาคนที่ 2' });
+            signerList.push({ name: staffName, role: 'เจ้าหน้าที่ / นายทะเบียน' });
+            const STUDENTS_PER_PAGE = 24; const pagesCount = Math.ceil(report.data.length / STUDENTS_PER_PAGE) || 1; // ลดจาก 30 เพื่อกันเนื้อหาล้นหน้า A4
+            const pdfDoc = new jspdf.jsPDF('p', 'pt', 'a4');
+            let htmlContainer = `<div id="pdf-room-container" class="a4-export-container text-slate-800" style="font-family: 'Sarabun', sans-serif;">`;
+            for (let page = 0; page < pagesCount; page++) {
+                const dataChunk = report.data.slice(page * STUDENTS_PER_PAGE, (page + 1) * STUDENTS_PER_PAGE);
+                let tableHTML = `<table class="w-full text-center border-collapse text-[12px] bg-white border border-slate-500" style="table-layout: fixed; width: 100%;"><thead class="bg-slate-100 text-slate-700"><tr><th class="p-2 border border-slate-500" style="width: 8%;">เลขที่</th><th class="p-2 border border-slate-500 text-left" style="width: 32%;">ชื่อ-นามสกุล</th><th class="p-2 border border-slate-500" style="width: 6%;">ส.1</th><th class="p-2 border border-slate-500" style="width: 6%;">ส.2</th><th class="p-2 border border-slate-500" style="width: 6%;">ส.3</th><th class="p-2 border border-slate-500" style="width: 6%;">ส.4</th><th class="p-2 border border-slate-500" style="width: 6%;">ส.5</th><th class="p-2 border border-slate-500 bg-emerald-50 text-emerald-800" style="width: 6%;">มา</th><th class="p-2 border border-slate-500 bg-blue-50 text-blue-800" style="width: 6%;">ลา</th><th class="p-2 border border-slate-500 bg-rose-50 text-rose-800" style="width: 6%;">ขาด</th><th class="p-2 border border-slate-500 text-indigo-700" style="width: 12%;">การติดตาม</th></tr></thead><tbody class="divide-y divide-slate-400">`;
+                dataChunk.forEach((row) => {
+                    const isRes = row.student.status === 'resigned'; let bgRow = isRes ? 'bg-slate-100 text-slate-500 opacity-80' : 'bg-white';
+                    let valid = row.monthly['มา'] + row.monthly['ร่วมกิจกรรม'], leave = row.monthly['ลากิจ'] + row.monthly['ลาป่วย'], absent = row.monthly['ขาด'] + row.monthly['โดดเรียน'];
+                    
+                    let fwText = '-'; let fwCls = '';
+                    let lateLimit = settings.thresholds?.late || 4; let absLimit = settings.thresholds?.absent || 4;
+                    let lateCount = row.monthly['สาย'] || 0; let absentCount = row.monthly['ขาด'] || 0;
+                   
+                    if (lateCount >= lateLimit || absentCount >= absLimit) {
+                        const isFollowedUp = followUps.find(f => f.studentId === row.student.id && f.month === month);
+                        if (isFollowedUp) { fwText = 'ติดตามแล้ว'; fwCls = 'text-emerald-700 bg-emerald-50 font-bold'; }
+                        else { fwText = 'ต้องติดตาม'; fwCls = 'text-rose-700 bg-rose-50 font-bold'; }
+                    }
+
+                    tableHTML += `<tr class="${bgRow}"><td class="p-1.5 border border-slate-500 font-bold">${row.student.number}</td><td class="p-1.5 border border-slate-500 text-left font-bold">${row.student.name} ${isRes?'(ออก)':''}</td><td class="p-1.5 border border-slate-500">${row.weekly[1]||'-'}</td><td class="p-1.5 border border-slate-500">${row.weekly[2]||'-'}</td><td class="p-1.5 border border-slate-500">${row.weekly[3]||'-'}</td><td class="p-1.5 border border-slate-500">${row.weekly[4]||'-'}</td><td class="p-1.5 border border-slate-500">${row.weekly[5]||'-'}</td><td class="p-1.5 border border-slate-500 font-black text-emerald-700 bg-emerald-50/50">${valid||'-'}</td><td class="p-1.5 border border-slate-500 font-black text-blue-700 bg-blue-50/50">${leave||'-'}</td><td class="p-1.5 border border-slate-500 font-black text-rose-700 bg-rose-50/50">${absent||'-'}</td><td class="p-1.5 border border-slate-500 ${fwCls} text-[10px]">${fwText}</td></tr>`;
+                });
+                tableHTML += '</tbody></table>';
+                htmlContainer += `<div id="pdf-room-page-${page}" class="a4-page flex flex-col justify-between bg-white">${pdfPageBadge(pagesCount > 1 ? `หน้า ${page+1}/${pagesCount}` : '')}<div><div class="text-center mb-6 border-b-2 border-slate-700 pb-4">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-3xl font-black" style="margin-bottom:22px; line-height:1.5;">รายงานภาพรวมห้องเรียน</h1><h2 class="text-xl font-bold bg-emerald-100 px-4 py-1.5 rounded-full inline-block border border-emerald-300">ห้อง: ${roomName} | ประจำเดือน: ${displayMonthYear}</h2></div><div class="mb-6 text-sm font-bold bg-slate-50 p-4 rounded-xl border border-slate-300 text-center"><span class="text-slate-500">ครูที่ปรึกษา:</span> ${advisorText}</div>${tableHTML}</div>${page === pagesCount - 1 ? buildPdfSignatureBlock(signerList) : ''}</div>`;
+            }
+            htmlContainer += `</div>`; document.body.insertAdjacentHTML('beforeend', htmlContainer);
+            await document.fonts.ready;
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            try {
+                for (let page = 0; page < pagesCount; page++) {
+                    const el = document.getElementById(`pdf-room-page-${page}`);
+                    const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false }); const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                    if (page > 0) pdfDoc.addPage(); pdfDoc.addImage(imgData, 'JPEG', 0, 0, 595.28, 841.89);
+                }
+                pdfDoc.save(`RoomSummary_${roomName}_${month}.pdf`);
+                showToast("สร้างไฟล์ PDF สำเร็จ!", "success");
+            } catch (err) { showToast("เกิดข้อผิดพลาดในการสร้าง PDF", "error"); } document.getElementById('pdf-room-container').remove();
+            if (__wasDark) document.documentElement.classList.add('dark');
+        }
+
+        window.downloadRoomDailyPDF = async function(roomId, date) {
+            showToast("กำลังประมวลผล PDF กรุณารอสักครู่...", "success");
+            const __wasDark = document.documentElement.classList.contains('dark'); if (__wasDark) document.documentElement.classList.remove('dark');
+            const roomName = formatRoomName(roomId), roomStudents = getRoomStudents(roomId).sort((a,b) => parseInt(a.number) - parseInt(b.number)), roomSubjects = getRoomSubjects(roomId);
+            const advData = getRoomAdvisors(roomId); let advisorText = Array.isArray(advData) ? advData.filter(a => a.trim()).join(' และ ') : "ยังไม่ระบุ";
+            const staffName = getRoomStaff(roomId);
+            const signerListDaily = [];
+            if (advData[0]) signerListDaily.push({ name: advData[0], role: advData[1] ? 'ครูที่ปรึกษาคนที่ 1' : 'ครูที่ปรึกษา' });
+            if (advData[1]) signerListDaily.push({ name: advData[1], role: 'ครูที่ปรึกษาคนที่ 2' });
+            signerListDaily.push({ name: staffName, role: 'เจ้าหน้าที่ / นายทะเบียน' });
+            const dObj = new Date(date); const dayOfWeek = dObj.getDay(); let dayIndexForSched = (dayOfWeek >= 1 && dayOfWeek <= 5) ? dayOfWeek : 1;
+            const subjectsToday = []; roomSubjects.forEach(s => { if (s.schedules) { s.schedules.forEach(sch => { if (parseInt(sch.day) === dayIndexForSched) { subjectsToday.push({ ...s, period: parseInt(sch.period) }); } }); } });
+            subjectsToday.sort((a,b) => a.period - b.period);
+            const dailyAttRecords = attendanceData.filter(a => a.date === date && subjectsToday.some(st => st.id === a.subjectId && String(st.period) === String(a.period)));
+            const STUDENTS_PER_PAGE = 24; const pagesCount = Math.ceil(roomStudents.length / STUDENTS_PER_PAGE) || 1; // ลดจาก 30 เพื่อกันเนื้อหาล้นหน้า A4
+            const pdfDoc = new jspdf.jsPDF('p', 'pt', 'a4');
+            let htmlContainer = `<div id="pdf-daily-room-container" class="a4-export-container text-slate-800" style="font-family: 'Sarabun', sans-serif;">`;
+            const thaiMonths = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."]; const displayDateStr = `${dObj.getDate()} ${thaiMonths[dObj.getMonth()]} ${dObj.getFullYear() + 543}`;
+            for (let page = 0; page < pagesCount; page++) {
+                const dataChunk = roomStudents.slice(page * STUDENTS_PER_PAGE, (page + 1) * STUDENTS_PER_PAGE);
+                let tableHTML = `<table class="w-full text-center border-collapse text-[12px] bg-white border border-slate-500" style="table-layout: fixed; width: 100%;"><thead class="bg-slate-100 text-slate-700"><tr><th class="p-2 border border-slate-500" style="width: 10%;">เลขที่</th><th class="p-2 border border-slate-500 text-left" style="width: 35%;">ชื่อ-นามสกุล</th>`;
+                if (subjectsToday.length === 0) { tableHTML += `<th class="p-2 border border-slate-500 w-auto">ไม่มีวิชาเรียน</th>`;
+                } else { const subColWidth = 55 / subjectsToday.length; subjectsToday.forEach(sub => { tableHTML += `<th class="p-2 border border-slate-500" style="width: ${subColWidth}%;"><div class="leading-tight" title="${sub.name}">${sub.name}</div><div class="text-[9px] mt-1 text-slate-500">คาบ ${sub.period}</div></th>`; });
+                }
+                tableHTML += `</tr></thead><tbody class="divide-y divide-slate-400">`;
+                dataChunk.forEach((st) => {
+                    const isRes = st.status === 'resigned'; let bgRow = isRes ? 'bg-slate-100 text-slate-500 opacity-80' : 'bg-white';
+                    tableHTML += `<tr class="${bgRow}"><td class="p-1.5 border border-slate-500 font-bold">${st.number}</td><td class="p-1.5 border border-slate-500 text-left font-bold">${st.name} ${isRes?'(ออก/ย้าย)':''}</td>`;
+                    if (subjectsToday.length === 0) { tableHTML += `<td class="p-1.5 border border-slate-500">-</td>`; } else { subjectsToday.forEach(sub => { const attRecord = dailyAttRecords.find(a => a.subjectId === sub.id && String(a.period) === String(sub.period)); let statusStr = '-', statusCls = ''; if (attRecord && attRecord.records[st.id]) { statusStr = attRecord.records[st.id]; if(statusStr === 'มา' || statusStr === 'ร่วมกิจกรรม') statusCls = 'text-emerald-700 font-bold'; else if(statusStr === 'สาย') statusCls = 'text-amber-600 font-bold'; else statusCls = 'text-rose-600 font-bold';
+                    } tableHTML += `<td class="p-1.5 border border-slate-500 ${statusCls} whitespace-nowrap">${statusStr}</td>`; });
+                    }
+                    tableHTML += `</tr>`;
+                });
+                tableHTML += '</tbody></table>';
+                htmlContainer += `<div id="pdf-daily-room-page-${page}" class="a4-page flex flex-col justify-between bg-white">${pdfPageBadge(pagesCount > 1 ? `หน้า ${page+1}/${pagesCount}` : '')}<div><div class="text-center mb-6 border-b-2 border-slate-700 pb-4">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-3xl font-black" style="margin-bottom:22px; line-height:1.5;">รายงานการเช็คชื่อรายวัน</h1><h2 class="text-xl font-bold bg-indigo-100 px-4 py-1.5 rounded-full inline-block border border-indigo-300">ห้อง: ${roomName} | ประจำวันที่: ${displayDateStr}</h2></div><div class="mb-6 text-sm font-bold bg-slate-50 p-4 rounded-xl border border-slate-300 text-center"><span class="text-slate-500">ครูที่ปรึกษา:</span> ${advisorText}</div>${tableHTML}</div>${page === pagesCount - 1 ? buildPdfSignatureBlock(signerListDaily) : ''}</div>`;
+            }
+            htmlContainer += `</div>`; document.body.insertAdjacentHTML('beforeend', htmlContainer);
+            await document.fonts.ready;
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            try {
+                for (let page = 0; page < pagesCount; page++) {
+                    const el = document.getElementById(`pdf-daily-room-page-${page}`);
+                    const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false }); const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                    if (page > 0) pdfDoc.addPage(); pdfDoc.addImage(imgData, 'JPEG', 0, 0, 595.28, 841.89);
+                }
+                pdfDoc.save(`DailySummary_${roomName}_${date}.pdf`);
+                showToast("สร้างไฟล์ PDF สำเร็จ!", "success");
+            } catch (err) { showToast("เกิดข้อผิดพลาดในการสร้าง PDF", "error"); } document.getElementById('pdf-daily-room-container').remove();
+            if (__wasDark) document.documentElement.classList.add('dark');
+        }
+
+        // ===== สมุดทะเบียนการเช็คชื่อรายเดือน (รวมหน้าปก + บันทึกรายวันทุกวันจันทร์-ศุกร์ + หน้าสรุปทั้งเดือน + ลงนามครั้งเดียวท้ายเล่ม) =====
+        // นับเฉพาะวันจันทร์-ศุกร์เท่านั้น (เสาร์-อาทิตย์ไม่นับรวมเด็ดขาด) วันที่ตรงกับวันหยุดที่แอดมินประกาศไว้จะขึ้นหน้าแจ้งวันหยุดแทนตารางเช็คชื่อ
+        let __registerChoicePending = null;
+        window.downloadRoomMonthlyRegisterPDF = function(roomId, month) {
+            const reportCheck = window.tempRoomReport; if (!reportCheck || reportCheck.roomId !== roomId) { showToast("กรุณาเปิดหน้าสรุปห้องนี้ก่อนสร้างสมุดทะเบียน", "error"); return; }
+            __registerChoicePending = { roomId, month };
+            const modal = document.getElementById('registerChoiceModal'); const box = document.getElementById('registerChoiceModalBox');
+            modal.classList.remove('hidden'); setTimeout(() => { box.classList.remove('scale-95', 'opacity-0'); box.classList.add('scale-100', 'opacity-100'); }, 10);
+        };
+        window.closeRegisterChoiceModal = function() {
+            const modal = document.getElementById('registerChoiceModal'); const box = document.getElementById('registerChoiceModalBox');
+            box.classList.remove('scale-100', 'opacity-100'); box.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => { modal.classList.add('hidden'); }, 300);
+        };
+        window.__chooseRegisterMode = function(mode) {
+            window.closeRegisterChoiceModal();
+            if (!__registerChoicePending) return;
+            const { roomId, month } = __registerChoicePending; __registerChoicePending = null;
+            const modeLabel = mode === 'summary' ? 'เฉพาะสรุป (ปก + สรุปทั้งเดือน + รายชื่อนักเรียนที่ต้องติดตาม)' : (mode === 'incomplete_only' ? 'เฉพาะรายชื่อนักเรียนที่ต้องติดตาม' : 'ทั้งเล่ม (รวมภาคผนวกบันทึกรายวันทุกวัน)');
+            showConfirm("สร้างสมุดทะเบียนรายเดือน", `จะสร้างสมุดทะเบียนแบบ "${modeLabel}" ซึ่งอาจใช้เวลาสักครู่ พร้อมดำเนินการหรือไม่?`, () => {
+                window.__runDownloadRoomMonthlyRegisterPDF(roomId, month, mode);
+            });
+        };
+        window.__runDownloadRoomMonthlyRegisterPDF = async function(roomId, month, mode = 'full') {
+            const report = window.tempRoomReport; if (!report || report.roomId !== roomId) { showToast("กรุณาเปิดหน้าสรุปห้องนี้ก่อนสร้างสมุดทะเบียน", "error"); return; }
+            showProgressModal("กำลังจัดทำสมุดทะเบียน", "กำลังเตรียมข้อมูล...");
+            const __wasDark = document.documentElement.classList.contains('dark'); if (__wasDark) document.documentElement.classList.remove('dark');
+            await document.fonts.ready; // รอฟอนต์ครั้งเดียวตอนเริ่ม ไม่ต้องรอซ้ำทุกหน้า (มีหลายสิบหน้า จะช้ามากถ้ารอทุกหน้า)
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            const roomName = formatRoomName(roomId);
+            const roomStudents = getRoomStudents(roomId).sort((a,b) => parseInt(a.number) - parseInt(b.number));
+            const roomSubjects = getRoomSubjects(roomId);
+            const advData = getRoomAdvisors(roomId);
+            const staffName = getRoomStaff(roomId);
+            const signerList = [];
+            if (advData[0]) signerList.push({ name: advData[0], role: advData[1] ? 'ครูที่ปรึกษาคนที่ 1' : 'ครูที่ปรึกษา' });
+            if (advData[1]) signerList.push({ name: advData[1], role: 'ครูที่ปรึกษาคนที่ 2' });
+            signerList.push({ name: staffName, role: 'เจ้าหน้าที่ / นายทะเบียน' });
+
+            const monthNames = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+            const thaiMonthsShort = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+            const [yearStr, monthStr] = month.split('-');
+            const year = parseInt(yearStr), monthNum = parseInt(monthStr);
+            const daysInMonth = new Date(year, monthNum, 0).getDate();
+            const displayMonthYear = `${monthNames[monthNum-1]} ${year+543}`;
+            const STUDENTS_PER_PAGE = 24;
+
+            // เก็บเฉพาะวันจันทร์-ศุกร์ในเดือนนี้ (dow: 1=จันทร์ ... 5=ศุกร์) เสาร์-อาทิตย์ข้ามไปเลย ไม่นับรวมในเล่ม
+            const weekdays = [];
+            for (let d = 1; d <= daysInMonth; d++) {
+                const dObj = new Date(year, monthNum - 1, d);
+                const dow = dObj.getDay();
+                if (dow === 0 || dow === 6) continue;
+                const dateStr = `${year}-${String(monthNum).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                weekdays.push({ day: d, dateStr, dObj, dow, holiday: getHolidayForDate(dateStr) });
+            }
+            const totalWeekdays = weekdays.length;
+            const totalHolidays = weekdays.filter(w => w.holiday).length;
+            const totalTeachingDays = totalWeekdays - totalHolidays;
+
+            const pdfDoc = new jspdf.jsPDF('p', 'pt', 'a4');
+            let htmlContainer = `<div id="pdf-register-container" class="a4-export-container text-slate-800" style="font-family: 'Sarabun', sans-serif;">`;
+
+            // ===== หน้าปก (ข้ามในโหมด "จัดทำเฉพาะรายชื่อนักเรียนที่ต้องติดตาม") =====
+            if (mode !== 'incomplete_only') {
+            htmlContainer += `<div id="pdf-reg-cover" class="a4-page flex flex-col items-center justify-center bg-white text-center">${settings.logoDataUrl ? `<img src="${settings.logoDataUrl}" style="width:90px; height:90px; object-fit:cover; border-radius:9999px; margin:0 auto 18px auto; display:block; border:3px solid #e2e8f0;">` : ''}<p class="text-sm text-slate-400 font-bold mb-10 tracking-wide">${settings.title || 'ระบบเช็คชื่อนักเรียนอัจฉริยะ'}</p><h1 class="text-4xl font-black text-slate-800 mb-3">สมุดทะเบียนการเช็คชื่อนักเรียน</h1><h2 class="text-2xl font-bold text-indigo-600 mb-1">ห้อง ${roomName}</h2><p class="text-xl font-bold text-slate-500 mb-10">ประจำเดือน${displayMonthYear}</p><div class="grid grid-cols-2 gap-5 w-full max-w-sm text-left bg-slate-50 border border-slate-200 rounded-2xl p-6 sm:p-8"><div><p class="text-[11px] text-slate-400 font-bold">นักเรียนทั้งหมด</p><p class="text-2xl font-black text-slate-700">${roomStudents.length} คน</p></div><div><p class="text-[11px] text-slate-400 font-bold">วันทำการ (จ-ศ)</p><p class="text-2xl font-black text-slate-700">${totalWeekdays} วัน</p></div><div><p class="text-[11px] text-slate-400 font-bold">วันหยุดประกาศ</p><p class="text-2xl font-black text-rose-500">${totalHolidays} วัน</p></div><div><p class="text-[11px] text-slate-400 font-bold">วันเรียนจริง</p><p class="text-2xl font-black text-emerald-600">${totalTeachingDays} วัน</p></div></div><div class="mt-12">${pdfDocMeta()}</div></div>`;
+
+            // ===== หน้าสรุปทั้งเดือน + ลงนาม (กลับมาลงนามในหน้านี้ตามเดิม) =====
+            const summaryPagesCount = Math.ceil(report.data.length / STUDENTS_PER_PAGE) || 1;
+            for (let page = 0; page < summaryPagesCount; page++) {
+                const dataChunk = report.data.slice(page * STUDENTS_PER_PAGE, (page + 1) * STUDENTS_PER_PAGE);
+                let tableHTML = `<table class="w-full text-center border-collapse text-[12px] bg-white border border-slate-500" style="table-layout: fixed; width: 100%;"><thead class="bg-slate-100 text-slate-700"><tr><th class="p-2 border border-slate-500" style="width: 8%;">เลขที่</th><th class="p-2 border border-slate-500 text-left" style="width: 32%;">ชื่อ-นามสกุล</th><th class="p-2 border border-slate-500" style="width: 6%;">ส.1</th><th class="p-2 border border-slate-500" style="width: 6%;">ส.2</th><th class="p-2 border border-slate-500" style="width: 6%;">ส.3</th><th class="p-2 border border-slate-500" style="width: 6%;">ส.4</th><th class="p-2 border border-slate-500" style="width: 6%;">ส.5</th><th class="p-2 border border-slate-500 bg-emerald-50 text-emerald-800" style="width: 6%;">มา</th><th class="p-2 border border-slate-500 bg-blue-50 text-blue-800" style="width: 6%;">ลา</th><th class="p-2 border border-slate-500 bg-rose-50 text-rose-800" style="width: 6%;">ขาด</th><th class="p-2 border border-slate-500 text-indigo-700" style="width: 12%;">การติดตาม</th></tr></thead><tbody class="divide-y divide-slate-400">`;
+                dataChunk.forEach((row) => {
+                    const isRes = row.student.status === 'resigned'; let bgRow = isRes ? 'bg-slate-100 text-slate-500 opacity-80' : 'bg-white';
+                    let valid = row.monthly['มา'] + row.monthly['ร่วมกิจกรรม'], leave = row.monthly['ลากิจ'] + row.monthly['ลาป่วย'], absent = row.monthly['ขาด'] + row.monthly['โดดเรียน'];
+                    let fwText = '-'; let fwCls = '';
+                    let lateLimit = settings.thresholds?.late || 4; let absLimit = settings.thresholds?.absent || 4;
+                    let lateCount = row.monthly['สาย'] || 0; let absentCount = row.monthly['ขาด'] || 0;
+                    const incompleteTriggeredPdf = (row.triggerDatesThisMonth || []).length > 0;
+                    if (lateCount >= lateLimit || absentCount >= absLimit || incompleteTriggeredPdf) {
+                        const isFollowedUp = followUps.find(f => f.studentId === row.student.id && f.month === month);
+                        if (isFollowedUp) { fwText = 'ติดตามแล้ว'; fwCls = 'text-emerald-700 bg-emerald-50 font-bold'; }
+                        else { fwText = 'ต้องติดตาม'; fwCls = 'text-rose-700 bg-rose-50 font-bold'; }
+                    }
+                    tableHTML += `<tr class="${bgRow}"><td class="p-1.5 border border-slate-500 font-bold">${row.student.number}</td><td class="p-1.5 border border-slate-500 text-left font-bold">${row.student.name} ${isRes?'(ออก)':''}</td><td class="p-1.5 border border-slate-500">${row.weekly[1]||'-'}</td><td class="p-1.5 border border-slate-500">${row.weekly[2]||'-'}</td><td class="p-1.5 border border-slate-500">${row.weekly[3]||'-'}</td><td class="p-1.5 border border-slate-500">${row.weekly[4]||'-'}</td><td class="p-1.5 border border-slate-500">${row.weekly[5]||'-'}</td><td class="p-1.5 border border-slate-500 font-black text-emerald-700 bg-emerald-50/50">${valid||'-'}</td><td class="p-1.5 border border-slate-500 font-black text-blue-700 bg-blue-50/50">${leave||'-'}</td><td class="p-1.5 border border-slate-500 font-black text-rose-700 bg-rose-50/50">${absent||'-'}</td><td class="p-1.5 border border-slate-500 ${fwCls} text-[10px]">${fwText}</td></tr>`;
+                });
+                tableHTML += '</tbody></table>';
+                htmlContainer += `<div class="a4-page flex flex-col justify-between bg-white">${pdfPageBadge(summaryPagesCount > 1 ? `หน้าสรุป ${page+1}/${summaryPagesCount}` : '')}<div><div class="text-center mb-6 border-b-2 border-slate-700 pb-4">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-3xl font-black" style="margin-bottom:22px; line-height:1.5;">สรุปผลรวมทั้งเดือน</h1><h2 class="text-xl font-bold bg-emerald-100 px-4 py-1.5 rounded-full inline-block border border-emerald-300">ห้อง: ${roomName} | ประจำเดือน: ${displayMonthYear}</h2></div>${tableHTML}</div>${page === summaryPagesCount - 1 ? buildPdfSignatureBlock(signerList) : ''}</div>`;
+            }
+            } // ปิดเงื่อนไข mode !== 'incomplete_only' (ปก + สรุปทั้งเดือน)
+
+            // ===== รายชื่อ "นักเรียนที่ต้องติดตาม" (รวม 2 เกณฑ์) + ลงนามของส่วนนี้เอง (เป็นการยืนยันแยกต่างหากจากหน้าสรุป) - แสดงทุกโหมด =====
+            const incompleteList = report.incompleteList || [];
+            const INC_PER_PAGE = 20;
+            const incPagesCount = Math.ceil(incompleteList.length / INC_PER_PAGE) || 1;
+            for (let page = 0; page < incPagesCount; page++) {
+                const chunk = incompleteList.slice(page * INC_PER_PAGE, (page + 1) * INC_PER_PAGE);
+                let listHTML;
+                if (incompleteList.length === 0) {
+                    listHTML = `<div class="flex-1 flex flex-col items-center justify-center text-center py-16"><p class="text-lg font-black text-emerald-600">ไม่มีนักเรียนที่เข้าเงื่อนไขในเดือนนี้</p><p class="text-sm text-slate-400 mt-2">(เข้าเรียนไม่ครบซ้ำตามเกณฑ์ หรือ สาย/ขาด เกินจำนวนวันที่ตั้งไว้ต่อเดือน)</p></div>`;
+                } else {
+                    listHTML = `<table class="w-full text-center border-collapse text-[11px] bg-white border border-slate-500" style="table-layout: fixed; width: 100%;"><thead class="bg-slate-100 text-slate-700"><tr><th class="p-2 border border-slate-500" style="width: 6%;">เลขที่</th><th class="p-2 border border-slate-500 text-left" style="width: 24%;">ชื่อ-นามสกุล</th><th class="p-2 border border-slate-500" style="width: 8%;">สาย(ด)</th><th class="p-2 border border-slate-500" style="width: 8%;">ขาด(ด)</th><th class="p-2 border border-slate-500" style="width: 27%;">วันที่เข้าเรียนไม่ครบในเดือนนี้</th><th class="p-2 border border-slate-500" style="width: 27%;">เหตุผลที่ต้องติดตาม</th></tr></thead><tbody class="divide-y divide-slate-400">${chunk.map(row => { const incompleteDatesDisplay = row.incompleteDays.map(d => { const p = d.date.split('-'); return `${p[2]}/${p[1]}`; }).join(', '); const reasons = [ row.triggerDatesThisMonth.length > 0 ? 'เข้าเรียนไม่ครบ' : '', row.lateExceeded ? 'สายเกินเกณฑ์' : '', row.absentExceeded ? 'ขาดเกินเกณฑ์' : '' ].filter(Boolean).join(' / '); return `<tr class="bg-white"><td class="p-1.5 border border-slate-500 font-bold">${row.student.number}</td><td class="p-1.5 border border-slate-500 text-left font-bold">${row.student.name}</td><td class="p-1.5 border border-slate-500 font-bold text-amber-600">${row.monthly['สาย']||0}</td><td class="p-1.5 border border-slate-500 font-bold text-rose-600">${row.monthly['ขาด']||0}</td><td class="p-1.5 border border-slate-500 font-bold text-slate-600 text-[10px]">${incompleteDatesDisplay || '-'}</td><td class="p-1.5 border border-slate-500 font-black text-orange-600 text-[10px]">${reasons || '-'}</td></tr>`; }).join('')}</tbody></table>`;
+                }
+                htmlContainer += `<div class="a4-page flex flex-col justify-between bg-white">${pdfPageBadge(incPagesCount > 1 ? `หน้า ${page+1}/${incPagesCount}` : '')}<div><div class="text-center mb-6 border-b-2 border-slate-700 pb-4">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-3xl font-black" style="margin-bottom:22px; line-height:1.5;">นักเรียนที่ต้องติดตาม</h1><h2 class="text-xl font-bold bg-orange-100 px-4 py-1.5 rounded-full inline-block border border-orange-300">ห้อง: ${roomName} | ประจำเดือน: ${displayMonthYear}</h2></div>${listHTML}</div>${page === incPagesCount - 1 ? buildPdfSignatureBlock(signerList) : ''}</div>`;
+            }
+
+            // ===== หน้าคั่นภาคผนวก + บันทึกรายวัน (เฉพาะโหมด "จัดทำทั้งเล่ม" เท่านั้น) =====
+            if (mode === 'full') {
+            htmlContainer += `<div class="a4-page flex flex-col items-center justify-center bg-white text-center">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-3xl font-black text-slate-800 mb-3 mt-6">ภาคผนวก</h1><h2 class="text-xl font-bold text-slate-500">บันทึกการเช็คชื่อรายวัน</h2><p class="text-sm text-slate-400 mt-3">ห้อง ${roomName} · ประจำเดือน${displayMonthYear} · เอกสารประกอบสำหรับตรวจสอบย้อนหลัง</p></div>`;
+
+            // ===== หน้าบันทึกรายวัน (จันทร์-ศุกร์ทุกวัน) - ภาคผนวก อยู่ท้ายเล่ม =====
+            weekdays.forEach(w => {
+                const displayDateStr = `${w.day} ${thaiMonthsShort[monthNum-1]} ${year + 543}`;
+                if (w.holiday) {
+                    htmlContainer += `<div class="a4-page flex flex-col bg-white">${pdfPageBadge('ภาคผนวก')}<div class="text-center mb-6 border-b-2 border-slate-700 pb-4">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-3xl font-black" style="margin-bottom:22px; line-height:1.5;">บันทึกประจำวันที่ ${displayDateStr}</h1><h2 class="text-xl font-bold bg-indigo-100 px-4 py-1.5 rounded-full inline-block border border-indigo-300">ห้อง: ${roomName}</h2></div><div class="flex-1 flex flex-col items-center justify-center text-center py-16"><div class="w-20 h-20 bg-rose-100 text-rose-500 rounded-full flex items-center justify-center text-4xl mb-6"><i class="fas fa-calendar-times"></i></div><p class="text-2xl font-black text-rose-600 mb-2">วันหยุด</p><p class="text-lg font-bold text-slate-600">${w.holiday.label}</p><p class="text-sm text-slate-400 mt-4">ไม่มีการเรียนการสอนในวันนี้</p></div></div>`;
+                    return;
+                }
+                const subjectsToday = []; roomSubjects.forEach(s => { if (s.schedules) { s.schedules.forEach(sch => { if (parseInt(sch.day) === w.dow) { subjectsToday.push({ ...s, period: parseInt(sch.period) }); } }); } });
+                subjectsToday.sort((a,b) => a.period - b.period);
+                const dailyAttRecords = attendanceData.filter(a => a.date === w.dateStr && subjectsToday.some(st => st.id === a.subjectId && String(st.period) === String(a.period)));
+                const pagesForDay = Math.ceil(roomStudents.length / STUDENTS_PER_PAGE) || 1;
+                for (let p = 0; p < pagesForDay; p++) {
+                    const dataChunk = roomStudents.slice(p * STUDENTS_PER_PAGE, (p + 1) * STUDENTS_PER_PAGE);
+                    let tableHTML = `<table class="w-full text-center border-collapse text-[12px] bg-white border border-slate-500" style="table-layout: fixed; width: 100%;"><thead class="bg-slate-100 text-slate-700"><tr><th class="p-2 border border-slate-500" style="width: 10%;">เลขที่</th><th class="p-2 border border-slate-500 text-left" style="width: 35%;">ชื่อ-นามสกุล</th>`;
+                    if (subjectsToday.length === 0) { tableHTML += `<th class="p-2 border border-slate-500 w-auto">ไม่มีวิชาเรียน</th>`;
+                    } else { const subColWidth = 55 / subjectsToday.length; subjectsToday.forEach(sub => { tableHTML += `<th class="p-2 border border-slate-500" style="width: ${subColWidth}%;"><div class="leading-tight" title="${sub.name}">${sub.name}</div><div class="text-[9px] mt-1 text-slate-500">คาบ ${sub.period}</div></th>`; }); }
+                    tableHTML += `</tr></thead><tbody class="divide-y divide-slate-400">`;
+                    dataChunk.forEach((st) => {
+                        const isRes = st.status === 'resigned'; let bgRow = isRes ? 'bg-slate-100 text-slate-500 opacity-80' : 'bg-white';
+                        tableHTML += `<tr class="${bgRow}"><td class="p-1.5 border border-slate-500 font-bold">${st.number}</td><td class="p-1.5 border border-slate-500 text-left font-bold">${st.name} ${isRes?'(ออก/ย้าย)':''}</td>`;
+                        if (subjectsToday.length === 0) { tableHTML += `<td class="p-1.5 border border-slate-500">-</td>`; } else { subjectsToday.forEach(sub => { const attRecord = dailyAttRecords.find(a => a.subjectId === sub.id && String(a.period) === String(sub.period)); let statusStr = '-', statusCls = ''; if (attRecord && attRecord.records[st.id]) { statusStr = attRecord.records[st.id]; if(statusStr === 'มา' || statusStr === 'ร่วมกิจกรรม') statusCls = 'text-emerald-700 font-bold'; else if(statusStr === 'สาย') statusCls = 'text-amber-600 font-bold'; else statusCls = 'text-rose-600 font-bold';
+                        } tableHTML += `<td class="p-1.5 border border-slate-500 ${statusCls} whitespace-nowrap">${statusStr}</td>`; }); }
+                        tableHTML += `</tr>`;
+                    });
+                    tableHTML += '</tbody></table>';
+                    htmlContainer += `<div class="a4-page flex flex-col bg-white">${pdfPageBadge(pagesForDay > 1 ? `ภาคผนวก · หน้าเสริม ${p+1}/${pagesForDay}` : 'ภาคผนวก')}<div class="text-center mb-6 border-b-2 border-slate-700 pb-4">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-3xl font-black" style="margin-bottom:22px; line-height:1.5;">บันทึกประจำวันที่ ${displayDateStr}</h1><h2 class="text-xl font-bold bg-indigo-100 px-4 py-1.5 rounded-full inline-block border border-indigo-300">ห้อง: ${roomName}</h2></div>${tableHTML}</div>`;
+                }
+            });
+            } // ปิดเงื่อนไข mode === 'full'
+
+            htmlContainer += `</div>`; document.body.insertAdjacentHTML('beforeend', htmlContainer);
+            await document.fonts.ready;
+            await new Promise(resolve => setTimeout(resolve, 800));
+            try {
+                const allPages = document.querySelectorAll('#pdf-register-container .a4-page');
+                const totalPages = allPages.length;
+                for (let i = 0; i < totalPages; i++) {
+                    updateProgressModal((i / totalPages) * 100, `กำลังสร้างหน้าที่ ${i+1} จาก ${totalPages}...`);
+                    const canvas = await html2canvas(allPages[i], { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false });
+                    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                    if (i > 0) pdfDoc.addPage(); pdfDoc.addImage(imgData, 'JPEG', 0, 0, 595.28, 841.89);
+                }
+                updateProgressModal(100, "กำลังบันทึกไฟล์...");
+                const modeSuffix = mode === 'summary' ? '_สรุป' : (mode === 'incomplete_only' ? '_นักเรียนที่ต้องติดตาม' : '');
+                pdfDoc.save(`สมุดทะเบียน_${roomName}_${month}${modeSuffix}.pdf`);
+                completeProgressModal("ดำเนินการเสร็จสิ้น", `สร้างสมุดทะเบียน (${totalPages} หน้า) สำเร็จ ไฟล์ถูกดาวน์โหลดแล้ว`);
+            } catch (err) { errorProgressModal("เกิดข้อผิดพลาดในการสร้างสมุดทะเบียน กรุณาลองใหม่อีกครั้ง"); }
+            document.getElementById('pdf-register-container').remove();
+            if (__wasDark) document.documentElement.classList.add('dark');
+        };
+    
