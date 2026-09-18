@@ -47,12 +47,13 @@
         }
         function makeStatusDoughnutChart(canvasId, totals) {
             const el = document.getElementById(canvasId); if (!el || typeof Chart === 'undefined') return;
+            if (typeof Chart.getChart === 'function') { const existingChart = Chart.getChart(el); if (existingChart) existingChart.destroy(); } // ป้องกันกราฟเก่าค้างซ้อนทับกราฟใหม่บน canvas เดียวกัน (เช็คก่อนว่า Chart.js เวอร์ชันนี้รองรับฟังก์ชันนี้ไหม กันพังถ้าเป็นเวอร์ชันเก่า)
             const legendEl = document.getElementById(canvasId + 'Legend');
             const labels = Object.keys(totals).filter(l => (totals[l] || 0) > 0);
             if (labels.length === 0) { const ctx = el.getContext('2d'); ctx.font = '13px Sarabun'; ctx.fillStyle = chartTextColor(); ctx.textAlign = 'center'; ctx.fillText('ยังไม่มีข้อมูลในเดือนนี้', el.width / 2, el.height / 2); if (legendEl) legendEl.innerHTML = ''; return; }
             const total = labels.reduce((a, l) => a + (totals[l] || 0), 0);
             new Chart(el, { type: 'doughnut', data: { labels, datasets: [{ data: labels.map(l => totals[l]), backgroundColor: labels.map(l => STATUS_HEX[l]), borderWidth: 2, borderColor: chartBorderBg() }] },
-                options: { responsive: true, maintainAspectRatio: false, cutout: '60%', animation: false, plugins: { legend: { display: false }, datalabels: { display: false }, tooltip: { callbacks: { label: (ctx) => { const pct = total > 0 ? Math.round((ctx.parsed / total) * 100) : 0; return ` ${ctx.label}: ${ctx.parsed} ครั้ง (${pct}%)`; } } } } } });
+                options: { responsive: true, maintainAspectRatio: false, cutout: '60%', animation: false, plugins: { legend: { display: false }, datalabels: false, tooltip: { callbacks: { label: (ctx) => { const pct = total > 0 ? Math.round((ctx.parsed / total) * 100) : 0; return ` ${ctx.label}: ${ctx.parsed} ครั้ง (${pct}%)`; } } } } } });
             if (legendEl) {
                 legendEl.innerHTML = `<div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2">${labels.map(l => { const count = totals[l] || 0; const pct = total > 0 ? Math.round((count / total) * 100) : 0;
                     return `<div class="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5 sm:px-3 sm:py-2"><span class="w-3 h-3 rounded-full shrink-0" style="background-color:${STATUS_HEX[l]}"></span><span class="font-bold text-slate-700 text-xs sm:text-sm flex-1 truncate">${l}</span><span class="font-black text-slate-800 text-xs sm:text-sm">${pct}%</span><span class="text-slate-400 text-[10px] sm:text-xs">(${count})</span></div>`; }).join('')}</div>`;
