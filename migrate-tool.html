@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>เครื่องมือย้ายข้อมูล - BNKSA Attendance</title>
+<style>
+  body { font-family: 'Segoe UI', Tahoma, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 20px; background: #f8fafc; color: #1e293b; }
+  h1 { font-size: 22px; }
+  .card { background: white; border-radius: 16px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 16px; }
+  label { display: block; font-weight: bold; font-size: 13px; margin-bottom: 4px; margin-top: 12px; }
+  input { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; box-sizing: border-box; }
+  button { background: #4f46e5; color: white; border: none; padding: 12px 20px; border-radius: 10px; font-weight: bold; cursor: pointer; font-size: 15px; margin-top: 16px; }
+  button:hover { background: #4338ca; }
+  button:disabled { background: #94a3b8; cursor: not-allowed; }
+  #log { background: #0f172a; color: #e2e8f0; padding: 16px; border-radius: 10px; font-family: monospace; font-size: 13px; white-space: pre-wrap; max-height: 400px; overflow-y: auto; margin-top: 16px; }
+  .ok { color: #4ade80; }
+  .err { color: #f87171; }
+  .warn { color: #fbbf24; }
+</style>
+</head>
+<body>
+<h1>🔄 เครื่องมือย้ายข้อมูล: Apps Script → Cloudflare Worker</h1>
+<div class="card">
+  <p style="font-size:13px;color:#64748b;">เครื่องมือนี้จะ<b>คัดลอก</b>ข้อมูลจากระบบเดิมมาใส่ระบบใหม่ (ไม่ลบ/ไม่แตะของเดิมเลย) เปิดไฟล์นี้ในเบราว์เซอร์แล้วกรอกข้อมูลด้านล่าง</p>
+
+  <label>URL ระบบเดิม (Google Apps Script)</label>
+  <input id="oldUrl" value="https://script.google.com/macros/s/AKfycbwhNFwtgCmNhIat4PyluEG7tIMdgPcfGLQmfccwjSCCQFjtwrk7lOV5QYsix-4iDPPOvA/exec">
+
+  <label>URL ระบบใหม่ (Cloudflare Worker)</label>
+  <input id="newUrl" placeholder="https://bnksa-attendance-api.xxxxx.workers.dev">
+
+  <button id="startBtn" onclick="startMigration()">🚀 เริ่มย้ายข้อมูล</button>
+  <div id="log"></div>
+</div>
+
+<script>
+function log(msg, cls) {
+  const el = document.getElementById('log');
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+async function startMigration() {
+  const oldUrl = document.getElementById('oldUrl').value.trim();
+  const newUrl = document.getElementById('newUrl').value.trim();
+  const btn = document.getElementById('startBtn');
+  document.getElementById('log').innerHTML = '';
+
+  if (!oldUrl || !newUrl) { log('กรุณากรอก URL ให้ครบทั้ง 2 ช่อง', 'err'); return; }
+  btn.disabled = true;
+
+  try {
+    log('ขั้นที่ 1/4: กำลังดึงข้อมูลหลัก (ตั้งค่า/ครู/วิชา/นักเรียน) จากระบบเดิม...');
+    const mainRes = await fetch(oldUrl);
+    const mainData = await mainRes.json();
+    if (!mainData.settings || !Array.isArray(mainData.subjects)) throw new Error('ข้อมูลหลักจากระบบเดิมไม่ถูกต้อง หยุดการทำงานเพื่อความปลอดภัย');
+    log(`✓ ได้ข้อมูลหลักแล้ว: ครู ${mainData.teachers.length} คน, วิชา ${mainData.subjects.length} วิชา, นักเรียน ${mainData.students.length} คน`, 'ok');
+
+    log('ขั้นที่ 2/4: กำลังหารายชื่อห้อง/เทอม/ปีทั้งหมดที่มีข้อมูล...');
+    const roomTermYearSet = new Map();
+    mainData.subjects.forEach(s => {
+      const key = `${s.term}||${s.year}||${s.roomId}`;
+      roomTermYearSet.set(key, { term: s.term, year: s.year, roomId: s.roomId });
+    });
+    const combos = Array.from(roomTermYearSet.values());
+    log(`✓ พบ ${combos.length} ชุดห้อง/เทอม/ปีที่ต้องดึงข้อมูลเช็คชื่อ`, 'ok');
+
+    log('ขั้นที่ 3/4: กำลังดึงข้อมูลเช็คชื่อทีละห้อง (อาจใช้เวลาสักครู่ถ้ามีหลายห้อง)...');
+    let attendanceRecords = [];
+    for (let i = 0; i < combos.length; i++) {
+      const c = combos[i];
+      try {
+        const res = await fetch(`${oldUrl}?action=get_attendance&term=${encodeURIComponent(c.term)}&year=${encodeURIComponent(c.year)}&room=${encodeURIComponent(c.roomId)}`);
+        const data = await res.json();
+        if (data.status === 'success' && Array.isArray(data.attendanceData)) {
+          data.attendanceData.forEach(rec => attendanceRecords.push({ term: c.term, year: c.year, roomId: c.roomId, record: rec }));
+          log(`  [${i+1}/${combos.length}] ห้อง ${c.roomId} เทอม ${c.term}/${c.year}: ${data.attendanceData.length} รายการ`);
+        }
+      } catch (e) { log(`  [${i+1}/${combos.length}] ห้อง ${c.roomId} ดึงไม่สำเร็จ - ข้ามไปก่อน: ${e}`, 'warn'); }
+    }
+    log(`✓ รวมข้อมูลเช็คชื่อทั้งหมด ${attendanceRecords.length} รายการ`, 'ok');
+
+    log('กำลังดึงประวัติ log...');
+    let logsRecords = [];
+    try {
+      const logsRes = await fetch(`${oldUrl}?action=get_logs`);
+      const logsData = await logsRes.json();
+      if (logsData.status === 'success' && Array.isArray(logsData.logs)) logsRecords = logsData.logs;
+      log(`✓ ได้ log ${logsRecords.length} รายการ`, 'ok');
+    } catch (e) { log('ดึง log ไม่สำเร็จ - ข้ามไปก่อน (ไม่กระทบข้อมูลหลัก)', 'warn'); }
+
+    log('ขั้นที่ 4/4: กำลังส่งข้อมูลทั้งหมดไปใส่ระบบใหม่...');
+    const importPayload = {
+      __mode: 'bulk_import',
+      mainData: { settings: mainData.settings, teachers: mainData.teachers, subjects: mainData.subjects, students: mainData.students, followUps: mainData.followUps || [] },
+      attendanceRecords, logsRecords,
+    };
+    const importRes = await fetch(newUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(importPayload) });
+    const importResult = await importRes.json();
+    if (importResult.status === 'success') {
+      log(`✅ ย้ายข้อมูลสำเร็จ! เช็คชื่อ ${importResult.imported.attendance} รายการ, log ${importResult.imported.logs} รายการ`, 'ok');
+      log('เปิด URL ระบบใหม่ตรงๆ ดูได้เลย ควรเห็นข้อมูลครบแล้ว', 'ok');
+    } else {
+      log(`✗ ระบบใหม่ตอบกลับว่าไม่สำเร็จ: ${importResult.message}`, 'err');
+    }
+  } catch (err) {
+    log(`✗ เกิดข้อผิดพลาด: ${err}`, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+</script>
+</body>
+</html>
