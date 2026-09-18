@@ -45,37 +45,14 @@
                     datalabels: { display: (ctx) => ctx.dataset.data[ctx.dataIndex] > 0, color: chartTextColor(), anchor: 'end', align: 'top', offset: 2, font: { weight: 'bold', size: isMobileView() ? 9 : 11 }, formatter: percentLabelFormatter } },
                     scales: { x: { ticks: { color: chartTextColor(), font: { weight: 'bold', size: isMobileView() ? 9 : 11 }, maxRotation: isMobileView() ? 60 : 0, minRotation: isMobileView() ? 60 : 0 }, grid: { display: false } }, y: { beginAtZero: true, ticks: { color: chartTextColor(), precision: 0, font: { size: 10 } }, grid: { color: chartGridColor() } } } } });
         }
-        // ===== [ใหม่] วาดกราฟโดนัทด้วย SVG ล้วนๆ แทน Chart.js/canvas - แก้ปัญหาตัวหนังสือ/ตัวเลขหลุดหายตอนส่งออกรูปภาพ/PDF ถาวร
-        // (สาเหตุคือ html2canvas จับภาพ <canvas> ที่วาดด้วย JS ได้ไม่แน่นอนในบางสถานการณ์ - SVG เป็น DOM ธรรมดา จับภาพได้แม่นยำเสมอ) =====
-        function polarToXY(cx, cy, r, angleDeg) { const rad = (angleDeg - 90) * Math.PI / 180; return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) }; }
-        function annularSectorPath(cx, cy, rOuter, rInner, startAngle, endAngle) {
-            const largeArc = (endAngle - startAngle) > 180 ? 1 : 0;
-            const p1 = polarToXY(cx, cy, rOuter, endAngle), p2 = polarToXY(cx, cy, rOuter, startAngle);
-            const p3 = polarToXY(cx, cy, rInner, startAngle), p4 = polarToXY(cx, cy, rInner, endAngle);
-            return `M ${p1.x} ${p1.y} A ${rOuter} ${rOuter} 0 ${largeArc} 0 ${p2.x} ${p2.y} L ${p3.x} ${p3.y} A ${rInner} ${rInner} 0 ${largeArc} 1 ${p4.x} ${p4.y} Z`;
-        }
         function makeStatusDoughnutChart(canvasId, totals) {
-            const el = document.getElementById(canvasId); if (!el) return;
+            const el = document.getElementById(canvasId); if (!el || typeof Chart === 'undefined') return;
             const legendEl = document.getElementById(canvasId + 'Legend');
             const labels = Object.keys(totals).filter(l => (totals[l] || 0) > 0);
-            if (labels.length === 0) {
-                const emptyHtml = `<div class="w-full h-full flex items-center justify-center text-slate-400 text-xs sm:text-sm font-medium"><i class="fas fa-info-circle mr-1.5"></i> ยังไม่มีข้อมูลในเดือนนี้</div>`;
-                if (el.tagName === 'CANVAS') { const wrap = document.createElement('div'); wrap.id = canvasId; wrap.className = 'w-full h-full'; wrap.innerHTML = emptyHtml; el.replaceWith(wrap); } else { el.innerHTML = emptyHtml; }
-                if (legendEl) legendEl.innerHTML = ''; return;
-            }
+            if (labels.length === 0) { const ctx = el.getContext('2d'); ctx.font = '13px Sarabun'; ctx.fillStyle = chartTextColor(); ctx.textAlign = 'center'; ctx.fillText('ยังไม่มีข้อมูลในเดือนนี้', el.width / 2, el.height / 2); if (legendEl) legendEl.innerHTML = ''; return; }
             const total = labels.reduce((a, l) => a + (totals[l] || 0), 0);
-            const size = 220; const cx = size / 2, cy = size / 2, rOuter = size / 2 - 6, rInner = rOuter * 0.6;
-            let cumulative = 0, paths = '';
-            labels.forEach(l => {
-                const value = totals[l];
-                const startAngle = (cumulative / total) * 360; cumulative += value; const endAngle = (cumulative / total) * 360;
-                const angleSpan = endAngle - startAngle;
-                // ช่องว่างเล็กๆ ระหว่างชิ้น (เว้นมุมนิดหน่อย) - ถ้าชิ้นเล็กมากจนมุมติดลบ ให้ไม่เว้นเพื่อกันชิ้นหายไปเลย
-                const gap = angleSpan > 3 ? 0.6 : 0;
-                paths += `<path d="${annularSectorPath(cx, cy, rOuter, rInner, startAngle + gap, endAngle - gap)}" fill="${STATUS_HEX[l]}"><title>${l}: ${value} ครั้ง (${Math.round(value / total * 100)}%)</title></path>`;
-            });
-            const svgHtml = `<svg viewBox="0 0 ${size} ${size}" style="width:100%;height:100%;max-width:280px;max-height:280px;margin:0 auto;display:block;">${paths}</svg>`;
-            if (el.tagName === 'CANVAS') { const wrap = document.createElement('div'); wrap.id = canvasId; wrap.className = 'w-full h-full flex items-center justify-center'; wrap.innerHTML = svgHtml; el.replaceWith(wrap); } else { el.innerHTML = svgHtml; }
+            new Chart(el, { type: 'doughnut', data: { labels, datasets: [{ data: labels.map(l => totals[l]), backgroundColor: labels.map(l => STATUS_HEX[l]), borderWidth: 2, borderColor: chartBorderBg() }] },
+                options: { responsive: true, maintainAspectRatio: false, cutout: '60%', plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => { const pct = total > 0 ? Math.round((ctx.parsed / total) * 100) : 0; return ` ${ctx.label}: ${ctx.parsed} ครั้ง (${pct}%)`; } } } } } });
             if (legendEl) {
                 legendEl.innerHTML = `<div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2">${labels.map(l => { const count = totals[l] || 0; const pct = total > 0 ? Math.round((count / total) * 100) : 0;
                     return `<div class="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5 sm:px-3 sm:py-2"><span class="w-3 h-3 rounded-full shrink-0" style="background-color:${STATUS_HEX[l]}"></span><span class="font-bold text-slate-700 text-xs sm:text-sm flex-1 truncate">${l}</span><span class="font-black text-slate-800 text-xs sm:text-sm">${pct}%</span><span class="text-slate-400 text-[10px] sm:text-xs">(${count})</span></div>`; }).join('')}</div>`;
