@@ -78,61 +78,6 @@
             return counts;
         }
         const timeSlots = [ { period: 0, time: '08.00-08.30', name: 'เข้าแถวเช้า' }, { period: 1, time: '08.30-09.20' }, { period: 2, time: '09.20-10.10' }, { period: 3, time: '10.20-11.10' }, { period: 4, time: '11.10-12.00' }, { period: -1, time: '12.00-13.00', name: 'พักกลางวัน' }, { period: 5, time: '13.00-13.50' }, { period: 6, time: '13.50-14.40' }, { period: 7, time: '14.40-15.30' }, { period: 8, time: '15.30-16.20' } ];
-        // ===== [ใหม่] รายการวันหยุดราชการไทยอย่างเป็นทางการ ไว้แนะนำให้แอดมินกดยืนยันเพิ่มในปฏิทินได้เลย (ไม่ต้องพิมพ์เอง) =====
-        // ครอบคลุม พ.ศ. 2568-2569 (ค.ศ. 2025-2026) เท่านั้น - ปีถัดไปต้องอัพเดตตารางนี้เพิ่มเอง (วันหยุดตามปฏิทินจันทรคติ เช่น มาฆบูชา/วิสาขบูชา/อาสาฬหบูชา เปลี่ยนวันที่ทุกปี ประกาศจาก ครม. ล่วงหน้าไม่กี่เดือน)
-        const THAI_HOLIDAYS_REFERENCE = {
-            2025: [
-                { date: '2025-01-01', label: 'วันขึ้นปีใหม่' },
-                { date: '2025-02-12', label: 'วันมาฆบูชา' },
-                { date: '2025-04-06', label: 'วันจักรี' },
-                { date: '2025-04-07', label: 'วันหยุดชดเชยวันจักรี' },
-                { date: '2025-04-13', label: 'วันสงกรานต์' },
-                { date: '2025-04-14', label: 'วันสงกรานต์' },
-                { date: '2025-04-15', label: 'วันสงกรานต์' },
-                { date: '2025-04-16', label: 'วันหยุดชดเชยวันสงกรานต์' },
-                { date: '2025-05-01', label: 'วันแรงงานแห่งชาติ' },
-                { date: '2025-05-04', label: 'วันฉัตรมงคล' },
-                { date: '2025-05-05', label: 'วันหยุดชดเชยวันฉัตรมงคล' },
-                { date: '2025-05-09', label: 'วันพืชมงคล (เฉพาะราชการ)' },
-                { date: '2025-05-11', label: 'วันวิสาขบูชา' },
-                { date: '2025-05-12', label: 'วันหยุดชดเชยวันวิสาขบูชา' },
-                { date: '2025-06-02', label: 'วันหยุดพิเศษ (มติ ครม.)' },
-                { date: '2025-06-03', label: 'วันเฉลิมพระชนมพรรษาสมเด็จพระราชินี' },
-                { date: '2025-07-10', label: 'วันอาสาฬหบูชา' },
-                { date: '2025-07-11', label: 'วันเข้าพรรษา' },
-                { date: '2025-07-28', label: 'วันเฉลิมพระชนมพรรษา ร.10' },
-                { date: '2025-08-12', label: 'วันแม่แห่งชาติ' },
-                { date: '2025-10-13', label: 'วันคล้ายวันสวรรคต ร.9' },
-                { date: '2025-10-23', label: 'วันปิยมหาราช' },
-                { date: '2025-12-05', label: 'วันพ่อแห่งชาติ' },
-                { date: '2025-12-10', label: 'วันรัฐธรรมนูญ' },
-                { date: '2025-12-31', label: 'วันสิ้นปี' },
-            ],
-            2026: [
-                { date: '2026-01-01', label: 'วันขึ้นปีใหม่' },
-                { date: '2026-01-02', label: 'วันหยุดพิเศษ (มติ ครม.)' },
-                { date: '2026-03-03', label: 'วันมาฆบูชา' },
-                { date: '2026-04-06', label: 'วันจักรี' },
-                { date: '2026-04-13', label: 'วันสงกรานต์' },
-                { date: '2026-04-14', label: 'วันสงกรานต์' },
-                { date: '2026-04-15', label: 'วันสงกรานต์' },
-                { date: '2026-05-01', label: 'วันแรงงานแห่งชาติ' },
-                { date: '2026-05-04', label: 'วันฉัตรมงคล' },
-                { date: '2026-05-11', label: 'วันพืชมงคล (เฉพาะราชการ)' },
-                { date: '2026-05-31', label: 'วันวิสาขบูชา' },
-                { date: '2026-06-03', label: 'วันเฉลิมพระชนมพรรษาสมเด็จพระราชินี' },
-                { date: '2026-07-28', label: 'วันเฉลิมพระชนมพรรษา ร.10' },
-                { date: '2026-07-29', label: 'วันอาสาฬหบูชา' },
-                { date: '2026-07-30', label: 'วันเข้าพรรษา' },
-                { date: '2026-08-12', label: 'วันแม่แห่งชาติ' },
-                { date: '2026-10-13', label: 'วันคล้ายวันสวรรคต ร.9' },
-                { date: '2026-10-23', label: 'วันปิยมหาราช' },
-                { date: '2026-12-05', label: 'วันพ่อแห่งชาติ' },
-                { date: '2026-12-07', label: 'วันหยุดชดเชยวันพ่อแห่งชาติ' },
-                { date: '2026-12-10', label: 'วันรัฐธรรมนูญ' },
-                { date: '2026-12-31', label: 'วันสิ้นปี' },
-            ],
-        };
         const daysLabel = ['วันจันทร์', 'วันอังคาร', 'วันพุธ', 'วันพฤหัสบดี', 'วันศุกร์'];
         const SUBJECT_DAY_MAP = { 'จันทร์': 1, 'จ': 1, 'อังคาร': 2, 'อ': 2, 'พุธ': 3, 'พ': 3, 'พฤหัสบดี': 4, 'พฤหัส': 4, 'พฤ': 4, 'ศุกร์': 5, 'ศ': 5 };
         function parseScheduleString(str) {
@@ -2242,21 +2187,6 @@ content.innerHTML = html;
 
                 html += `<div class="flex items-center justify-between mb-4 bg-slate-50 rounded-xl border border-slate-100 p-2 sm:p-3"><button onclick="window.changeHolidayMonth(-1)" class="w-9 h-9 sm:w-10 sm:h-10 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg flex items-center justify-center text-slate-600 shadow-sm transition-colors"><i class="fas fa-chevron-left"></i></button><span class="font-extrabold text-sm sm:text-lg text-slate-800">${monthNamesFull[month]} ${year + 543}</span><button onclick="window.changeHolidayMonth(1)" class="w-9 h-9 sm:w-10 sm:h-10 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg flex items-center justify-center text-slate-600 shadow-sm transition-colors"><i class="fas fa-chevron-right"></i></button></div>`;
 
-                // ===== [ใหม่] แนะนำวันหยุดราชการไทยของเดือนที่กำลังดูอยู่ - กดยืนยันทีเดียวเพิ่มเข้าปฏิทินได้เลย ไม่ต้องพิมพ์เอง =====
-                const yearRefList = THAI_HOLIDAYS_REFERENCE[year] || [];
-                const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}-`;
-                const existingHolidayDates = new Set((settings.holidays || []).map(h => h.date));
-                const suggestedThisMonth = yearRefList.filter(h => h.date.startsWith(monthPrefix) && !existingHolidayDates.has(h.date));
-                // ปุ่มดึง/ดึงใหม่จากอินเทอร์เน็ต - โชว์ทุกปีเสมอ (ไม่ใช่แค่ปีที่ยังไม่มีข้อมูล) เผื่อรัฐบาลประกาศวันหยุดชดเชยเพิ่มทีหลัง จะได้กดรีเฟรชได้
-                const refreshBtnHtml = `<button onclick="window.fetchExternalHolidaysForYear(${year})" id="fetchHolidayBtn" class="bg-slate-700 hover:bg-slate-800 text-white px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold shrink-0 whitespace-nowrap"><i class="fas fa-cloud-download-alt"></i> ${yearRefList.length === 0 ? 'ดึงข้อมูลจากอินเทอร์เน็ต' : 'ดึงข้อมูลใหม่ (เผื่อมีประกาศเพิ่ม)'}</button>`;
-                if (yearRefList.length === 0) {
-                    html += `<div class="mb-4 bg-slate-50 border border-slate-200 rounded-xl p-3 text-[10px] sm:text-xs text-slate-400 font-medium"><div class="flex flex-wrap items-center justify-between gap-2"><span><i class="fas fa-info-circle"></i> ยังไม่มีข้อมูลวันหยุดราชการอ้างอิงสำหรับปี ${year + 543} ในระบบ (มีให้พร้อมใช้เฉพาะ พ.ศ. 2568-2569)</span>${refreshBtnHtml}</div></div>`;
-                } else if (suggestedThisMonth.length > 0) {
-                    html += `<div class="mb-4 bg-indigo-50 border border-indigo-200 rounded-xl p-3 sm:p-4"><div class="flex flex-wrap items-center justify-between gap-2 mb-2"><h4 class="text-xs sm:text-sm font-extrabold text-indigo-700 flex items-center gap-1.5"><i class="fas fa-magic"></i> แนะนำวันหยุดราชการไทยเดือนนี้ (${suggestedThisMonth.length} วัน)</h4><div class="flex gap-1.5"><button onclick="window.confirmAllSuggestedHolidays('${monthPrefix}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors"><i class="fas fa-check-double"></i> ยืนยันทั้งหมด</button></div></div><div class="flex flex-wrap gap-1.5">${suggestedThisMonth.map(h => `<button onclick="window.confirmSuggestedHoliday('${h.date}', '${h.label.replace(/'/g,"\\'")}')" class="bg-white border border-indigo-200 hover:bg-indigo-100 text-indigo-700 px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-colors flex items-center gap-1"><i class="fas fa-plus-circle"></i> ${h.date.split('-')[2]} - ${h.label}</button>`).join('')}</div><div class="mt-2 pt-2 border-t border-indigo-100">${refreshBtnHtml}</div></div>`;
-                } else {
-                    html += `<div class="mb-4 flex justify-end">${refreshBtnHtml}</div>`;
-                }
-
                 html += `<div class="grid grid-cols-7 gap-1 sm:gap-1.5 mb-8">`;
                 dayNamesShort.forEach(d => { html += `<div class="text-center text-[9px] sm:text-xs font-black text-slate-400 py-1">${d}</div>`; });
                 for (let i = 0; i < startWeekday; i++) html += `<div></div>`;
@@ -2390,61 +2320,6 @@ content.innerHTML = html;
             logAction('เพิ่ม/แก้ไขวันหยุด', `${dateStr.split('-').reverse().join('/')} - ${label}`, 'settings');
             updateHolidayBar();
             saveData('full'); showToast("บันทึกวันหยุดเรียบร้อย"); renderAdminTab(); closeHolidayModal();
-        };
-        // ===== [ใหม่] ยืนยันเพิ่มวันหยุดที่แนะนำ (จากตาราง THAI_HOLIDAYS_REFERENCE) เข้าปฏิทินจริง =====
-        // ===== [ใหม่] ตารางแปลชื่อวันหยุดจากภาษาอังกฤษ (ที่ได้จาก API ภายนอก) เป็นภาษาไทย - ถ้าไม่พบในตารางจะใช้ชื่อภาษาอังกฤษเดิมไปก่อน =====
-        const HOLIDAY_NAME_TRANSLATE = {
-            "New Year's Day": "วันขึ้นปีใหม่", "Makha Bucha": "วันมาฆบูชา", "Chakri Memorial Day": "วันจักรี",
-            "Songkran Festival": "วันสงกรานต์", "National Labor Day": "วันแรงงานแห่งชาติ", "Coronation Day": "วันฉัตรมงคล",
-            "Royal Ploughing Ceremony": "วันพืชมงคล", "Visakha Bucha": "วันวิสาขบูชา", "Asalha Bucha": "วันอาสาฬหบูชา",
-            "Buddhist Lent Day": "วันเข้าพรรษา", "Constitution Day": "วันรัฐธรรมนูญ", "New Year's Eve": "วันสิ้นปี",
-            "Chulalongkorn Memorial Day": "วันปิยมหาราช", "Awakening Day": "วันหยุดพิเศษ",
-        };
-        function translateHolidayName_(englishName) {
-            if (HOLIDAY_NAME_TRANSLATE[englishName]) return HOLIDAY_NAME_TRANSLATE[englishName];
-            const found = Object.keys(HOLIDAY_NAME_TRANSLATE).find(k => englishName.includes(k));
-            return found ? HOLIDAY_NAME_TRANSLATE[found] : englishName; // ไม่พบคำแปล - ใช้ชื่อเดิม (ยังกดยืนยันเพิ่มได้ปกติ)
-        }
-        window.fetchExternalHolidaysForYear = async function(year) {
-            const btn = document.getElementById('fetchHolidayBtn');
-            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังดึงข้อมูล...'; }
-            try {
-                const res = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=get_external_holidays&year=${year}`);
-                const data = await res.json();
-                if (data && data.status === 'success' && Array.isArray(data.holidays) && data.holidays.length > 0) {
-                    THAI_HOLIDAYS_REFERENCE[year] = data.holidays.map(h => ({ date: h.date, label: translateHolidayName_(h.label) }));
-                    showToast(`ดึงข้อมูลวันหยุดปี ${year + 543} มาแล้ว ${data.holidays.length} วัน`);
-                    renderAdminTab();
-                } else {
-                    showToast(data.message || "ไม่พบข้อมูลวันหยุดของปีนี้จากแหล่งข้อมูลภายนอก", "error");
-                    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-cloud-download-alt"></i> ดึงข้อมูลจากอินเทอร์เน็ต'; }
-                }
-            } catch (e) {
-                showToast("เชื่อมต่อแหล่งข้อมูลภายนอกไม่ได้", "error");
-                if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-cloud-download-alt"></i> ดึงข้อมูลจากอินเทอร์เน็ต'; }
-            }
-        };
-        window.confirmSuggestedHoliday = function(dateStr, label) {
-            if (!settings.holidays) settings.holidays = [];
-            if (settings.holidays.find(h => h.date === dateStr)) { showToast("มีวันหยุดนี้อยู่แล้ว", "error"); return; }
-            settings.holidays.push({ date: dateStr, label });
-            logAction('เพิ่มวันหยุด (แนะนำอัตโนมัติ)', `${dateStr.split('-').reverse().join('/')} - ${label}`, 'settings');
-            updateHolidayBar();
-            saveData('full'); showToast(`เพิ่มวันหยุด "${label}" เรียบร้อย`); renderAdminTab();
-        };
-        window.confirmAllSuggestedHolidays = function(monthPrefix) {
-            const yearNum = parseInt(monthPrefix.split('-')[0]);
-            const yearRefList = THAI_HOLIDAYS_REFERENCE[yearNum] || [];
-            const existingHolidayDates = new Set((settings.holidays || []).map(h => h.date));
-            const toAdd = yearRefList.filter(h => h.date.startsWith(monthPrefix) && !existingHolidayDates.has(h.date));
-            if (toAdd.length === 0) return;
-            showConfirm("ยืนยันเพิ่มวันหยุดทั้งหมด", `ต้องการเพิ่มวันหยุดที่แนะนำทั้ง ${toAdd.length} วันของเดือนนี้เข้าปฏิทินเลยใช่หรือไม่?`, () => {
-                if (!settings.holidays) settings.holidays = [];
-                toAdd.forEach(h => settings.holidays.push({ date: h.date, label: h.label }));
-                logAction('เพิ่มวันหยุดทั้งเดือน (แนะนำอัตโนมัติ)', `${toAdd.length} วัน (${monthPrefix.slice(0,7)})`, 'settings');
-                updateHolidayBar();
-                saveData('full'); showToast(`เพิ่มวันหยุด ${toAdd.length} วันเรียบร้อย`); renderAdminTab();
-            });
         };
         window.deleteHoliday = function(dateStr) {
             const holiday = getHolidayForDate(dateStr);
