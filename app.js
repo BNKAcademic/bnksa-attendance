@@ -6,7 +6,7 @@
 // ==========================================================
 
         // 🚨 นำ Web App URL ของคุณจาก Google Apps Script มาใส่ในบรรทัดด้านล่างนี้
-        const GOOGLE_APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwhNFwtgCmNhIat4PyluEG7tIMdgPcfGLQmfccwjSCCQFjtwrk7lOV5QYsix-4iDPPOvA/exec"; 
+        const GOOGLE_APP_SCRIPT_URL = "https://bnksa-attendance-api.tear-jeerasak.workers.dev"; // ระบบเช็คชื่อรุ่นใหม่ ใช้ Cloudflare Worker แทน Google Apps Script 
 
         let isAdmin = false, isDbInitialized = false, currentAdminTab = 'settings', currentRoomId = null, currentSubjectId = null;
         let editingTeacherId = null, editingSubjectId = null, editingStudentId = null, editingUserId = null;
