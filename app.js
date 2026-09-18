@@ -14,6 +14,8 @@
         let settings = { title: "ระบบเช็คชื่อนักเรียนอัจฉริยะ", faviconDataUrl: "", logoDataUrl: "", announcement: "", announcementStart: "", announcementEnd: "", announcements: [], term: "1", year: "2567", academicYears: [{ year: "2567", status: "active" }], roomCounts: { m1: 4, m2: 4, m3: 4, m4: 3, m5: 3, m6: 3 }, advisors: {}, staffs: {}, thresholds: { late: 4, absent: 4 }, storageLimitChars: 8000000, holidays: [], serverOnline: true, termLocks: {}, termCount: 2, users: [{ id: 'super_admin_root', username: 'BNKAdmin', password: '042499078', name: 'ผู้ดูแลระบบหลัก', role: 'super_admin', createdAt: new Date().toISOString() }] };
         let teachers = [], subjects = [], students = [], attendanceData = [], followUps = [], logs = [];
         let currentUser = null;
+        // ===== [ใหม่] กันสระ/วรรณยุกต์ไทยที่อยู่ใต้บรรทัด (เช่น สระอุ สระอู) โดนตัดตอนแคปภาพเป็น PDF/รูปภาพ (html2canvas) - ใส่ไว้ถาวรสำหรับทุกหน้า PDF (.a4-page) เพราะ class นี้ใช้เฉพาะตอนสร้างเอกสารส่งออกเท่านั้น ไม่กระทบการแสดงผลหน้าเว็บปกติ
+        (function () { const s = document.createElement('style'); s.textContent = `.a4-page * { line-height: 1.7 !important; }`; document.head.appendChild(s); })();
         const statuses = {
             'มา': { color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200', activeBg: 'bg-emerald-500', icon: 'fa-check' },
             'ร่วมกิจกรรม': { color: 'text-cyan-700', bg: 'bg-cyan-50', border: 'border-cyan-200', activeBg: 'bg-cyan-500', icon: 'fa-running' },
@@ -3604,6 +3606,10 @@ content.innerHTML = html;
             if (!el) { showToast("ไม่พบข้อมูลสำหรับส่งออก", "error"); return; }
             showToast(`กำลังสร้างไฟล์ ${format === 'image' ? 'รูปภาพ' : 'PDF'} กรุณารอสักครู่...`, "success");
             const __wasDark = document.documentElement.classList.contains('dark'); if (__wasDark) document.documentElement.classList.remove('dark');
+            // ===== [ใหม่] กันสระ/วรรณยุกต์ไทยที่อยู่ใต้บรรทัด (เช่น สระอุ สระอู) โดนตัดตอนแคปภาพ - เพิ่มระยะห่างบรรทัดชั่วคราวเฉพาะตอนส่งออก แล้วคืนค่าเดิมทันทีหลังเสร็จ =====
+            const lineHeightFixStyle = document.createElement('style');
+            lineHeightFixStyle.textContent = `#${elementId} * { line-height: 1.7 !important; }`;
+            document.head.appendChild(lineHeightFixStyle);
             await document.fonts.ready; await new Promise(resolve => setTimeout(resolve, 400));
             try {
                 const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false });
@@ -3622,6 +3628,7 @@ content.innerHTML = html;
                 }
                 showToast(`สร้างไฟล์ ${format === 'image' ? 'รูปภาพ' : 'PDF'} สำเร็จ!`, "success");
             } catch (err) { showToast("เกิดข้อผิดพลาดในการสร้างไฟล์ Infographic", "error"); }
+            lineHeightFixStyle.remove();
             if (__wasDark) document.documentElement.classList.add('dark');
         };
 
