@@ -15,7 +15,7 @@
         let teachers = [], subjects = [], students = [], attendanceData = [], followUps = [], logs = [];
         let currentUser = null;
         // ===== [ใหม่] กันสระ/วรรณยุกต์ไทยที่อยู่ใต้บรรทัด (เช่น สระอุ สระอู) โดนตัดตอนแคปภาพเป็น PDF/รูปภาพ (html2canvas) - ใส่ไว้ถาวรสำหรับทุกหน้า PDF (.a4-page) เพราะ class นี้ใช้เฉพาะตอนสร้างเอกสารส่งออกเท่านั้น ไม่กระทบการแสดงผลหน้าเว็บปกติ
-        (function () { const s = document.createElement('style'); s.textContent = `.a4-page * { line-height: 1.7 !important; }`; document.head.appendChild(s); })();
+        (function () { const s = document.createElement('style'); s.textContent = `.a4-page * { line-height: 2 !important; }`; document.head.appendChild(s); })();
         const statuses = {
             'มา': { color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200', activeBg: 'bg-emerald-500', icon: 'fa-check' },
             'ร่วมกิจกรรม': { color: 'text-cyan-700', bg: 'bg-cyan-50', border: 'border-cyan-200', activeBg: 'bg-cyan-500', icon: 'fa-running' },
@@ -3608,7 +3608,7 @@ content.innerHTML = html;
             const __wasDark = document.documentElement.classList.contains('dark'); if (__wasDark) document.documentElement.classList.remove('dark');
             // ===== [ใหม่] กันสระ/วรรณยุกต์ไทยที่อยู่ใต้บรรทัด (เช่น สระอุ สระอู) โดนตัดตอนแคปภาพ - เพิ่มระยะห่างบรรทัดชั่วคราวเฉพาะตอนส่งออก แล้วคืนค่าเดิมทันทีหลังเสร็จ =====
             const lineHeightFixStyle = document.createElement('style');
-            lineHeightFixStyle.textContent = `#${elementId} * { line-height: 1.7 !important; }`;
+            lineHeightFixStyle.textContent = `#${elementId} * { line-height: 2 !important; }`;
             document.head.appendChild(lineHeightFixStyle);
             await document.fonts.ready; await new Promise(resolve => setTimeout(resolve, 400));
             try {
