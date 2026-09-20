@@ -893,7 +893,8 @@
         }
 
         let confirmCallback = null, promptCallback = null;
-        function showConfirm(title, message, callback, confirmLabel) { document.getElementById('confirmTitle').innerText = title; document.getElementById('confirmMessage').innerText = message; document.getElementById('confirmBtn').innerText = confirmLabel || 'ยืนยัน'; confirmCallback = callback; const modal = document.getElementById('confirmModal');
+        function showConfirm(title, message, callback, confirmLabel, hideCancel) { document.getElementById('confirmTitle').innerText = title; document.getElementById('confirmMessage').innerText = message; document.getElementById('confirmBtn').innerText = confirmLabel || 'ยืนยัน'; confirmCallback = callback; const modal = document.getElementById('confirmModal');
+            const cancelBtn = document.getElementById('confirmBtn').previousElementSibling; if (cancelBtn) cancelBtn.classList.toggle('hidden', !!hideCancel); // ซ่อนปุ่ม "ยกเลิก" สำหรับป็อปอัพแจ้งผลแบบมีแค่ปุ่มเดียว (เช่น แจ้งเช็คชื่อสำเร็จ)
             const box = document.getElementById('confirmModalBox'); modal.classList.remove('hidden'); setTimeout(() => { box.classList.remove('scale-95', 'opacity-0'); box.classList.add('scale-100', 'opacity-100'); }, 10);
         }
         function closeConfirm() { const modal = document.getElementById('confirmModal'); const box = document.getElementById('confirmModalBox');
@@ -1414,8 +1415,7 @@
             await ensureAttendanceLoadedForRoom(subject.term, subject.year, subject.roomId, true);
             window.closeProgressModal();
             document.body.style.pointerEvents = 'auto';
-            showToast("บันทึกข้อมูลสำเร็จ!");
-            history.back(); // กลับไปหน้าห้องเรียน/ตารางครูที่มีอยู่แล้วในประวัติ (จะแสดงข้อมูลล่าสุดโดยอัตโนมัติ) แทนการสร้างรายการใหม่ - ทำให้ Back อีกครั้งจากตรงนี้ไปหน้าแรกได้ในครั้งเดียว
+            showConfirm("เช็คชื่อสำเร็จ", "บันทึกข้อมูลการเช็คชื่อเรียบร้อยแล้ว", () => { history.back(); }, "ตกลง", true);
         };
 
         window.resetSubjectAttendance = async function(subjectId) {
