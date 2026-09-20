@@ -893,7 +893,15 @@
         }
 
         let confirmCallback = null, promptCallback = null;
-        function showConfirm(title, message, callback, confirmLabel, hideCancel) { document.getElementById('confirmTitle').innerText = title; document.getElementById('confirmMessage').innerText = message; document.getElementById('confirmBtn').innerText = confirmLabel || 'ยืนยัน'; confirmCallback = callback; const modal = document.getElementById('confirmModal');
+        function showConfirm(title, message, callback, confirmLabel, hideCancel, theme) { 
+            const titleEl = document.getElementById('confirmTitle');
+            titleEl.innerHTML = theme === 'success' ? `<i class="fas fa-check-circle text-emerald-500 mr-1.5"></i> ${title}` : title;
+            document.getElementById('confirmMessage').innerText = message; document.getElementById('confirmBtn').innerText = confirmLabel || 'ยืนยัน'; confirmCallback = callback; const modal = document.getElementById('confirmModal');
+            const confirmBtn = document.getElementById('confirmBtn');
+            // ===== [ใหม่] ป็อปอัพแบบ "สำเร็จ" ใช้ปุ่มสีเขียวแทนสีแดงเริ่มต้น (สีแดงเหมาะกับคำเตือน/ยืนยันการลบ ไม่ใช่การแจ้งผลสำเร็จ) =====
+            confirmBtn.classList.remove('bg-rose-600', 'hover:bg-rose-700', 'shadow-rose-200', 'bg-emerald-600', 'hover:bg-emerald-700', 'shadow-emerald-200');
+            if (theme === 'success') confirmBtn.classList.add('bg-emerald-600', 'hover:bg-emerald-700', 'shadow-emerald-200');
+            else confirmBtn.classList.add('bg-rose-600', 'hover:bg-rose-700', 'shadow-rose-200');
             const cancelBtn = document.getElementById('confirmBtn').previousElementSibling; if (cancelBtn) cancelBtn.classList.toggle('hidden', !!hideCancel); // ซ่อนปุ่ม "ยกเลิก" สำหรับป็อปอัพแจ้งผลแบบมีแค่ปุ่มเดียว (เช่น แจ้งเช็คชื่อสำเร็จ)
             const box = document.getElementById('confirmModalBox'); modal.classList.remove('hidden'); setTimeout(() => { box.classList.remove('scale-95', 'opacity-0'); box.classList.add('scale-100', 'opacity-100'); }, 10);
         }
@@ -1415,7 +1423,7 @@
             await ensureAttendanceLoadedForRoom(subject.term, subject.year, subject.roomId, true);
             window.closeProgressModal();
             document.body.style.pointerEvents = 'auto';
-            showConfirm("เช็คชื่อสำเร็จ", "บันทึกข้อมูลการเช็คชื่อเรียบร้อยแล้ว", () => { history.back(); }, "ตกลง", true);
+            showConfirm("เช็คชื่อสำเร็จ", "บันทึกข้อมูลการเช็คชื่อเรียบร้อยแล้ว", () => { history.back(); }, "ตกลง", true, 'success');
         };
 
         window.resetSubjectAttendance = async function(subjectId) {
