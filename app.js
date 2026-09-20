@@ -1309,6 +1309,7 @@
                 const rec = attendanceData.find(a => a.subjectId === periodSubjectMap[p].id && a.date === today && String(a.period) === String(p));
                 if (rec) periodRecordMap[p] = rec;
             });
+            console.log('[DEBUG จุดสถานะ]', { today, selectedPeriod, roomId: subject.roomId, periodSubjectMap: Object.fromEntries(Object.entries(periodSubjectMap).map(([k,v]) => [k, v.name])), periodRecordMap, attendanceDataLength: attendanceData.length, sampleAttendanceRecord: attendanceData[0] });
             const buildDayDots = (studentId, big) => Array.from({ length: 9 }, (_, p) => {
                 const sub = periodSubjectMap[p];
                 const rec = periodRecordMap[p];
