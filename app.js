@@ -81,6 +81,16 @@
         }
         const timeSlots = [ { period: 0, time: '08.00-08.30', name: 'เข้าแถวเช้า' }, { period: 1, time: '08.30-09.20' }, { period: 2, time: '09.20-10.10' }, { period: 3, time: '10.20-11.10' }, { period: 4, time: '11.10-12.00' }, { period: -1, time: '12.00-13.00', name: 'พักกลางวัน' }, { period: 5, time: '13.00-13.50' }, { period: 6, time: '13.50-14.40' }, { period: 7, time: '14.40-15.30' }, { period: 8, time: '15.30-16.20' } ];
         const daysLabel = ['วันจันทร์', 'วันอังคาร', 'วันพุธ', 'วันพฤหัสบดี', 'วันศุกร์'];
+        // ===== [ใหม่] แปลง Date เป็นสตริง YYYY-MM-DD ตาม "เวลาท้องถิ่นของเครื่อง" (ไม่ใช่ UTC) =====
+        // แก้บั๊ก: new Date().toISOString().split('T')[0] แปลงเป็นเวลา UTC เสมอ ซึ่งช้ากว่าไทย 7 ชั่วโมง
+        // ทำให้ช่วง 00:00-06:59 น. ของทุกวัน ระบบจะเข้าใจผิดว่ายังเป็น "เมื่อวาน" อยู่ - ฟังก์ชันนี้ใช้ getFullYear/getMonth/getDate ซึ่งอ่านตามเวลาเครื่องจริง ไม่เลื่อนวันผิด
+        function localDateStr(d) {
+            d = d || new Date();
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
         const SUBJECT_DAY_MAP = { 'จันทร์': 1, 'จ': 1, 'อังคาร': 2, 'อ': 2, 'พุธ': 3, 'พ': 3, 'พฤหัสบดี': 4, 'พฤหัส': 4, 'พฤ': 4, 'ศุกร์': 5, 'ศ': 5 };
         function parseScheduleString(str) {
             if (!str) return [];
@@ -1241,9 +1251,9 @@
                 html += `<button onclick="window.navigate('classroom', {roomId: '${roomId}', dayIndex: ${i}})" class="px-2 sm:px-3 lg:px-5 py-1.5 sm:py-2 rounded-lg border font-bold whitespace-nowrap transition-all flex flex-col items-center justify-center gap-0.5 flex-1 ${activeClass}"><span class="text-[8px] sm:text-[10px] font-medium opacity-80 leading-none">${dayDateLabel}</span><span class="text-[10px] sm:text-sm flex items-center gap-1 leading-none">${i === dayIndex ? '<i class="fas fa-check-circle"></i>' : ''} ${daysLabel[i-1].replace('วัน','')}</span></button>`; }
             
             let dObj = new Date();
-            let currentDayOfWeek = dObj.getDay(); let dateToPass = new Date().toISOString().split('T')[0];
+            let currentDayOfWeek = dObj.getDay(); let dateToPass = localDateStr();
             if (currentDayOfWeek >= 1 && currentDayOfWeek <= 5) { dObj.setDate(dObj.getDate() + (dayIndex - currentDayOfWeek));
-                dateToPass = dObj.toISOString().split('T')[0]; }
+                dateToPass = localDateStr(dObj); }
             
             html += `</div></div><div class="rounded-xl border border-slate-200 shadow-sm w-full overflow-hidden"><table class="w-full text-left border-collapse table-fixed"><colgroup><col style="width:14%"><col style="width:32%"><col style="width:23%"><col style="width:31%"></colgroup><thead><tr class="bg-slate-50 text-slate-700 text-[9px] sm:text-sm border-b-2 border-slate-200 uppercase tracking-wider"><th class="p-1.5 sm:p-3 lg:p-5 font-extrabold text-center">คาบ</th><th class="p-1.5 sm:p-3 lg:p-5 font-extrabold">วิชา / กิจกรรม</th><th class="p-1.5 sm:p-3 lg:p-5 font-extrabold">ครูผู้สอน</th><th class="p-1.5 sm:p-3 lg:p-5 font-extrabold text-center">จัดการ</th></tr></thead><tbody class="divide-y divide-slate-100">`;
             timeSlots.forEach(slot => {
@@ -1280,7 +1290,7 @@
                 return;
             }
             const roomStudents = getRoomStudents(subject.roomId).sort((a, b) => parseInt(a.number) - parseInt(b.number));
-            const today = passedDate || new Date().toISOString().split('T')[0];
+            const today = passedDate || localDateStr();
             let selectedPeriod = initialPeriod;
             if (!selectedPeriod && subject.schedules && subject.schedules.length > 0) { const todayDay = new Date(today).getDay() || 7;
                 const todaySched = subject.schedules.find(s => parseInt(s.day) === todayDay); selectedPeriod = todaySched ? todaySched.period : subject.schedules[0].period;
@@ -1589,8 +1599,8 @@
                 const firstDayOfMonth = new Date(selYearNum, selMonthNum - 1, 1);
                 const lastDayOfMonth = new Date(selYearNum, selMonthNum, 0);
                 const extendedStart = new Date(firstDayOfMonth); extendedStart.setDate(extendedStart.getDate() - (INCOMPLETE_WINDOW_DAYS - 1));
-                const extendedStartStr = extendedStart.toISOString().split('T')[0];
-                const lastDayStr = lastDayOfMonth.toISOString().split('T')[0];
+                const extendedStartStr = localDateStr(extendedStart);
+                const lastDayStr = localDateStr(lastDayOfMonth);
                 let roomDailyRawExt = {}; roomStudents.forEach(st => roomDailyRawExt[st.id] = {});
                 attendanceData.forEach(record => { if (record.date >= extendedStartStr && record.date <= lastDayStr) { const sub = roomSubjects.find(s => s.id === record.subjectId); if (sub) { roomStudents.forEach(st => { const status = record.records[st.id];
                 if (status) { if (!roomDailyRawExt[st.id][record.date]) roomDailyRawExt[st.id][record.date] = []; roomDailyRawExt[st.id][record.date].push({ period: record.period || 1, status: status }); } }); } } });
@@ -1670,7 +1680,7 @@
                 }
             } 
             else if (tab === 'daily') {
-                const todayStr = new Date().toISOString().split('T')[0];
+                const todayStr = localDateStr();
                 const displayDate = window.tempDailyDate || todayStr; const dObj = new Date(displayDate); const dayOfWeek = dObj.getDay();
                 let dayIndexForSched = (dayOfWeek >= 1 && dayOfWeek <= 5) ? dayOfWeek : 1;
                 const monday = new Date(dObj);
@@ -1680,7 +1690,7 @@
                 subjectsToday.sort((a,b) => a.period - b.period);
                 const dailyAttRecords = attendanceData.filter(a => a.date === displayDate && subjectsToday.some(st => st.id === a.subjectId && String(st.period) === String(a.period)));
                 let dayButtonsHtml = `<div class="flex flex-wrap gap-1 w-full mt-2 sm:mt-0 sm:w-auto justify-center bg-slate-50 p-1.5 rounded-lg border border-slate-200">`;
-                for(let i=1; i<=5; i++) { let iterDate = new Date(monday); iterDate.setDate(monday.getDate() + (i-1)); let iterDateStr = iterDate.toISOString().split('T')[0];
+                for(let i=1; i<=5; i++) { let iterDate = new Date(monday); iterDate.setDate(monday.getDate() + (i-1)); let iterDateStr = localDateStr(iterDate);
                     let isActive = iterDateStr === displayDate; let activeCls = isActive ? 'bg-indigo-600 text-white shadow-md' : 'bg-transparent text-slate-600 hover:bg-slate-200';
                     dayButtonsHtml += `<button onclick="window.tempDailyDate='${iterDateStr}'; window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'daily'})" class="px-2 py-1 sm:px-3 sm:py-1.5 rounded text-[10px] sm:text-sm font-bold transition-colors ${activeCls}">${daysLabel[i-1].replace('วัน','')}</button>`;
                 }
@@ -2220,7 +2230,7 @@ content.innerHTML = html;
                 if (!window.__holidaysPrunedThisSession) {
                     window.__holidaysPrunedThisSession = true;
                     const oneYearAgo = new Date(); oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-                    const cutoffStr = oneYearAgo.toISOString().split('T')[0];
+                    const cutoffStr = localDateStr(oneYearAgo);
                     const oldCount = (settings.holidays || []).filter(h => h.date < cutoffStr).length;
                     if (oldCount > 0) {
                         settings.holidays = (settings.holidays || []).filter(h => h.date >= cutoffStr);
