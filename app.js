@@ -894,14 +894,21 @@
 
         let confirmCallback = null, promptCallback = null;
         function showConfirm(title, message, callback, confirmLabel, hideCancel, theme) { 
-            const titleEl = document.getElementById('confirmTitle');
-            titleEl.innerHTML = theme === 'success' ? `<i class="fas fa-check-circle text-emerald-500 mr-1.5"></i> ${title}` : title;
+            document.getElementById('confirmTitle').innerText = title;
             document.getElementById('confirmMessage').innerText = message; document.getElementById('confirmBtn').innerText = confirmLabel || 'ยืนยัน'; confirmCallback = callback; const modal = document.getElementById('confirmModal');
             const confirmBtn = document.getElementById('confirmBtn');
-            // ===== [ใหม่] ป็อปอัพแบบ "สำเร็จ" ใช้ปุ่มสีเขียวแทนสีแดงเริ่มต้น (สีแดงเหมาะกับคำเตือน/ยืนยันการลบ ไม่ใช่การแจ้งผลสำเร็จ) =====
-            confirmBtn.classList.remove('bg-rose-600', 'hover:bg-rose-700', 'shadow-rose-200', 'bg-emerald-600', 'hover:bg-emerald-700', 'shadow-emerald-200');
-            if (theme === 'success') confirmBtn.classList.add('bg-emerald-600', 'hover:bg-emerald-700', 'shadow-emerald-200');
-            else confirmBtn.classList.add('bg-rose-600', 'hover:bg-rose-700', 'shadow-rose-200');
+            // ===== [ใหม่] ป็อปอัพแบบ "สำเร็จ" ใช้ปุ่มสีเขียว + ไอคอนติ๊กถูกแทนไอคอนตกใจ/เตือนสีแดงเริ่มต้น (อ้างอิง class จริงจาก index.html ตรงๆ ไม่ต้องเดา) =====
+            const badgeWrap = document.querySelector('#confirmModalBox .rounded-full'); // ป้ายวงกลมไอคอน (bg-rose-100 text-rose-500 <i>...)
+            const badgeIcon = badgeWrap ? badgeWrap.querySelector('i') : null;
+            if (theme === 'success') {
+                confirmBtn.className = confirmBtn.className.replace('bg-rose-600', 'bg-emerald-600').replace('hover:bg-rose-700', 'hover:bg-emerald-700').replace('shadow-rose-200', 'shadow-emerald-200');
+                if (badgeWrap) badgeWrap.className = badgeWrap.className.replace('bg-rose-100', 'bg-emerald-100').replace('text-rose-500', 'text-emerald-500');
+                if (badgeIcon) badgeIcon.className = 'fas fa-check-circle';
+            } else {
+                confirmBtn.className = confirmBtn.className.replace('bg-emerald-600', 'bg-rose-600').replace('hover:bg-emerald-700', 'hover:bg-rose-700').replace('shadow-emerald-200', 'shadow-rose-200');
+                if (badgeWrap) badgeWrap.className = badgeWrap.className.replace('bg-emerald-100', 'bg-rose-100').replace('text-emerald-500', 'text-rose-500');
+                if (badgeIcon) badgeIcon.className = 'fas fa-exclamation-triangle';
+            }
             const cancelBtn = document.getElementById('confirmBtn').previousElementSibling; if (cancelBtn) cancelBtn.classList.toggle('hidden', !!hideCancel); // ซ่อนปุ่ม "ยกเลิก" สำหรับป็อปอัพแจ้งผลแบบมีแค่ปุ่มเดียว (เช่น แจ้งเช็คชื่อสำเร็จ)
             const box = document.getElementById('confirmModalBox'); modal.classList.remove('hidden'); setTimeout(() => { box.classList.remove('scale-95', 'opacity-0'); box.classList.add('scale-100', 'opacity-100'); }, 10);
         }
