@@ -91,6 +91,26 @@
             const day = String(d.getDate()).padStart(2, '0');
             return `${year}-${month}-${day}`;
         }
+        // ===== [ใหม่] หาว่า "วันที่" ที่ให้มา อยู่สัปดาห์ที่เท่าไหร่ของเดือน (นับแบบสัปดาห์ปฏิทินจริง เริ่มวันจันทร์เสมอ ไม่ใช่หารวันที่ด้วย 7 แบบเดิม) =====
+        // ปัดเข้าช่องสัปดาห์ที่ 1-5 (ถ้าเดือนไหนมีสัปดาห์ที่ 6 โผล่มา เช่น เดือน 31 วันที่วันแรกตรงกับเสาร์/อาทิตย์ จะถูกยุบรวมเข้าสัปดาห์ 5 เพราะตารางมีแค่ 5 ช่อง)
+        function getWeekOfMonth(dateStr) {
+            const [y, m, d] = dateStr.split('-').map(Number);
+            const firstDayOfWeekMon = (new Date(y, m - 1, 1).getDay() + 6) % 7; // จันทร์=0 ... อาทิตย์=6
+            let week = Math.ceil((d + firstDayOfWeekMon) / 7);
+            if (week > 5) week = 5;
+            return week;
+        }
+        // ===== [ใหม่] คำนวณ "ช่วงวันที่" จริงของแต่ละสัปดาห์ในเดือนนั้น (เอาไว้แสดงเป็นคำชี้แจงใต้ตาราง) =====
+        function getMonthWeekRanges(year, month) {
+            const lastDay = new Date(year, month, 0).getDate();
+            const ranges = {};
+            for (let day = 1; day <= lastDay; day++) {
+                const dStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                const week = getWeekOfMonth(dStr);
+                if (!ranges[week]) ranges[week] = { start: day, end: day }; else ranges[week].end = day;
+            }
+            return ranges;
+        }
         const SUBJECT_DAY_MAP = { 'จันทร์': 1, 'จ': 1, 'อังคาร': 2, 'อ': 2, 'พุธ': 3, 'พ': 3, 'พฤหัสบดี': 4, 'พฤหัส': 4, 'พฤ': 4, 'ศุกร์': 5, 'ศ': 5 };
         function parseScheduleString(str) {
             if (!str) return [];
@@ -783,7 +803,9 @@
             try {
                 const response = await fetch(GOOGLE_APP_SCRIPT_URL); const data = await response.json();
                 if (data) {
-                    attendanceData = data.attendanceData || attendanceData; followUps = data.followUps || followUps;
+                    // [แก้ไข] ไม่แตะ attendanceData ที่นี่อีกต่อไป เพราะ default GET ไม่ได้แนบข้อมูลเช็คชื่อมาด้วยแล้ว (ย้ายไปเก็บแยกรายห้องใน D1)
+                    // ของเดิมเขียนทับด้วย data.attendanceData ที่เป็น [] เสมอ ทำให้ข้อมูลเช็คชื่อที่โหลดไว้หายหมดทุกครั้งที่กดรีเฟรช - นี่คือบั๊กที่พบและแก้แล้ว
+                    followUps = data.followUps || followUps;
                     if (!isAdmin) {
                         teachers = data.teachers || teachers; subjects = data.subjects || subjects;
                         students = (data.students || students).map(st => { if (st.title) { st.name = (st.title + (st.name || '')).trim(); st.title = ''; } return st; });
@@ -796,6 +818,18 @@
                             if (data.settings.serverOnline !== undefined) { settings.serverOnline = data.settings.serverOnline; applyServerStatusBadge(); }
                         }
                     }
+                }
+                // ===== [ใหม่] รีเฟรชข้อมูลเช็คชื่อของห้องที่กำลังโหลดอยู่จริง (ผ่านช่องทางที่ถูกต้อง แยกรายห้อง) ให้ปุ่มนี้ยังรีเฟรชข้อมูลเช็คชื่อได้จริงเหมือนเดิม =====
+                if (Array.isArray(window.__loadedRoomsList) && window.__loadedRoomsList.length > 0) {
+                    await Promise.all(window.__loadedRoomsList.map(r => ensureAttendanceLoadedForRoom(r.term, r.year, r.roomId, true)));
+                }
+                // ===== [ใหม่] ถ้าเคยเปิดแท็บ "ประวัติการแก้ไข" มาแล้วในเซสชันนี้ ให้ดึง log ชุดล่าสุดมาด้วย (log ก็แยกเก็บต่างหากเหมือนข้อมูลเช็คชื่อ ไม่ได้มากับ default GET) =====
+                if (window.__logsLoaded) {
+                    try {
+                        const logsRes = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=get_logs`);
+                        const logsData = await logsRes.json();
+                        if (logsData && logsData.status === 'success' && Array.isArray(logsData.logs)) logs = logsData.logs;
+                    } catch (e) { /* ดึง log ใหม่ไม่สำเร็จ - ใช้ของเดิมที่มีอยู่ไปก่อน ไม่ทำให้รีเฟรชทั้งหมดล้มเหลว */ }
                 }
                 safeRenderState(history.state || { view: 'dashboard' });
                 showToast("รีเฟรชข้อมูลสำเร็จ");
@@ -1477,6 +1511,55 @@
             });
         };
 
+        // ===== [ใหม่] ล้างข้อมูลเช็คชื่อเฉพาะวันที่ต้องการ (ไม่กระทบวันอื่น) - ปลอดภัยกว่าล้างทั้งวิชา =====
+        window.openResetByDateModal = async function(subjectId) {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่ล้างข้อมูลเช็คชื่อได้", "error"); return; }
+            const subChk = subjects.find(s => s.id === subjectId);
+            if (subChk && guardAttendanceLock(subChk.term, subChk.year)) return;
+            showLoadingSpinnerModal("กำลังโหลดรายการวันที่", "กรุณารอสักครู่...");
+            try {
+                const res = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=get_subject_dates&subjectId=${subjectId}`);
+                const data = await res.json();
+                window.closeProgressModal();
+                if (!data || data.status !== 'success' || !Array.isArray(data.dates) || data.dates.length === 0) {
+                    showToast("ไม่พบข้อมูลเช็คชื่อของวิชานี้เลย", "error"); return;
+                }
+                const listHtml = data.dates.map(d => {
+                    const dObj = new Date(d.date);
+                    const thaiDate = isNaN(dObj) ? d.date : dObj.toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+                    return `<button onclick="window.confirmResetSubjectDate('${subjectId}', '${d.date}', '${thaiDate.replace(/'/g, "\\'")}')" class="w-full flex items-center justify-between bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-300 rounded-lg px-3 py-2.5 text-left transition-colors"><span class="font-bold text-slate-700 text-sm">${thaiDate}</span><span class="text-xs text-slate-400 font-medium">${d.cnt} รายการ <i class="fas fa-chevron-right ml-1"></i></span></button>`;
+                }).join('');
+                const modalHtml = `<div id="resetByDateModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4"><div class="bg-white rounded-3xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col"><div class="p-5 border-b border-slate-100 flex items-center justify-between shrink-0"><h3 class="font-extrabold text-slate-800 text-base sm:text-lg flex items-center gap-2"><i class="fas fa-calendar-times text-orange-500"></i> เลือกวันที่ต้องการล้าง</h3><button onclick="document.getElementById('resetByDateModal').remove()" class="text-slate-400 hover:text-slate-600"><i class="fas fa-times text-xl"></i></button></div><div class="p-4 overflow-y-auto space-y-2">${listHtml}</div></div></div>`;
+                document.body.insertAdjacentHTML('beforeend', modalHtml);
+            } catch (e) {
+                window.closeProgressModal();
+                showToast("โหลดรายการวันที่ไม่สำเร็จ ลองใหม่อีกครั้ง", "error");
+            }
+        };
+        window.confirmResetSubjectDate = function(subjectId, dateStr, thaiDateLabel) {
+            const m = document.getElementById('resetByDateModal'); if (m) m.remove();
+            showConfirm("ยืนยันการล้างข้อมูล", `ต้องการล้างข้อมูลเช็คชื่อของวันที่ ${thaiDateLabel} ทั้งหมดใช่หรือไม่? การลบนี้ไม่สามารถกู้คืนได้ (วันอื่นจะไม่ถูกกระทบ)`, async () => {
+                showLoadingSpinnerModal("กำลังล้างข้อมูล", "กรุณารอสักครู่...");
+                const sub = subjects.find(s => s.id === subjectId);
+                try {
+                    const res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'reset_subject_date', subjectId, date: dateStr }) });
+                    const data = await res.json();
+                    window.closeProgressModal();
+                    if (data && data.status === 'success') {
+                        attendanceData = attendanceData.filter(a => !(a.subjectId === subjectId && a.date === dateStr));
+                        logAction('ล้างข้อมูลเช็คชื่อเฉพาะวัน', `${sub ? sub.name : subjectId} - วันที่ ${dateStr}`);
+                        showToast("ล้างข้อมูลวันที่เลือกเรียบร้อยแล้ว", "success");
+                        openSubjectSummary(subjectId);
+                    } else {
+                        showToast((data && data.message) || "ล้างข้อมูลไม่สำเร็จ", "error");
+                    }
+                } catch (e) {
+                    window.closeProgressModal();
+                    showToast("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้", "error");
+                }
+            }, "ยืนยันลบ");
+        };
+
         function openSubjectSummary(subjectId, fromTeacherDash = false) {
             const isDarkNow = document.documentElement.classList.contains('dark');
             const subject = subjects.find(s => s.id === subjectId);
@@ -1494,7 +1577,7 @@
             const backAction = 'history.back()';
             const isSummaryLocked = getTermStatus(subject.term, subject.year) === 'locked';
             const isSummaryAttendanceLocked = isAttendanceEntryLocked(subject.term, subject.year);
-            let html = `<div class="mb-4 sm:mb-8 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-1/3 h-full ${isDarkNow ? '' : 'bg-gradient-to-l from-emerald-50 to-transparent opacity-60'}"></div><div class="relative z-10 flex gap-3 items-center"><div class="w-12 h-12 sm:w-20 sm:h-20 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-full flex items-center justify-center text-white text-xl sm:text-3xl shadow-lg border-2 sm:border-4 ${isDarkNow ? 'border-[#141e33]' : 'border-white'} shrink-0"><i class="fas fa-book"></i></div><div><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800 tracking-tight leading-tight">${subject.name}</h2><p class="text-slate-600 font-bold mt-1 sm:mt-2 flex flex-wrap items-center gap-1 sm:gap-3"><span class="bg-emerald-100 text-emerald-900 px-2 sm:px-4 py-0.5 sm:py-1.5 rounded-md sm:rounded-xl text-[10px] sm:text-sm shadow-sm">ห้อง ${formatRoomName(subject.roomId)}</span><span class="bg-slate-100 text-slate-700 px-2 sm:px-4 py-0.5 sm:py-1.5 rounded-md sm:rounded-xl text-[10px] sm:text-sm shadow-sm"><i class="fas fa-chalkboard-teacher mr-1"></i> ${subject.teacher || '-'}${subject.teacher2 ? ' / ' + subject.teacher2 : ''}</span></p></div></div><div class="relative z-10 flex flex-wrap gap-1.5 sm:gap-3 w-full lg:w-auto mt-2 lg:mt-0">${(isAdmin && currentUser && currentUser.role === 'super_admin') ? (isSummaryLocked ? `<button disabled title="เทอมนี้ถูกล็อคข้อมูลไว้" class="flex-1 sm:flex-none bg-slate-100 text-slate-400 border border-slate-200 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold cursor-not-allowed"><i class="fas fa-lock"></i> ล้าง</button>` : `<button onclick="window.resetSubjectAttendance('${subjectId}')" class="flex-1 sm:flex-none bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors" title="เฉพาะ Super Admin"><i class="fas fa-redo"></i> ล้าง</button>`) : ''}${isSummaryAttendanceLocked ? `<button disabled title="ไม่สามารถเช็คชื่อได้ในขณะนี้" class="flex-1 sm:flex-none bg-slate-100 text-slate-400 border border-slate-200 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold cursor-not-allowed"><i class="fas fa-lock"></i> ล็อคแล้ว</button>` : `<button onclick="window.navigate('attendance', {subjectId: '${subjectId}', fromTeacherDash: ${fromTeacherDash}})" class="flex-1 sm:flex-none bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors"><i class="fas fa-edit"></i> แก้ไข</button>`}<button onclick="window.downloadInfographicPDF('${subjectId}')" class="flex-1 sm:flex-none bg-purple-600 hover:bg-purple-700 text-white border border-purple-700 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors"><i class="fas fa-file-pdf"></i> PDF</button><button onclick="window.exportSubjectExcel('${subjectId}')" class="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors"><i class="fas fa-file-excel"></i> Excel</button><button onclick="${backAction}" class="flex-1 sm:flex-none bg-white border border-slate-200 text-slate-700 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors">กลับ</button></div></div>`;
+            let html = `<div class="mb-4 sm:mb-8 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-1/3 h-full ${isDarkNow ? '' : 'bg-gradient-to-l from-emerald-50 to-transparent opacity-60'}"></div><div class="relative z-10 flex gap-3 items-center"><div class="w-12 h-12 sm:w-20 sm:h-20 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-full flex items-center justify-center text-white text-xl sm:text-3xl shadow-lg border-2 sm:border-4 ${isDarkNow ? 'border-[#141e33]' : 'border-white'} shrink-0"><i class="fas fa-book"></i></div><div><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800 tracking-tight leading-tight">${subject.name}</h2><p class="text-slate-600 font-bold mt-1 sm:mt-2 flex flex-wrap items-center gap-1 sm:gap-3"><span class="bg-emerald-100 text-emerald-900 px-2 sm:px-4 py-0.5 sm:py-1.5 rounded-md sm:rounded-xl text-[10px] sm:text-sm shadow-sm">ห้อง ${formatRoomName(subject.roomId)}</span><span class="bg-slate-100 text-slate-700 px-2 sm:px-4 py-0.5 sm:py-1.5 rounded-md sm:rounded-xl text-[10px] sm:text-sm shadow-sm"><i class="fas fa-chalkboard-teacher mr-1"></i> ${subject.teacher || '-'}${subject.teacher2 ? ' / ' + subject.teacher2 : ''}</span></p></div></div><div class="relative z-10 flex flex-wrap gap-1.5 sm:gap-3 w-full lg:w-auto mt-2 lg:mt-0">${(isAdmin && currentUser && currentUser.role === 'super_admin') ? (isSummaryLocked ? `<button disabled title="เทอมนี้ถูกล็อคข้อมูลไว้" class="flex-1 sm:flex-none bg-slate-100 text-slate-400 border border-slate-200 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold cursor-not-allowed"><i class="fas fa-lock"></i> ล้าง</button>` : `<button onclick="window.resetSubjectAttendance('${subjectId}')" class="flex-1 sm:flex-none bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors" title="เฉพาะ Super Admin"><i class="fas fa-redo"></i> ล้าง</button><button onclick="window.openResetByDateModal('${subjectId}')" class="flex-1 sm:flex-none bg-orange-50 hover:bg-orange-100 text-orange-600 border border-orange-200 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors" title="ล้างเฉพาะวันที่ต้องการ - ไม่กระทบวันอื่น"><i class="fas fa-calendar-times"></i> ล้างเฉพาะวัน</button>`) : ''}${isSummaryAttendanceLocked ? `<button disabled title="ไม่สามารถเช็คชื่อได้ในขณะนี้" class="flex-1 sm:flex-none bg-slate-100 text-slate-400 border border-slate-200 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold cursor-not-allowed"><i class="fas fa-lock"></i> ล็อคแล้ว</button>` : `<button onclick="window.navigate('attendance', {subjectId: '${subjectId}', fromTeacherDash: ${fromTeacherDash}})" class="flex-1 sm:flex-none bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors"><i class="fas fa-edit"></i> แก้ไข</button>`}<button onclick="window.downloadInfographicPDF('${subjectId}')" class="flex-1 sm:flex-none bg-purple-600 hover:bg-purple-700 text-white border border-purple-700 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors"><i class="fas fa-file-pdf"></i> PDF</button><button onclick="window.exportSubjectExcel('${subjectId}')" class="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors"><i class="fas fa-file-excel"></i> Excel</button><button onclick="${backAction}" class="flex-1 sm:flex-none bg-white border border-slate-200 text-slate-700 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors">กลับ</button></div></div>`;
             
             html += `<div class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 overflow-hidden p-3 sm:p-8"><div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 sm:mb-6 gap-2"><h3 class="text-lg sm:text-3xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-table text-indigo-500"></i> บันทึกเวลาเรียน</h3><div class="bg-slate-100 px-3 py-1.5 sm:px-5 sm:py-3 rounded-xl text-slate-600 font-bold border border-slate-200 shadow-inner text-xs sm:text-base w-full sm:w-auto text-center"><i class="fas fa-history text-slate-400"></i> สอนแล้ว: <span class="text-indigo-600 text-base sm:text-2xl font-black">${totalClasses}</span> ครั้ง</div></div><div class="overflow-x-auto rounded-xl border border-slate-200 shadow-sm relative max-h-[600px] w-full"><table class="w-full text-left border-collapse min-w-[500px] sm:min-w-[700px] text-[10px] sm:text-sm"><thead class="sticky top-0 z-30 shadow-sm bg-slate-100"><tr class="bg-slate-100 text-slate-700 border-b-2 border-slate-300 uppercase tracking-wider"><th class="p-2 sm:p-4 font-extrabold w-[40px] sm:w-[60px] min-w-[40px] sm:min-w-[60px] text-center border-r border-slate-300 sticky left-0 bg-slate-100 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">เลขที่</th><th class="p-2 sm:p-4 font-extrabold w-[120px] sm:w-[200px] min-w-[120px] sm:min-w-[200px] border-r border-slate-300 sticky left-[40px] sm:left-[60px] bg-slate-100 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">ชื่อ-นามสกุล</th>`;
             if (totalClasses === 0) { html += `<th class="p-4 font-bold text-center text-slate-400">ยังไม่มีข้อมูล</th>`;
@@ -1557,7 +1640,7 @@
             let monthlyStats = { 'มา':0, 'ร่วมกิจกรรม':0, 'สาย':0, 'ลาป่วย':0, 'ลากิจ':0, 'ขาด':0, 'โดดเรียน':0 };
             let weeklyStats = {};
             for(let i=1; i<=5; i++) weeklyStats[i] = { 'มา':0, 'ร่วมกิจกรรม':0, 'สาย':0, 'ลาป่วย':0, 'ลากิจ':0, 'ขาด':0, 'โดดเรียน':0 };
-            filteredDates.forEach(d => { const status = dailyRecords[d].status; if(status && monthlyStats[status] !== undefined) monthlyStats[status]++; const dayNum = parseInt(d.split('-')[2]); let week = Math.ceil(dayNum / 7); if(week > 5) week = 5; if(status && weeklyStats[week][status] !== undefined) weeklyStats[week][status]++; });
+            filteredDates.forEach(d => { const status = dailyRecords[d].status; if(status && monthlyStats[status] !== undefined) monthlyStats[status]++; const week = getWeekOfMonth(d); if(status && weeklyStats[week][status] !== undefined) weeklyStats[week][status]++; });
             const monthNames = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
             const displayMonthYear = `${monthNames[parseInt(selectedMonth.split('-')[1])-1]} ${parseInt(selectedMonth.split('-')[0])+543}`;
             const statusBadge = student.status === 'resigned' ? `<span class="bg-rose-100 text-rose-800 px-2 py-0.5 rounded text-[10px] border border-rose-200 font-black">ออก/ย้าย</span>` : '';
@@ -1631,7 +1714,7 @@
                 roomStudents.forEach(st => {
                     let sStats = { 'มา':0, 'ร่วมกิจกรรม':0, 'สาย':0, 'ลาป่วย':0, 'ลากิจ':0, 'ขาด':0, 'โดดเรียน':0 }, wStats = { 1:0, 2:0, 3:0, 4:0, 5:0 };
                     let incompleteDays = []; // วันที่ "มา" แต่เข้าเรียนไม่ครบ (>= เกณฑ์คาบที่ตั้งไว้) เฉพาะในเดือนนี้ - ใช้แสดงผลในตาราง
-                    Object.keys(roomDailyRaw[st.id]).sort().forEach(date => { const dayResult = calculateDailyStatus(roomDailyRaw[st.id][date]); const dayStatus = dayResult.status; if (dayStatus) { sStats[dayStatus]++; if (dayStatus === 'มา' || dayStatus === 'ร่วมกิจกรรม' || dayStatus === 'สาย') { const dayNum = parseInt(date.split('-')[2]); let week = Math.ceil(dayNum / 7); if (week > 5) week = 5; wStats[week]++; } if (dayResult.incomplete) incompleteDays.push({ date, missingCount: dayResult.missingCount }); } });
+                    Object.keys(roomDailyRaw[st.id]).sort().forEach(date => { const dayResult = calculateDailyStatus(roomDailyRaw[st.id][date]); const dayStatus = dayResult.status; if (dayStatus) { sStats[dayStatus]++; if (dayStatus === 'มา' || dayStatus === 'ร่วมกิจกรรม' || dayStatus === 'สาย') { const week = getWeekOfMonth(date); wStats[week]++; } if (dayResult.incomplete) incompleteDays.push({ date, missingCount: dayResult.missingCount }); } });
                     // เช็คแยกจากข้อมูลขยาย (ย้อนไปถึงเดือนก่อนได้) ว่ามีวันไหนครบเกณฑ์ "3 วันใน 1 สัปดาห์" ไหม โดยนับเฉพาะวันตัดสินที่ตกในเดือนนี้
                     const extIncompleteDatesSorted = Object.keys(roomDailyRawExt[st.id]).sort().filter(date => calculateDailyStatus(roomDailyRawExt[st.id][date]).incomplete);
                     const triggerDatesThisMonth = findIncompleteTriggerDates(extIncompleteDatesSorted).filter(d => d.startsWith(selectedMonth));
@@ -1677,9 +1760,12 @@
                         html += `<tr class="${bg} hover:bg-slate-100 transition-colors"><td class="p-1.5 sm:p-2 text-center sticky left-0 z-10 ${bgForSticky} border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] font-black text-slate-500">${row.student.number}</td><td class="p-1.5 sm:p-3 text-left sticky left-[40px] sm:left-[60px] z-10 ${bgForSticky} border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] font-bold text-[9px] sm:text-sm break-words"><div class="flex items-center flex-wrap">${row.student.name} ${isRes?'<span class="text-[8px] bg-rose-100 text-rose-700 px-1 rounded border border-rose-200 ml-1">ออก</span>':''}</div>${alertHtml}</td><td class="p-1.5">${row.weekly[1]||'-'}</td><td class="p-1.5">${row.weekly[2]||'-'}</td><td class="p-1.5">${row.weekly[3]||'-'}</td><td class="p-1.5">${row.weekly[4]||'-'}</td><td class="p-1.5 border-r border-slate-200">${row.weekly[5]||'-'}</td><td class="p-1.5 font-black text-emerald-600 bg-emerald-50/30">${valid||'-'}</td><td class="p-1.5 font-black text-cyan-600">${row.monthly['ร่วมกิจกรรม']||'-'}</td><td class="p-1.5 font-black text-amber-500">${row.monthly['สาย']||'-'}</td><td class="p-1.5 font-black text-blue-500">${row.monthly['ลาป่วย']||'-'}</td><td class="p-1.5 font-black text-indigo-500">${row.monthly['ลากิจ']||'-'}</td><td class="p-1.5 font-black text-rose-500">${row.monthly['ขาด']||'-'}</td><td class="p-1.5 font-black text-purple-600">${row.monthly['โดดเรียน']||'-'}</td></tr>`;
                     });
                 }
-                html += `</tbody></table></div></div>`;
-
-                // ===== [ย้ายมาจากด้านบน] กราฟสรุปสถิติการมาเรียนของห้อง - แสดงผลอย่างเดียว ไม่มีปุ่มส่งออกแล้ว (ย้ายไปรวมกับสมุดทะเบียนแทน) =====
+                html += `</tbody></table></div>`;
+                // ===== [ใหม่] คำชี้แจงใต้ตาราง บอกช่วงวันที่จริงของแต่ละสัปดาห์ (นับแบบปฏิทินจริง เริ่มวันจันทร์เสมอ) =====
+                const [legendYear, legendMonth] = selectedMonth.split('-').map(Number);
+                const weekRanges = getMonthWeekRanges(legendYear, legendMonth);
+                html += `<div class="mt-2 px-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] sm:text-[11px] text-slate-400 font-medium"><span class="font-bold text-slate-500"><i class="far fa-calendar-alt"></i> ช่วงวันที่ของแต่ละสัปดาห์:</span>${[1,2,3,4,5].filter(w => weekRanges[w]).map(w => `<span>สัปดาห์ ${w} = วันที่ ${weekRanges[w].start}${weekRanges[w].end !== weekRanges[w].start ? '-' + weekRanges[w].end : ''}</span>`).join('')}</div>`;
+                html += `</div>`;
                 html += `<div id="roomChartInfographicSection" class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-6 mt-4 sm:mt-6"><h3 class="text-sm sm:text-lg font-extrabold text-slate-800 flex items-center gap-2 mb-3"><i class="fas fa-chart-pie text-emerald-500"></i> กราฟสรุปสถิติการมาเรียนของห้อง เดือน${displayMonthYear}</h3>${roomTotalRecorded === 0 ? `<div class="text-center text-slate-400 py-8 text-xs sm:text-sm font-medium"><i class="fas fa-info-circle"></i> ยังไม่มีข้อมูลการเช็คชื่อในเดือนนี้</div>` : `<div class="relative h-64 sm:h-72"><canvas id="roomMonthlyChart"></canvas></div><div id="roomMonthlyChartLegend" class="mt-4"></div>`}</div>`;
 
                 // ===== ส่วนแยก: นักเรียนที่ต้องติดตาม (รวม 2 เกณฑ์: เข้าเรียนไม่ครบ + สาย/ขาดเกินเกณฑ์ต่อเดือน) =====
@@ -2040,6 +2126,7 @@ content.innerHTML = html;
                                 </div>
                                 <div class="flex items-center gap-2 shrink-0 text-slate-500">
                                     <span>${formatRoomName(ev.roomId)}</span>
+                                    <span class="font-bold text-slate-700"><i class="far fa-calendar-alt"></i> ${new Date(ev.date).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
                                     <span>คาบ ${ev.period}</span>
                                     <span class="font-bold text-indigo-600"><i class="far fa-clock"></i> ${firstCheckStr}</span>
                                 </div>
@@ -3752,6 +3839,10 @@ content.innerHTML = html;
                 htmlContainer += `<table class="w-full text-center border-collapse border border-slate-500 text-base mb-6"><thead class="bg-slate-100"><tr><th class="border border-slate-500 p-3" colspan="2">สรุปสถิติประจำเดือน</th></tr></thead><tbody class="divide-y divide-slate-400 font-bold"><tr><td class="border border-slate-500 p-3 w-1/2 text-right pr-6">มาเรียน</td><td class="border border-slate-500 p-3 w-1/2 text-left pl-6 text-emerald-600">${data.monthly['มา']} ครั้ง</td></tr><tr><td class="border border-slate-500 p-3 text-right pr-6">ร่วมกิจกรรม</td><td class="border border-slate-500 p-3 text-left pl-6 text-cyan-600">${data.monthly['ร่วมกิจกรรม']} ครั้ง</td></tr><tr><td class="border border-slate-500 p-3 text-right pr-6">สาย</td><td class="border border-slate-500 p-3 text-left pl-6 text-amber-600">${data.monthly['สาย']} ครั้ง</td></tr><tr><td class="border border-slate-500 p-3 text-right pr-6">ลาป่วย</td><td class="border border-slate-500 p-3 text-left pl-6 text-blue-600">${data.monthly['ลาป่วย']} ครั้ง</td></tr><tr><td class="border border-slate-500 p-3 text-right pr-6">ลากิจ</td><td class="border border-slate-500 p-3 text-left pl-6 text-indigo-600">${data.monthly['ลากิจ']} ครั้ง</td></tr><tr><td class="border border-slate-500 p-3 text-right pr-6">ขาดเรียน</td><td class="border border-slate-500 p-3 text-left pl-6 text-rose-600">${data.monthly['ขาด']} ครั้ง</td></tr><tr><td class="border border-slate-500 p-3 text-right pr-6">โดดเรียน</td><td class="border border-slate-500 p-3 text-left pl-6 text-purple-600">${data.monthly['โดดเรียน']} ครั้ง</td></tr></tbody></table>`;
             } else if (pdfType === 'weekly') {
                 htmlContainer += `<table class="w-full text-center border-collapse border border-slate-500 text-[14px] mb-6"><thead class="bg-slate-100"><tr><th class="border border-slate-500 p-2">สัปดาห์ที่</th><th class="border border-slate-500 p-2 text-emerald-700">มา</th><th class="border border-slate-500 p-2 text-cyan-700">กิจกรรม</th><th class="border border-slate-500 p-2 text-amber-700">สาย</th><th class="border border-slate-500 p-2 text-blue-700">ลาป่วย</th><th class="border border-slate-500 p-2 text-indigo-700">ลากิจ</th><th class="border border-slate-500 p-2 text-rose-700">ขาด</th><th class="border border-slate-500 p-2 text-purple-700">โดด</th></tr></thead><tbody class="divide-y divide-slate-400 font-bold">${[1,2,3,4,5].map(w => `<tr><td class="border border-slate-500 p-2 bg-slate-50">สัปดาห์ ${w}</td><td class="border border-slate-500 p-2 text-emerald-600">${data.weekly[w]['มา']}</td><td class="border border-slate-500 p-2 text-cyan-600">${data.weekly[w]['ร่วมกิจกรรม']}</td><td class="border border-slate-500 p-2 text-amber-600">${data.weekly[w]['สาย']}</td><td class="border border-slate-500 p-2 text-blue-600">${data.weekly[w]['ลาป่วย']}</td><td class="border border-slate-500 p-2 text-indigo-600">${data.weekly[w]['ลากิจ']}</td><td class="border border-slate-500 p-2 text-rose-600">${data.weekly[w]['ขาด']}</td><td class="border border-slate-500 p-2 text-purple-600">${data.weekly[w]['โดดเรียน']}</td></tr>`).join('')}</tbody></table>`;
+                // ===== [ใหม่] คำชี้แจงช่วงวันที่ของแต่ละสัปดาห์ ใต้ตาราง (นับแบบปฏิทินจริง เริ่มวันจันทร์เสมอ) =====
+                const [pdfWkYear, pdfWkMonth] = month.split('-').map(Number);
+                const pdfWeekRanges = getMonthWeekRanges(pdfWkYear, pdfWkMonth);
+                htmlContainer += `<p class="text-[11px] text-slate-500 font-medium mb-6" style="margin-top:-16px;">ช่วงวันที่ของแต่ละสัปดาห์: ${[1,2,3,4,5].filter(w => pdfWeekRanges[w]).map(w => `สัปดาห์ ${w} = วันที่ ${pdfWeekRanges[w].start}${pdfWeekRanges[w].end !== pdfWeekRanges[w].start ? '-' + pdfWeekRanges[w].end : ''}`).join(' / ')}</p>`;
             } else if (pdfType === 'daily') {
                 htmlContainer += `<table class="w-full text-center border-collapse border border-slate-500 text-[13px] mb-6"><thead class="bg-slate-100"><tr><th class="border border-slate-500 p-2 w-1/2">วันที่</th><th class="border border-slate-500 p-2 w-1/2">สถานะการมาเรียน</th></tr></thead><tbody class="divide-y divide-slate-400 font-bold">${data.dates.map(d => { const stat = data.daily[d].status; let cl = ''; if(stat==='มา'||stat==='ร่วมกิจกรรม') cl='text-emerald-600'; else if(stat==='สาย') cl='text-amber-600'; else cl='text-rose-600'; return `<tr><td class="border border-slate-500 p-2">${d.split('-').reverse().join('/')}</td><td class="border border-slate-500 p-2 ${cl}">${stat}</td></tr>`; }).join('')}${data.dates.length === 0 ? `<tr><td class="border border-slate-500 p-4 text-slate-400" colspan="2">ไม่มีข้อมูลในเดือนนี้</td></tr>` : ''}</tbody></table>`;
             }
