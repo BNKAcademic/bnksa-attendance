@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>ตั้งรหัสผ่าน Super Admin ใหม่</title>
+<style>
+  body { font-family: 'Segoe UI', Tahoma, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; background: #f8fafc; color: #1e293b; }
+  .card { background: white; border-radius: 16px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 16px; }
+  label { display: block; font-weight: bold; font-size: 13px; margin-bottom: 4px; margin-top: 12px; }
+  input { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; box-sizing: border-box; font-family: monospace; }
+  button { background: #4f46e5; color: white; border: none; padding: 12px 20px; border-radius: 10px; font-weight: bold; cursor: pointer; font-size: 15px; margin-top: 16px; }
+  button:hover { background: #4338ca; }
+  button:disabled { background: #94a3b8; cursor: not-allowed; }
+  #log { background: #0f172a; color: #e2e8f0; padding: 16px; border-radius: 10px; font-family: monospace; font-size: 13px; white-space: pre-wrap; margin-top: 16px; }
+  .ok { color: #4ade80; } .err { color: #f87171; } .warn { color: #fbbf24; }
+</style>
+</head>
+<body>
+<h1>🔑 ตั้งรหัสผ่าน Super Admin ใหม่ (ใช้ครั้งเดียว)</h1>
+<div class="card">
+  <p style="font-size:13px;color:#64748b;">เครื่องมือนี้จะเข้ารหัสรหัสผ่านใหม่ด้วย SHA-256 แล้วบันทึกทับบัญชี Super Admin โดยตรง <b>ใช้เสร็จแล้วลบไฟล์นี้ทิ้งได้เลย</b> (มีรหัสผ่านฝังอยู่ในไฟล์)</p>
+  <label>URL ระบบ (Cloudflare Worker)</label>
+  <input type="text" id="workerUrl" placeholder="https://bnksa-attendance-api.xxxxx.workers.dev">
+  <label>Username ใหม่</label>
+  <input type="text" id="newUsername" value="BNKAdminAll">
+  <label>Password ใหม่</label>
+  <input type="text" id="newPassword" value="042499078Bnk@">
+  <button id="startBtn" onclick="startUpdate()">🚀 ตั้งค่าใหม่</button>
+  <div id="log" style="display:none;"></div>
+</div>
+<script>
+function log(msg, cls) {
+  const el = document.getElementById('log'); el.style.display = 'block';
+  const line = document.createElement('div'); if (cls) line.className = cls;
+  line.textContent = msg; el.appendChild(line); el.scrollTop = el.scrollHeight;
+}
+async function sha256Hex(text) {
+  const enc = new TextEncoder().encode(text);
+  const hashBuf = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+async function startUpdate() {
+  const url = document.getElementById('workerUrl').value.trim();
+  const newUsername = document.getElementById('newUsername').value.trim();
+  const newPassword = document.getElementById('newPassword').value;
+  const btn = document.getElementById('startBtn');
+  document.getElementById('log').innerHTML = '';
+  if (!url || !newUsername || !newPassword) { log('กรุณากรอกข้อมูลให้ครบทุกช่อง', 'err'); return; }
+  btn.disabled = true;
+  try {
+    log('ขั้นที่ 1/3: กำลังดึงข้อมูลปัจจุบัน...');
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!data.settings || !Array.isArray(data.settings.users)) throw new Error('ดึงข้อมูลผู้ใช้งานไม่สำเร็จ - โครงสร้างข้อมูลไม่ถูกต้อง');
+    const superAdmin = data.settings.users.find(u => u.role === 'super_admin');
+    if (!superAdmin) throw new Error('ไม่พบบัญชี Super Admin ในระบบ');
+    log(`✓ พบบัญชี Super Admin เดิม: ${superAdmin.username}`, 'ok');
+
+    log('ขั้นที่ 2/3: กำลังเข้ารหัสรหัสผ่านใหม่...');
+    const newHash = await sha256Hex(newPassword);
+    superAdmin.username = newUsername;
+    superAdmin.password = newHash;
+    log('✓ เข้ารหัสเรียบร้อย (SHA-256)', 'ok');
+
+    log('ขั้นที่ 3/3: กำลังบันทึกกลับเข้าระบบ...');
+    const savePayload = { settings: data.settings, teachers: data.teachers, subjects: data.subjects, students: data.students, followUps: data.followUps || [] };
+    const saveRes = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(savePayload) });
+    const saveData = await saveRes.json();
+    if (saveData.status === 'success') {
+      log(`✅ ตั้งค่าสำเร็จ! เข้าสู่ระบบด้วย Username: ${newUsername} ได้เลย`, 'ok');
+    } else {
+      log(`✗ บันทึกไม่สำเร็จ: ${saveData.message}`, 'err');
+    }
+  } catch (err) {
+    log(`✗ เกิดข้อผิดพลาด: ${err.message || err}`, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+</script>
+</body>
+</html>
