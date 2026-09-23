@@ -26,6 +26,14 @@
             'โดดเรียน': { color: 'text-purple-700', bg: 'bg-purple-50', border: 'border-purple-200', activeBg: 'bg-purple-600', icon: 'fa-walking' }
         };
         const STATUS_HEX = { 'มา': '#10b981', 'ร่วมกิจกรรม': '#06b6d4', 'สาย': '#f59e0b', 'ลาป่วย': '#3b82f6', 'ลากิจ': '#6366f1', 'ขาด': '#f43f5e', 'โดดเรียน': '#9333ea' };
+        // ===== [ใหม่] ประเภทของวันที่ในปฏิทิน: วันหยุด (ไม่นับเป็นวันเรียนจริง) / วันกิจกรรม / วันสอบ (ยังนับเป็นวันเรียนจริง เช็คชื่อได้ปกติ) =====
+        const HOLIDAY_TYPE_META = {
+            holiday: { label: 'วันหยุด', activeBtn: 'border-rose-500 bg-rose-50 text-rose-700', dotHex: '#f43f5e', calCard: 'bg-rose-50 border-rose-300', calText: 'text-rose-600', calDot: 'text-rose-400', noteBg: 'bg-rose-50 border-2 border-rose-300', noteIconBg: 'bg-rose-500', noteText: 'text-rose-700' },
+            activity: { label: 'วันกิจกรรม', activeBtn: 'border-sky-500 bg-sky-50 text-sky-700', dotHex: '#0ea5e9', calCard: 'bg-sky-50 border-sky-300', calText: 'text-sky-600', calDot: 'text-sky-400', noteBg: 'bg-sky-50 border-2 border-sky-300', noteIconBg: 'bg-sky-500', noteText: 'text-sky-700' },
+            exam: { label: 'วันสอบ', activeBtn: 'border-amber-500 bg-amber-50 text-amber-700', dotHex: '#f59e0b', calCard: 'bg-amber-50 border-amber-300', calText: 'text-amber-600', calDot: 'text-amber-400', noteBg: 'bg-amber-50 border-2 border-amber-300', noteIconBg: 'bg-amber-500', noteText: 'text-amber-700' },
+            makeup: { label: 'สอนชดเชย', activeBtn: 'border-violet-500 bg-violet-50 text-violet-700', dotHex: '#8b5cf6', calCard: 'bg-violet-50 border-violet-300', calText: 'text-violet-600', calDot: 'text-violet-400', noteBg: 'bg-violet-50 border-2 border-violet-300', noteIconBg: 'bg-violet-500', noteText: 'text-violet-700' },
+        };
+        const HOLIDAY_DURATION_LABEL = { morning: 'ครึ่งเช้า', afternoon: 'ครึ่งบ่าย', full: 'ตลอดวัน' };
         if (typeof Chart !== 'undefined' && typeof ChartDataLabels !== 'undefined') { Chart.register(ChartDataLabels); }
         // ===== เครื่องมือสร้างกราฟ (Chart.js) รองรับ Dark Mode และมือถือ พร้อมเปอร์เซ็นต์บนกราฟ =====
         function percentLabelFormatter(value, context) {
@@ -462,9 +470,12 @@
 
         // ตาข่ายนิรภัยสุดท้าย: ถ้ามี error ที่ไม่ถูกดักจับเกิดขึ้นระหว่างการทำงาน และทำให้เนื้อหาหลักว่างเปล่า
         // ให้ดึงกลับมาที่หน้า dashboard แทนที่จะปล่อยให้จอขาวค้าง
-        window.addEventListener('error', function() {
+        window.addEventListener('error', function(event) {
             const mc = document.getElementById('mainContent');
             if (mc && isDbInitialized && mc.innerHTML.trim() === '') {
+                // ===== [ชั่วคราว] แสดงรายละเอียด error จริงๆ ออกมาเป็นป็อปอัพ เพื่อช่วยตามหาสาเหตุที่ทำให้บางห้องเด้งกลับหน้าหลัก =====
+                console.error('[DEBUG เด้งกลับหน้าหลัก]', event.message, 'ที่บรรทัด', event.lineno, 'คอลัมน์', event.colno, event.error && event.error.stack);
+                alert('[DEBUG] เกิดข้อผิดพลาด: ' + event.message + '\n\nบรรทัด: ' + event.lineno + '\n\n' + (event.error && event.error.stack ? event.error.stack.split('\n').slice(0,3).join('\n') : 'ไม่มีรายละเอียดเพิ่มเติม'));
                 try { renderDashboard(); } catch (e) {}
             }
         });
@@ -937,6 +948,12 @@
         function getHolidayForDate(dateStr) {
             return (settings.holidays || []).find(h => h.date === dateStr) || null;
         }
+        // ===== [ใหม่] หา "วันในสัปดาห์ที่ควรใช้หาตารางสอน" ของวันที่ที่ให้มา - ปกติคือวันจริงตามปฏิทิน แต่ถ้าวันนั้นตั้งเป็น "สอนชดเชย" (type: makeup) จะใช้ตารางของวันที่ระบุไว้แทนทั้งวัน =====
+        function getEffectiveDayOfWeek(dateStr) {
+            const holiday = getHolidayForDate(dateStr);
+            if (holiday && holiday.type === 'makeup' && holiday.useDayOfWeek) return parseInt(holiday.useDayOfWeek);
+            return new Date(dateStr).getDay() || 7; // จันทร์=1 ... เสาร์=6, อาทิตย์ 0->7 (ปกติจะไม่มีตารางวันเสาร์-อาทิตย์อยู่แล้ว เว้นแต่เป็นวันสอนชดเชย)
+        }
         function todayDateStr() {
             const d = new Date();
             return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -946,7 +963,13 @@
             const textEl = document.getElementById('holidayBarText');
             if (!bar || !textEl) return;
             const todayHoliday = getHolidayForDate(todayDateStr());
-            if (todayHoliday) { textEl.innerText = `วันนี้เป็นวันหยุด: ${todayHoliday.label}`; bar.classList.remove('hidden'); }
+            if (todayHoliday) {
+                const type = todayHoliday.type || 'holiday';
+                const durLabel = todayHoliday.duration ? ` (${HOLIDAY_DURATION_LABEL[todayHoliday.duration] || ''})` : '';
+                const prefix = type === 'holiday' ? 'วันนี้เป็นวันหยุด' : (type === 'activity' ? 'วันนี้มีกิจกรรม' : 'วันนี้มีสอบ');
+                textEl.innerText = `${prefix}: ${todayHoliday.label}${durLabel}`;
+                bar.classList.remove('hidden');
+            }
             else { bar.classList.add('hidden'); textEl.innerText = ''; }
         }
 
@@ -1351,7 +1374,11 @@
         function openClassroom(roomId, dayIndex = null) {
             const isDarkNow = document.documentElement.classList.contains('dark');
             currentRoomId = roomId;
-            if (dayIndex === null) { let today = new Date().getDay(); dayIndex = (today >= 1 && today <= 5) ? today : 1; }
+            if (dayIndex === null) {
+                let today = new Date().getDay() || 7; // จันทร์=1 ... อาทิตย์=7
+                if (today >= 1 && today <= 5) dayIndex = today;
+                else { const h = getHolidayForDate(localDateStr()); dayIndex = (h && h.type === 'makeup') ? today : 1; } // เสาร์-อาทิตย์: ถ้าวันนี้มีสอนชดเชยพอดี ให้เปิดแท็บนั้นเลย ไม่งั้น default ไปจันทร์
+            }
             // ===== [ใหม่] แอบโหลดข้อมูลเช็คชื่อของห้องนี้ไว้ล่วงหน้าเงียบๆ (ไม่บล็อกการแสดงผลหน้านี้) เผื่อผู้ใช้กด "เช็คชื่อ"/"สรุป" ต่อ จะได้ไม่ต้องรอโหลดซ้ำ =====
             const preloadTerm = adminTerm ? adminTerm() : settings.term, preloadYear = adminYear ? adminYear() : settings.year;
             ensureAttendanceLoadedForRoom(preloadTerm, preloadYear, roomId);
@@ -1365,35 +1392,43 @@
             const roomSubjects = getRoomSubjects(roomId);
             const roomStudents = getRoomStudents(roomId).sort((a, b) => parseInt(a.number) - parseInt(b.number));
             const activeStudents = roomStudents.filter(s => s.status !== 'resigned');
+            // ===== [ใหม่] หาวันจันทร์ของสัปดาห์นี้ไว้ล่วงหน้า (ใช้คำนวณวันที่จริงของทุกแท็บ รวมถึงเสาร์-อาทิตย์ที่อาจมีสอนชดเชย) =====
+            const todayForWeek = new Date(); const todayDowForWeek = todayForWeek.getDay() || 7; // จันทร์=1 ... อาทิตย์=7
+            const mondayOfWeek = new Date(todayForWeek); mondayOfWeek.setDate(todayForWeek.getDate() - (todayDowForWeek - 1));
+            const dateForDayIndex = (idx) => { const d = new Date(mondayOfWeek); d.setDate(mondayOfWeek.getDate() + (idx - 1)); return d; };
+            // ===== [ใหม่] เช็คว่าเสาร์(6)/อาทิตย์(7) ของสัปดาห์นี้ มีการตั้ง "สอนชดเชย" ไว้ไหม - ถ้ามีให้โผล่เป็นแท็บเพิ่มด้วย (ปกติมีแค่จันทร์-ศุกร์) =====
+            const weekendMakeupDays = [6, 7].filter(idx => { const h = getHolidayForDate(localDateStr(dateForDayIndex(idx))); return h && h.type === 'makeup'; });
+            const visibleDayIndexes = [1, 2, 3, 4, 5, ...weekendMakeupDays];
+            // ===== [ใหม่] คำนวณวันที่จริงของแท็บที่กำลังดูอยู่ก่อน แล้วค่อยหา "วันที่ควรใช้หาตารางสอน" (เผื่อวันนี้ตั้งเป็นสอนชดเชย จะได้ใช้ตารางที่ยืมมาแทน) =====
+            const dateToPass = localDateStr(dateForDayIndex(dayIndex));
+            const effectiveDayForSchedule = getEffectiveDayOfWeek(dateToPass);
+            const makeupInfo = getHolidayForDate(dateToPass);
+            const isMakeupDay = makeupInfo && makeupInfo.type === 'makeup';
             const daySubjects = [];
-            roomSubjects.forEach(s => { if(!s.schedules) return; const schedsOnDay = s.schedules.filter(sch => parseInt(sch.day) === dayIndex); schedsOnDay.forEach(sch => { daySubjects.push({ ...s, currentPeriod: parseInt(sch.period) }); }); });
+            roomSubjects.forEach(s => { if(!s.schedules) return; const schedsOnDay = s.schedules.filter(sch => parseInt(sch.day) === effectiveDayForSchedule); schedsOnDay.forEach(sch => { daySubjects.push({ ...s, currentPeriod: parseInt(sch.period) }); }); });
             let html = `<div class="mb-4 sm:mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-48 sm:w-64 h-full ${isDarkNow ? '' : 'bg-gradient-to-l from-indigo-50 to-transparent opacity-50'}"></div><div class="relative z-10"><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2 sm:gap-4"><div class="w-10 h-10 sm:w-14 sm:h-14 bg-indigo-600 text-white rounded-xl sm:rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-200"><i class="fas fa-door-open text-lg sm:text-2xl"></i></div> ห้องเรียน ${roomNameStr}</h2><div class="flex flex-wrap items-center gap-2 mt-3 text-[10px] sm:text-sm"><p class="text-slate-600 bg-slate-100 px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg border border-slate-200 font-bold flex items-center gap-1 sm:gap-2"><i class="fas fa-user-tie text-indigo-500"></i> <span class="hidden sm:inline">ที่ปรึกษา: </span><span class="text-indigo-700">${advisorText}</span></p><p class="text-slate-600 bg-slate-100 px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg border border-slate-200 font-bold flex items-center gap-1 sm:gap-2"><i class="fas fa-users text-blue-500"></i> <span class="hidden sm:inline">นักเรียน: </span><span class="text-blue-700">${activeStudents.length} คน</span></p></div></div><div class="relative z-10 flex gap-2 w-full sm:w-auto"><button onclick="window.navigate('room_summary', {roomId: '${roomId}', tab: 'daily'})" class="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 px-3 py-2 sm:px-6 sm:py-3 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-xs sm:text-base"><i class="fas fa-chart-bar"></i> ภาพรวมห้อง</button><button onclick="window.navigate('dashboard')" class="flex-1 sm:flex-none bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-2 sm:px-6 sm:py-3 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-xs sm:text-base"><i class="fas fa-arrow-left"></i> กลับ</button></div></div>`;
             const todayFullThaiDateStr = new Date().toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
             const todayProminentDateStr = `วันนี้ ${todayFullThaiDateStr}`;
             html += `<div class="bg-white rounded-2xl sm:rounded-3xl shadow-sm border border-slate-200 p-3 sm:p-8 mb-6 sm:mb-10"><div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-4 sm:mb-8"><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800 flex items-center gap-2 flex-wrap"><i class="far fa-calendar-alt text-blue-500 text-xl sm:text-3xl"></i> ตารางเรียน <span class="text-xs sm:text-base font-black ${isDarkNow ? 'bg-indigo-500/20 text-indigo-300 border-indigo-400/40' : 'bg-indigo-50 text-indigo-700 border-indigo-200'} border px-2.5 py-1 rounded-full">${todayProminentDateStr}</span></h3><div class="flex overflow-x-auto gap-1.5 sm:gap-2 pb-2 lg:pb-0 w-full lg:w-auto">`;
-            for(let i = 1; i <= 5; i++) {
-                // คำนวณวันที่ของแต่ละวัน (จันทร์-ศุกร์) ของสัปดาห์ปัจจุบัน - อิงจากวันนี้จริง จะขยับตามสัปดาห์ให้อัตโนมัติทุกครั้งที่เปิดหน้า
-                const todayForWeek = new Date(); const todayDowForWeek = todayForWeek.getDay() || 7; // จันทร์=1 ... อาทิตย์=7
-                const mondayOfWeek = new Date(todayForWeek); mondayOfWeek.setDate(todayForWeek.getDate() - (todayDowForWeek - 1));
-                const dateForThisDay = new Date(mondayOfWeek); dateForThisDay.setDate(mondayOfWeek.getDate() + (i - 1));
+            for(let i of visibleDayIndexes) {
+                const dateForThisDay = dateForDayIndex(i);
                 const dayDateLabel = dateForThisDay.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
-                // สีประจำวันแบบไทย: จันทร์เหลือง อังคารชมพู พุธเขียว พฤหัสส้ม ศุกร์ฟ้า
+                // สีประจำวันแบบไทย: จันทร์เหลือง อังคารชมพู พุธเขียว พฤหัสส้ม ศุกร์ฟ้า เสาร์ม่วง(สอนชดเชย) อาทิตย์แดง(สอนชดเชย)
                 const dayColorMap = {
                     1: { active: 'bg-yellow-500 border-yellow-500', text: 'text-yellow-700', hoverBorder: 'hover:border-yellow-300' },
                     2: { active: 'bg-pink-500 border-pink-500', text: 'text-pink-700', hoverBorder: 'hover:border-pink-300' },
                     3: { active: 'bg-green-600 border-green-600', text: 'text-green-700', hoverBorder: 'hover:border-green-300' },
                     4: { active: 'bg-orange-500 border-orange-500', text: 'text-orange-700', hoverBorder: 'hover:border-orange-300' },
-                    5: { active: 'bg-sky-500 border-sky-500', text: 'text-sky-700', hoverBorder: 'hover:border-sky-300' }
+                    5: { active: 'bg-sky-500 border-sky-500', text: 'text-sky-700', hoverBorder: 'hover:border-sky-300' },
+                    6: { active: 'bg-violet-500 border-violet-500', text: 'text-violet-700', hoverBorder: 'hover:border-violet-300' },
+                    7: { active: 'bg-violet-600 border-violet-600', text: 'text-violet-700', hoverBorder: 'hover:border-violet-300' },
                 };
+                const dayNameFor = (idx) => idx <= 5 ? daysLabel[idx-1].replace('วัน','') : (idx === 6 ? 'เสาร์*' : 'อาทิตย์*');
                 const dc = dayColorMap[i];
                 const activeClass = (i === dayIndex) ? `${dc.active} text-white shadow-md` : `bg-white border-slate-200 text-slate-700 hover:bg-slate-50 ${dc.hoverBorder}`;
-                html += `<button onclick="window.navigate('classroom', {roomId: '${roomId}', dayIndex: ${i}})" class="px-2 sm:px-3 lg:px-5 py-1.5 sm:py-2 rounded-lg border font-bold whitespace-nowrap transition-all flex flex-col items-center justify-center gap-0.5 flex-1 ${activeClass}"><span class="text-[8px] sm:text-[10px] font-medium opacity-80 leading-none">${dayDateLabel}</span><span class="text-[10px] sm:text-sm flex items-center gap-1 leading-none">${i === dayIndex ? '<i class="fas fa-check-circle"></i>' : ''} ${daysLabel[i-1].replace('วัน','')}</span></button>`; }
-            
-            let dObj = new Date();
-            let currentDayOfWeek = dObj.getDay(); let dateToPass = localDateStr();
-            if (currentDayOfWeek >= 1 && currentDayOfWeek <= 5) { dObj.setDate(dObj.getDate() + (dayIndex - currentDayOfWeek));
-                dateToPass = localDateStr(dObj); }
-            
+                html += `<button onclick="window.navigate('classroom', {roomId: '${roomId}', dayIndex: ${i}})" class="px-2 sm:px-3 lg:px-5 py-1.5 sm:py-2 rounded-lg border font-bold whitespace-nowrap transition-all flex flex-col items-center justify-center gap-0.5 flex-1 ${activeClass}"><span class="text-[8px] sm:text-[10px] font-medium opacity-80 leading-none">${dayDateLabel}</span><span class="text-[10px] sm:text-sm flex items-center gap-1 leading-none">${i === dayIndex ? '<i class="fas fa-check-circle"></i>' : ''} ${dayNameFor(i)}</span></button>`; }
+            if (weekendMakeupDays.length > 0) html += `<p class="w-full text-[9px] sm:text-[10px] text-violet-500 font-bold mt-1">* มีสอนชดเชยวันหยุดสุดสัปดาห์</p>`;
+            if (isMakeupDay) html += `<div class="mb-3 sm:mb-4 bg-violet-50 border-2 border-violet-300 rounded-xl px-3 py-2 sm:px-4 sm:py-3 flex items-center gap-2.5"><div class="w-8 h-8 sm:w-10 sm:h-10 bg-violet-500 text-white rounded-full flex items-center justify-center text-xs sm:text-base shrink-0"><i class="fas fa-exchange-alt"></i></div><span class="text-violet-700 font-bold text-[11px] sm:text-sm">วันนี้เป็นวันสอนชดเชย: ${makeupInfo.label} — ใช้ตารางสอนของวัน${daysLabel[effectiveDayForSchedule-1].replace('วัน','')}แทน</span></div>`;
             html += `</div></div><div class="rounded-xl border border-slate-200 shadow-sm w-full overflow-hidden"><table class="w-full text-left border-collapse table-fixed"><colgroup><col style="width:14%"><col style="width:32%"><col style="width:23%"><col style="width:31%"></colgroup><thead><tr class="bg-slate-50 text-slate-700 text-[9px] sm:text-sm border-b-2 border-slate-200 uppercase tracking-wider"><th class="p-1.5 sm:p-3 lg:p-5 font-extrabold text-center">คาบ</th><th class="p-1.5 sm:p-3 lg:p-5 font-extrabold">วิชา / กิจกรรม</th><th class="p-1.5 sm:p-3 lg:p-5 font-extrabold">ครูผู้สอน</th><th class="p-1.5 sm:p-3 lg:p-5 font-extrabold text-center">จัดการ</th></tr></thead><tbody class="divide-y divide-slate-100">`;
             timeSlots.forEach(slot => {
                 if (slot.period === -1) { html += `<tr class="bg-amber-50/70 border-y border-amber-100"><td class="p-1.5 sm:p-3 lg:p-5 text-center font-bold text-amber-600 bg-amber-100/50 text-[9px] sm:text-base"><i class="fas fa-utensils"></i></td><td class="p-1.5 sm:p-3 lg:p-5 font-black text-amber-700 text-center tracking-widest text-[11px] sm:text-lg" colspan="3">${slot.name}</td></tr>`; } else {
@@ -1431,7 +1466,7 @@
             const roomStudents = getRoomStudents(subject.roomId).sort((a, b) => parseInt(a.number) - parseInt(b.number));
             const today = passedDate || localDateStr();
             let selectedPeriod = initialPeriod;
-            if (!selectedPeriod && subject.schedules && subject.schedules.length > 0) { const todayDay = new Date(today).getDay() || 7;
+            if (!selectedPeriod && subject.schedules && subject.schedules.length > 0) { const todayDay = getEffectiveDayOfWeek(today);
                 const todaySched = subject.schedules.find(s => parseInt(s.day) === todayDay); selectedPeriod = todaySched ? todaySched.period : subject.schedules[0].period;
             }
             let tcOptions = `<option value="" disabled selected>-- เลือกครูที่มาสอนแทน --</option>`;
@@ -1454,7 +1489,7 @@
             
             html += `<div class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 overflow-hidden mb-10"><div class="bg-slate-50 border-b border-slate-200 p-2.5 sm:p-4 flex flex-wrap gap-1.5 justify-center">${Object.entries(statuses).map(([name, style]) => `<div class="flex items-center gap-1 px-1.5 sm:px-3 py-1 bg-white border border-slate-200 rounded-lg shadow-sm text-[9px] sm:text-xs font-bold text-slate-600"><div class="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-${style.activeBg.replace('bg-','')}"></div> ${name}</div>`).join('')}</div>`;
             // ===== [ใหม่] หาว่าวันนี้ (${today}) แต่ละคาบ (0-8) ห้องนี้มีวิชาอะไร และเช็คชื่อไปหรือยัง - ใช้แสดงจุดสีบอกสถานะคาบอื่นๆ ในวันเดียวกันให้ครูเห็นบริบท ไม่ต้องสลับหน้าไปดู =====
-            const dayOfWeekNumForDots = new Date(today).getDay() || 7;
+            const dayOfWeekNumForDots = getEffectiveDayOfWeek(today);
             const roomSubjectsForDots = getRoomSubjects(subject.roomId, subject.term, subject.year);
             const periodSubjectMap = {}; // period -> วิชาที่สอนคาบนี้วันนี้
             roomSubjectsForDots.forEach(s => { (s.schedules || []).forEach(sch => { if (parseInt(sch.day) === dayOfWeekNumForDots) periodSubjectMap[sch.period] = s; }); });
@@ -1497,7 +1532,7 @@
             
             window.updatePeriodDropdown = function() {
                 const dateVal = document.getElementById('attDate').value;
-                const dObj = new Date(dateVal); const dayOfWeek = dObj.getDay() || 7;
+                const dayOfWeek = getEffectiveDayOfWeek(dateVal);
                 const schedsOnDay = (subject.schedules || []).filter(s => parseInt(s.day) === dayOfWeek);
                 const selectEl = document.getElementById('attPeriod'), saveBtn = document.getElementById('saveAttBtn');
                 const noPeriodBanner = document.getElementById('attNoPeriodBanner');
@@ -1523,7 +1558,19 @@
                 const noteEl = document.getElementById('attHolidayNote'), textEl = document.getElementById('attHolidayNoteText');
                 if (!noteEl || !textEl) return;
                 const holiday = getHolidayForDate(dateVal);
-                if (holiday) { textEl.innerText = `วันที่เลือกเป็นวันหยุด: ${holiday.label} (ยังสามารถเช็คชื่อได้ตามปกติหากมีการเรียนการสอน)`; noteEl.classList.remove('hidden'); }
+                if (holiday) {
+                    const type = holiday.type || 'holiday';
+                    const meta = HOLIDAY_TYPE_META[type];
+                    const durLabel = holiday.duration ? ` (${HOLIDAY_DURATION_LABEL[holiday.duration] || ''})` : '';
+                    let msg;
+                    if (type === 'holiday') msg = `วันที่เลือกเป็นวันหยุด: ${holiday.label} (ยังสามารถเช็คชื่อได้ตามปกติหากมีการเรียนการสอน)`;
+                    else msg = `วันที่เลือกมี${meta.label}: ${holiday.label}${durLabel} — เช็คชื่อได้ตามปกติ`;
+                    textEl.innerText = msg;
+                    noteEl.className = `mb-4 sm:mb-6 rounded-2xl p-3 sm:p-4 flex items-center gap-3 ${meta.noteBg}`;
+                    const iconWrap = noteEl.querySelector('div'); if (iconWrap) iconWrap.className = `w-9 h-9 sm:w-11 sm:h-11 ${meta.noteIconBg} text-white rounded-full flex items-center justify-center text-sm sm:text-lg shrink-0`;
+                    textEl.className = `font-bold text-xs sm:text-sm ${meta.noteText}`;
+                    noteEl.classList.remove('hidden');
+                }
                 else { noteEl.classList.add('hidden'); }
             };
             window.updatePeriodDropdown();
@@ -1551,7 +1598,7 @@
                 {
                     const subForCopy = subjects.find(s => s.id === subjectId);
                     const prevPeriod = parseInt(period) - 1;
-                    const dObj2 = new Date(date); const dow2 = dObj2.getDay() || 7;
+                    const dow2 = getEffectiveDayOfWeek(date);
                     const hasPrevSchedule = subForCopy && (subForCopy.schedules || []).some(s => parseInt(s.day) === dow2 && parseInt(s.period) === prevPeriod);
                     if (hasPrevSchedule) {
                         const prevRecord = attendanceData.find(a => a.subjectId === subjectId && a.date === date && String(a.period) === String(prevPeriod));
@@ -1831,7 +1878,7 @@
             else if (tab === 'daily') {
                 const todayStr = localDateStr();
                 const displayDate = window.tempDailyDate || todayStr; const dObj = new Date(displayDate); const dayOfWeek = dObj.getDay();
-                let dayIndexForSched = (dayOfWeek >= 1 && dayOfWeek <= 5) ? dayOfWeek : 1;
+                let dayIndexForSched = getEffectiveDayOfWeek(displayDate);
                 const monday = new Date(dObj);
                 const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek; monday.setDate(dObj.getDate() + diffToMonday);
                 const subjectsToday = [];
@@ -2446,9 +2493,9 @@ content.innerHTML = html;
                 const startWeekday = firstDay.getDay();
                 const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-2 flex items-center gap-2"><i class="fas fa-calendar-times text-rose-500"></i> จัดการวันหยุด / วันสอบ และประกาศ</h3><p class="text-[10px] sm:text-xs text-slate-500 font-medium mb-4"><i class="fas fa-info-circle"></i> คลิกวันที่ในปฏิทินเพื่อเพิ่ม/แก้ไข/ลบวันหยุด ระบบจะแสดงหมายเหตุในหน้าเช็คชื่อทุกรายวิชาของวันนั้น และขึ้นประกาศบนหน้าเว็บอัตโนมัติในวันนั้นด้วย (ใช้ได้ทั้งวันหยุดราชการและวันสอบ) — วันหยุดที่เก่ากว่า 1 ปีจะถูกลบออกจากระบบให้อัตโนมัติ</p>`;
+                let html = `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-2 flex items-center gap-2"><i class="fas fa-calendar-times text-rose-500"></i> จัดการวันหยุด / กิจกรรม / สอบ และประกาศ</h3><p class="text-[10px] sm:text-xs text-slate-500 font-medium mb-4"><i class="fas fa-info-circle"></i> คลิกวันที่ในปฏิทินเพื่อเพิ่ม/แก้ไข/ลบ เลือกได้ 3 ประเภท: <b class="text-rose-500">วันหยุด</b> (ไม่นับเป็นวันเรียนจริง) <b class="text-sky-500">วันกิจกรรม</b> และ <b class="text-amber-500">วันสอบ</b> (2 ประเภทหลังยังเช็คชื่อและนับเป็นวันเรียนจริงตามปกติ เลือกช่วงเวลาได้ว่าครึ่งวันหรือทั้งวัน) ระบบจะแสดงหมายเหตุในหน้าเช็คชื่อของวันนั้นและขึ้นประกาศบนหน้าเว็บอัตโนมัติด้วย — รายการที่เก่ากว่า 1 ปีจะถูกลบออกให้อัตโนมัติ</p>`;
 
-                html += `<div id="holidayModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-3 transition-opacity"><div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-md transform scale-95 opacity-0 transition-all duration-300" id="holidayModalBox"><div class="p-4 sm:p-6"><div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-extrabold text-lg" id="holidayModalTitle">เพิ่มวันหยุด</h4><button onclick="window.closeHolidayModal()" class="text-slate-400 text-xl hover:text-rose-500 transition-colors"><i class="fas fa-times"></i></button></div><div class="space-y-3 mb-4"><div><label class="block text-xs font-bold mb-1">วันที่</label><input type="text" id="holidayModalDate" disabled class="w-full bg-slate-100 text-slate-500 border border-slate-200 rounded px-3 py-2 text-sm font-bold outline-none"></div><div><label class="block text-xs font-bold mb-1">หมายเหตุ / เหตุผล</label><input type="text" id="holidayModalLabel" class="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-rose-400" placeholder="เช่น วันหยุดราชการ, วันสอบปลายภาค"></div></div><div class="flex justify-between items-center gap-2"><button id="holidayModalDeleteBtn" onclick="window.deleteHoliday(document.getElementById('holidayModalDate').value)" class="hidden bg-rose-50 hover:bg-rose-100 text-rose-600 px-3 py-1.5 rounded font-bold text-xs sm:text-sm transition-colors"><i class="fas fa-trash"></i> ลบวันหยุดนี้</button><div class="flex gap-2 ml-auto"><button onclick="window.closeHolidayModal()" class="bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded font-bold text-sm transition-colors">ยกเลิก</button><button onclick="window.saveHolidayForm()" class="bg-rose-600 hover:bg-rose-700 text-white px-4 py-1.5 rounded font-bold text-sm shadow-sm transition-colors"><i class="fas fa-save"></i> บันทึก</button></div></div></div></div></div>`;
+                html += `<div id="holidayModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-3 transition-opacity"><div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-md transform scale-95 opacity-0 transition-all duration-300" id="holidayModalBox"><div class="p-4 sm:p-6"><div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-extrabold text-lg" id="holidayModalTitle">เพิ่มวันหยุด</h4><button onclick="window.closeHolidayModal()" class="text-slate-400 text-xl hover:text-rose-500 transition-colors"><i class="fas fa-times"></i></button></div><div class="space-y-3 mb-4"><div><label class="block text-xs font-bold mb-1">วันที่</label><input type="text" id="holidayModalDate" disabled class="w-full bg-slate-100 text-slate-500 border border-slate-200 rounded px-3 py-2 text-sm font-bold outline-none"></div><div><label class="block text-xs font-bold mb-1">ประเภท</label><div class="grid grid-cols-2 gap-1.5" id="holidayModalTypeButtons"><button type="button" onclick="window.setHolidayModalType('holiday')" data-type="holiday" class="px-2 py-2 rounded-lg text-xs sm:text-sm font-bold border-2 transition-all">วันหยุด</button><button type="button" onclick="window.setHolidayModalType('activity')" data-type="activity" class="px-2 py-2 rounded-lg text-xs sm:text-sm font-bold border-2 transition-all">วันกิจกรรม</button><button type="button" onclick="window.setHolidayModalType('exam')" data-type="exam" class="px-2 py-2 rounded-lg text-xs sm:text-sm font-bold border-2 transition-all">วันสอบ</button><button type="button" onclick="window.setHolidayModalType('makeup')" data-type="makeup" class="px-2 py-2 rounded-lg text-xs sm:text-sm font-bold border-2 transition-all">สอนชดเชย</button></div></div><div id="holidayModalMakeupDayWrap" class="hidden"><label class="block text-xs font-bold mb-1">ใช้ตารางสอนของวัน</label><select id="holidayModalMakeupDay" class="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm font-bold outline-none focus:ring-1 focus:ring-violet-400"><option value="1">จันทร์</option><option value="2">อังคาร</option><option value="3">พุธ</option><option value="4">พฤหัสบดี</option><option value="5">ศุกร์</option></select></div><div id="holidayModalDurationWrap" class="hidden"><label class="block text-xs font-bold mb-1">ช่วงเวลา</label><div class="grid grid-cols-3 gap-1.5" id="holidayModalDurationButtons"><button type="button" onclick="window.setHolidayModalDuration('morning')" data-duration="morning" class="px-2 py-2 rounded-lg text-[11px] sm:text-xs font-bold border-2 transition-all">ครึ่งเช้า</button><button type="button" onclick="window.setHolidayModalDuration('afternoon')" data-duration="afternoon" class="px-2 py-2 rounded-lg text-[11px] sm:text-xs font-bold border-2 transition-all">ครึ่งบ่าย</button><button type="button" onclick="window.setHolidayModalDuration('full')" data-duration="full" class="px-2 py-2 rounded-lg text-[11px] sm:text-xs font-bold border-2 transition-all">ตลอดวัน</button></div></div><div><label class="block text-xs font-bold mb-1">หมายเหตุ / เหตุผล</label><input type="text" id="holidayModalLabel" class="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-rose-400" placeholder="เช่น วันหยุดราชการ, กีฬาสี, สอบปลายภาค"></div><div id="holidayModalNote" class="hidden rounded-lg px-3 py-2 text-[11px] sm:text-xs font-medium"></div></div><div class="flex justify-between items-center gap-2"><button id="holidayModalDeleteBtn" onclick="window.deleteHoliday(document.getElementById('holidayModalDate').value)" class="hidden bg-rose-50 hover:bg-rose-100 text-rose-600 px-3 py-1.5 rounded font-bold text-xs sm:text-sm transition-colors"><i class="fas fa-trash"></i> ลบวันนี้</button><div class="flex gap-2 ml-auto"><button onclick="window.closeHolidayModal()" class="bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded font-bold text-sm transition-colors">ยกเลิก</button><button onclick="window.saveHolidayForm()" class="bg-rose-600 hover:bg-rose-700 text-white px-4 py-1.5 rounded font-bold text-sm shadow-sm transition-colors"><i class="fas fa-save"></i> บันทึก</button></div></div></div></div></div>`;
 
                 html += `<div class="flex items-center justify-between mb-4 bg-slate-50 rounded-xl border border-slate-100 p-2 sm:p-3"><button onclick="window.changeHolidayMonth(-1)" class="w-9 h-9 sm:w-10 sm:h-10 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg flex items-center justify-center text-slate-600 shadow-sm transition-colors"><i class="fas fa-chevron-left"></i></button><span class="font-extrabold text-sm sm:text-lg text-slate-800">${monthNamesFull[month]} ${year + 543}</span><button onclick="window.changeHolidayMonth(1)" class="w-9 h-9 sm:w-10 sm:h-10 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg flex items-center justify-center text-slate-600 shadow-sm transition-colors"><i class="fas fa-chevron-right"></i></button></div>`;
 
@@ -2459,7 +2506,8 @@ content.innerHTML = html;
                     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                     const holiday = getHolidayForDate(dateStr);
                     const isToday = dateStr === todayDateStr();
-                    html += `<button onclick="window.openHolidayModal('${dateStr}')" class="aspect-square rounded-lg sm:rounded-xl border p-1 sm:p-1.5 flex flex-col items-center justify-start transition-all hover:shadow-md ${holiday ? 'bg-rose-50 border-rose-300' : 'bg-white border-slate-200 hover:border-indigo-300'} ${isToday ? 'ring-2 ring-indigo-400' : ''}"><span class="text-[10px] sm:text-sm font-black ${holiday ? 'text-rose-600' : 'text-slate-700'}">${day}</span>${holiday ? `<span class="text-[7px] sm:text-[9px] font-bold text-rose-500 leading-tight text-center hidden sm:block overflow-hidden" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${holiday.label}</span><i class="fas fa-circle text-rose-400 text-[5px] sm:hidden mt-0.5"></i>` : ''}</button>`;
+                    const holType = holiday ? (HOLIDAY_TYPE_META[holiday.type] || HOLIDAY_TYPE_META.holiday) : null;
+                    html += `<button onclick="window.openHolidayModal('${dateStr}')" class="aspect-square rounded-lg sm:rounded-xl border p-1 sm:p-1.5 flex flex-col items-center justify-start transition-all hover:shadow-md ${holiday ? holType.calCard : 'bg-white border-slate-200 hover:border-indigo-300'} ${isToday ? 'ring-2 ring-indigo-400' : ''}"><span class="text-[10px] sm:text-sm font-black ${holiday ? holType.calText : 'text-slate-700'}">${day}</span>${holiday ? `<span class="text-[7px] sm:text-[9px] font-bold ${holType.calText} leading-tight text-center hidden sm:block overflow-hidden" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${holiday.label}</span><i class="fas fa-circle ${holType.calDot} text-[5px] sm:hidden mt-0.5"></i>` : ''}</button>`;
                 }
                 html += `</div>`;
 
@@ -2564,12 +2612,43 @@ content.innerHTML = html;
         };
         window.openHolidayModal = function(dateStr) {
             const holiday = getHolidayForDate(dateStr);
-            document.getElementById('holidayModalTitle').innerText = holiday ? 'แก้ไขวันหยุด' : 'เพิ่มวันหยุด';
+            document.getElementById('holidayModalTitle').innerText = holiday ? 'แก้ไขวันที่นี้' : 'เพิ่มวันหยุด/กิจกรรม/สอบ';
             document.getElementById('holidayModalDate').value = dateStr;
             document.getElementById('holidayModalLabel').value = holiday ? holiday.label : '';
             document.getElementById('holidayModalDeleteBtn').classList.toggle('hidden', !holiday);
+            window.setHolidayModalType((holiday && holiday.type) || 'holiday');
+            window.setHolidayModalDuration((holiday && holiday.duration) || 'full');
+            document.getElementById('holidayModalMakeupDay').value = (holiday && holiday.useDayOfWeek) || String((new Date(dateStr).getDay() || 7) <= 5 ? (new Date(dateStr).getDay() || 7) : 1);
             document.getElementById('holidayModal').classList.remove('hidden');
             setTimeout(() => { document.getElementById('holidayModalBox').classList.remove('scale-95', 'opacity-0'); document.getElementById('holidayModalBox').classList.add('scale-100', 'opacity-100'); }, 10);
+        };
+        // ===== [ใหม่] สลับประเภทในหน้าต่างเพิ่ม/แก้ไข - โชว์/ซ่อนตัวเลือกช่วงเวลาตามประเภทที่เลือก =====
+        window.setHolidayModalType = function(type) {
+            document.getElementById('holidayModal').dataset.type = type;
+            document.querySelectorAll('#holidayModalTypeButtons button').forEach(btn => {
+                const active = btn.dataset.type === type;
+                btn.className = `px-2 py-2 rounded-lg text-xs sm:text-sm font-bold border-2 transition-all ${active ? HOLIDAY_TYPE_META[btn.dataset.type].activeBtn : 'border-slate-200 bg-white text-slate-500'}`;
+            });
+            document.getElementById('holidayModalDurationWrap').classList.toggle('hidden', type === 'holiday' || type === 'makeup');
+            document.getElementById('holidayModalMakeupDayWrap').classList.toggle('hidden', type !== 'makeup');
+            const noteEl = document.getElementById('holidayModalNote');
+            if (type === 'holiday') { noteEl.classList.add('hidden'); }
+            else {
+                noteEl.classList.remove('hidden'); noteEl.className = `${HOLIDAY_TYPE_META[type].noteBg.replace('border-2', 'border')} rounded-lg px-3 py-2 text-[11px] sm:text-xs font-medium ${HOLIDAY_TYPE_META[type].noteText}`;
+                let msg;
+                if (type === 'activity') msg = 'วันกิจกรรมยังเช็คชื่อได้ตามปกติ และนับเป็นวันเรียนจริงในสมุดทะเบียน';
+                else if (type === 'exam') msg = 'วันสอบยังเช็คชื่อได้ตามปกติ และนับเป็นวันเรียนจริงในสมุดทะเบียน';
+                else msg = 'วันนี้จะใช้ตารางสอนของวันที่เลือกแทนตารางเดิมของวันนี้ทั้งวัน (เหมาะกับวันสลับ/ชดเชย รวมถึงชดเชยวันเสาร์-อาทิตย์)';
+                noteEl.innerHTML = `<i class="fas fa-info-circle"></i> ${msg}`;
+            }
+        };
+        window.setHolidayModalDuration = function(duration) {
+            document.getElementById('holidayModal').dataset.duration = duration;
+            document.querySelectorAll('#holidayModalDurationButtons button').forEach(btn => {
+                const active = btn.dataset.duration === duration;
+                const type = document.getElementById('holidayModal').dataset.type || 'holiday';
+                btn.className = `px-2 py-2 rounded-lg text-[11px] sm:text-xs font-bold border-2 transition-all ${active ? HOLIDAY_TYPE_META[type].activeBtn : 'border-slate-200 bg-white text-slate-500'}`;
+            });
         };
         window.closeHolidayModal = function() {
             document.getElementById('holidayModalBox').classList.remove('scale-100', 'opacity-100');
@@ -2579,13 +2658,24 @@ content.innerHTML = html;
         window.saveHolidayForm = function() {
             const dateStr = document.getElementById('holidayModalDate').value;
             const label = document.getElementById('holidayModalLabel').value.trim();
-            if (!label) { showToast("กรุณากรอกหมายเหตุ/เหตุผลของวันหยุด", "error"); return; }
+            const type = document.getElementById('holidayModal').dataset.type || 'holiday';
+            const duration = (type === 'activity' || type === 'exam') ? (document.getElementById('holidayModal').dataset.duration || 'full') : undefined;
+            const useDayOfWeek = type === 'makeup' ? document.getElementById('holidayModalMakeupDay').value : undefined;
+            if (!label) { showToast("กรุณากรอกหมายเหตุ/เหตุผล", "error"); return; }
             if (!settings.holidays) settings.holidays = [];
             const existing = settings.holidays.find(h => h.date === dateStr);
-            if (existing) { existing.label = label; } else { settings.holidays.push({ date: dateStr, label }); }
-            logAction('เพิ่ม/แก้ไขวันหยุด', `${dateStr.split('-').reverse().join('/')} - ${label}`, 'settings');
+            const entry = { date: dateStr, label, type };
+            if (duration) entry.duration = duration;
+            if (useDayOfWeek) entry.useDayOfWeek = useDayOfWeek;
+            if (existing) {
+                existing.label = label; existing.type = type;
+                if (duration) existing.duration = duration; else delete existing.duration;
+                if (useDayOfWeek) existing.useDayOfWeek = useDayOfWeek; else delete existing.useDayOfWeek;
+            } else { settings.holidays.push(entry); }
+            const extraLog = type === 'makeup' ? ` (ใช้ตารางวัน${daysLabel[useDayOfWeek - 1].replace('วัน','')})` : '';
+            logAction('เพิ่ม/แก้ไขวันในปฏิทิน', `${dateStr.split('-').reverse().join('/')} - ${HOLIDAY_TYPE_META[type].label}${extraLog}: ${label}`, 'settings');
             updateHolidayBar();
-            saveData('full'); showToast("บันทึกวันหยุดเรียบร้อย"); renderAdminTab(); closeHolidayModal();
+            saveData('full'); showToast("บันทึกเรียบร้อย"); renderAdminTab(); closeHolidayModal();
         };
         window.deleteHoliday = function(dateStr) {
             const holiday = getHolidayForDate(dateStr);
@@ -3860,7 +3950,7 @@ content.innerHTML = html;
         
         window.exportRoomDailyExcel = function(roomId, date) {
             const roomName = formatRoomName(roomId), roomStudents = getRoomStudents(roomId).sort((a,b) => parseInt(a.number) - parseInt(b.number)), roomSubjects = getRoomSubjects(roomId);
-            const dObj = new Date(date); const dayOfWeek = dObj.getDay(); let dayIndexForSched = (dayOfWeek >= 1 && dayOfWeek <= 5) ? dayOfWeek : 1;
+            const dObj = new Date(date); const dayOfWeek = dObj.getDay(); let dayIndexForSched = getEffectiveDayOfWeek(date);
             const subjectsToday = []; roomSubjects.forEach(s => { if (s.schedules) { s.schedules.forEach(sch => { if (parseInt(sch.day) === dayIndexForSched) { subjectsToday.push({ ...s, period: parseInt(sch.period) }); } }); } });
             subjectsToday.sort((a,b) => a.period - b.period);
             const dailyAttRecords = attendanceData.filter(a => a.date === date && subjectsToday.some(st => st.id === a.subjectId && String(st.period) === String(a.period)));
@@ -4090,7 +4180,7 @@ content.innerHTML = html;
             if (advData[0]) signerListDaily.push({ name: advData[0], role: advData[1] ? 'ครูที่ปรึกษาคนที่ 1' : 'ครูที่ปรึกษา' });
             if (advData[1]) signerListDaily.push({ name: advData[1], role: 'ครูที่ปรึกษาคนที่ 2' });
             signerListDaily.push({ name: staffName, role: 'เจ้าหน้าที่ / นายทะเบียน' });
-            const dObj = new Date(date); const dayOfWeek = dObj.getDay(); let dayIndexForSched = (dayOfWeek >= 1 && dayOfWeek <= 5) ? dayOfWeek : 1;
+            const dObj = new Date(date); const dayOfWeek = dObj.getDay(); let dayIndexForSched = getEffectiveDayOfWeek(date);
             const subjectsToday = []; roomSubjects.forEach(s => { if (s.schedules) { s.schedules.forEach(sch => { if (parseInt(sch.day) === dayIndexForSched) { subjectsToday.push({ ...s, period: parseInt(sch.period) }); } }); } });
             subjectsToday.sort((a,b) => a.period - b.period);
             const dailyAttRecords = attendanceData.filter(a => a.date === date && subjectsToday.some(st => st.id === a.subjectId && String(st.period) === String(a.period)));
@@ -4189,7 +4279,7 @@ content.innerHTML = html;
                 weekdays.push({ day: d, dateStr, dObj, dow, holiday: getHolidayForDate(dateStr) });
             }
             const totalWeekdays = weekdays.length;
-            const totalHolidays = weekdays.filter(w => w.holiday).length;
+            const totalHolidays = weekdays.filter(w => w.holiday && (!w.holiday.type || w.holiday.type === 'holiday')).length;
             const totalTeachingDays = totalWeekdays - totalHolidays;
 
             const pdfDoc = new jspdf.jsPDF('p', 'pt', 'a4');
