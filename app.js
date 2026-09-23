@@ -470,12 +470,9 @@
 
         // ตาข่ายนิรภัยสุดท้าย: ถ้ามี error ที่ไม่ถูกดักจับเกิดขึ้นระหว่างการทำงาน และทำให้เนื้อหาหลักว่างเปล่า
         // ให้ดึงกลับมาที่หน้า dashboard แทนที่จะปล่อยให้จอขาวค้าง
-        window.addEventListener('error', function(event) {
+        window.addEventListener('error', function() {
             const mc = document.getElementById('mainContent');
             if (mc && isDbInitialized && mc.innerHTML.trim() === '') {
-                // ===== [ชั่วคราว] แสดงรายละเอียด error จริงๆ ออกมาเป็นป็อปอัพ เพื่อช่วยตามหาสาเหตุที่ทำให้บางห้องเด้งกลับหน้าหลัก =====
-                console.error('[DEBUG เด้งกลับหน้าหลัก]', event.message, 'ที่บรรทัด', event.lineno, 'คอลัมน์', event.colno, event.error && event.error.stack);
-                alert('[DEBUG] เกิดข้อผิดพลาด: ' + event.message + '\n\nบรรทัด: ' + event.lineno + '\n\n' + (event.error && event.error.stack ? event.error.stack.split('\n').slice(0,3).join('\n') : 'ไม่มีรายละเอียดเพิ่มเติม'));
                 try { renderDashboard(); } catch (e) {}
             }
         });
@@ -505,7 +502,12 @@
                     case 'school_summary': renderSchoolSummary(state.month); break;
                     default: renderDashboard();
                 }
-            } catch (error) { renderDashboard(); }
+            } catch (error) {
+                // ===== [ชั่วคราว] แสดงรายละเอียด error จริงๆ ที่ทำให้เด้งกลับหน้าหลัก เพื่อช่วยตามหาสาเหตุ =====
+                console.error('[DEBUG เด้งกลับหน้าหลัก]', error.message, error.stack);
+                alert('[DEBUG] เกิดข้อผิดพลาดตอนโหลดหน้า "' + state.view + '": ' + error.message + '\n\n' + (error.stack ? error.stack.split('\n').slice(0,4).join('\n') : ''));
+                renderDashboard();
+            }
         }
 
         let pollingInterval = null;
