@@ -302,6 +302,10 @@
                 subjects.push({ id: generateId(), roomId, name: 'เข้าแถวเช้า', code: '', teacher: advisorName, teacher2: advisors[1] || '', credits: 0.5, schedules: [{ day: 1, period: 0 }], term, year, locked: true, systemType: 'morning' });
                 changed = true;
             }
+            if (!existing.some(s => s.systemType === 'zone')) {
+                subjects.push({ id: generateId(), roomId, name: 'เขตพื้นที่รับผิดชอบ', code: '', teacher: advisorName, teacher2: advisors[1] || '', credits: 0, schedules: [1,2,3,4,5].map(d => ({ day: d, period: -2 })), term, year, locked: true, systemType: 'zone' });
+                changed = true;
+            }
             if (!existing.some(s => s.systemType === 'homeroom')) {
                 subjects.push({ id: generateId(), roomId, name: 'โฮมรูม', code: '', teacher: advisorName, teacher2: advisors[1] || '', credits: 0.5, schedules: [{ day: 5, period: 0 }], term, year, locked: true, systemType: 'homeroom' });
                 changed = true;
@@ -333,7 +337,7 @@
             const list = getRoomSubjects(roomId, term, year); const dupIds = new Set();
             for (let i = 0; i < list.length; i++) { for (let j = i + 1; j < list.length; j++) {
                 const a = list[i], b = list[j];
-                if (a.systemType === 'homeroom' || b.systemType === 'homeroom') continue; // โฮมรูมไม่นับว่าซ้ำกับวิชาใดๆ
+                if (a.systemType === 'homeroom' || b.systemType === 'homeroom' || a.systemType === 'zone' || b.systemType === 'zone') continue; // โฮมรูมไม่นับว่าซ้ำกับวิชาใดๆ
                 const sameTeacher = (a.teacher || '').trim() === (b.teacher || '').trim();
                 const sameCode = (a.code || '').trim() === (b.code || '').trim();
                 const sameName = (a.name || '').trim() === (b.name || '').trim();
@@ -347,7 +351,7 @@
         function findTeacherConflicts(term, year) {
             const map = {};
             activeSubjects(term, year).forEach(s => {
-                if (s.systemType === 'homeroom') return; // โฮมรูมไม่นับว่าซ้ำ/ชนกับวิชาใดๆ
+                if (s.systemType === 'homeroom' || s.systemType === 'zone') return; // โฮมรูม/เขตพื้นที่ไม่นับว่าซ้ำ/ชนกับวิชาใดๆ
                 ['teacher', 'teacher2'].forEach(field => {
                     const tname = s[field]; if (!tname) return;
                     if (getTeacherDept(tname) === 'ระบบ/อื่นๆ') return;
@@ -1997,7 +2001,20 @@
         window.setTeacherStatusTerm = function(term) { window.teacherStatusTerm = String(term); renderAdminTab(); };
         window.setTeacherStatusYear = function(year) { window.teacherStatusYear = String(year); renderAdminTab(); };
 
+        // ===== [ใหม่] ลบประกาศที่หมดเวลาแล้วเกิน 7 วัน อัตโนมัติ (ทำเมื่อแอดมินเปิดหน้าจัดการ) =====
+        function pruneExpiredItems() {
+            const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 7);
+            const cutoffStr = localDateStr(cutoff);
+            let delA = 0, delH = 0; // วันหยุดไม่ลบอัตโนมัติ (ต้องคงไว้สำหรับสมุดทะเบียนย้อนหลัง) ยกเว้นเก่ากว่า 1 ปีในแท็บวันหยุด
+            if (Array.isArray(settings.announcements)) {
+                const before = settings.announcements.length;
+                settings.announcements = settings.announcements.filter(a => { if (!a || !a.end) return true; const e = new Date(a.end); return isNaN(e) || e >= cutoff; });
+                delA = before - settings.announcements.length;
+            }
+            if (delA > 0) { logAction('ลบประกาศที่หมดเวลาเกิน 7 วันอัตโนมัติ', `${delA} รายการ`, 'settings'); saveData('full'); }
+        }
         function renderAdminTab() {
+            pruneExpiredItems();
             const content = document.getElementById('adminContent');
             if (currentAdminTab === 'settings') {
                 const isSuperAdminSettings = currentUser && currentUser.role === 'super_admin';
@@ -2005,7 +2022,7 @@
                 for(let i=1; i<=6; i++) { html += `<div class="bg-slate-50 p-2 sm:p-3 rounded-lg border border-slate-100 text-center"><label class="block font-black text-[10px] sm:text-xs text-slate-700 mb-1 sm:mb-2">ม.${i}</label><input type="number" id="setCountM${i}" value="${settings.roomCounts[`m${i}`]}" min="0" max="15" ${!isSuperAdminSettings ? 'disabled' : ''} class="w-full text-center py-1.5 sm:py-2 rounded border border-slate-200 font-bold ${!isSuperAdminSettings ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'text-indigo-600'} outline-none text-base sm:text-sm"></div>`;
                 }
                 html += `</div>${isSuperAdminSettings ? `<div class="flex justify-end mb-6"><button onclick="window.saveRoomCountsSettings()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกจำนวนห้อง</button></div>` : '<div class="mb-6"></div>'}<h3 class="text-lg sm:text-xl font-extrabold text-rose-600 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-exclamation-triangle"></i> ล้างข้อมูลทั้งระบบ</h3><div class="bg-rose-50 p-4 rounded-xl border border-rose-200 shadow-sm flex flex-col sm:flex-row justify-between items-center gap-4"><div><h4 class="font-bold text-rose-800 text-sm sm:text-base">ล้างข้อมูลการเช็คชื่อทั้งหมด</h4><p class="text-[10px] sm:text-xs text-rose-600 font-medium">ลบประวัติการเช็คชื่อของทุกวิชา ทุกห้อง ทุกวัน (ไม่สามารถกู้คืนได้)</p>${!isSuperAdminSettings ? `<p class="text-[10px] sm:text-xs text-slate-400 font-bold mt-1"><i class="fas fa-lock"></i> เฉพาะ Super Admin เท่านั้นที่ใช้งานส่วนนี้ได้</p>` : ''}</div>${isSuperAdminSettings ? `<button onclick="window.resetAllAttendanceData()" class="w-full sm:w-auto bg-rose-600 hover:bg-rose-700 text-white px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-bold shadow-sm transition-colors text-sm whitespace-nowrap"><i class="fas fa-trash-alt"></i> ล้างข้อมูลทั้งหมด</button>` : `<button disabled title="เฉพาะ Super Admin เท่านั้น" class="w-full sm:w-auto bg-slate-200 text-slate-400 px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-bold text-sm whitespace-nowrap cursor-not-allowed"><i class="fas fa-lock"></i> ล้างข้อมูลทั้งหมด</button>`}</div>`;
-                html += `<div class="mt-8 pt-4 border-t border-slate-200 text-center"><span class="text-[11px] sm:text-xs font-bold text-slate-400"><i class="fas fa-code-branch"></i> Version 1.60.081026</span></div>`;
+                html += `<div class="mt-8 pt-4 border-t border-slate-200 text-center"><span class="text-[11px] sm:text-xs font-bold text-slate-400"><i class="fas fa-code-branch"></i> Version 1.62.081026</span></div>`;
                 content.innerHTML = html;
             } 
             else if (currentAdminTab === 'term_settings') {
@@ -2380,7 +2397,7 @@ content.innerHTML = html;
                 const subjRoomList = getRoomList();
                 let __sysSubjectsChanged = false;
                 subjRoomList.forEach(r => { if (ensureSystemSubjectsForRoom(r, adminTerm(), adminYear())) __sysSubjectsChanged = true; });
-                if (__sysSubjectsChanged) { logAction('สร้างคาบระบบอัตโนมัติ', 'เข้าแถวเช้า / โฮมรูม'); saveData('full'); }
+                if (__sysSubjectsChanged) { logAction('สร้างคาบระบบอัตโนมัติ', 'เขตพื้นที่รับผิดชอบ / เข้าแถวเช้า / โฮมรูม'); saveData('full'); }
                 if (!window.adminSelectedSubjectRoom) window.adminSelectedSubjectRoom = 'all';
                 if (window.adminSelectedSubjectRoom !== 'all' && !subjRoomList.includes(window.adminSelectedSubjectRoom)) window.adminSelectedSubjectRoom = 'all';
                 const isAllRooms = window.adminSelectedSubjectRoom === 'all';
@@ -2473,7 +2490,7 @@ content.innerHTML = html;
                 content.innerHTML = html;
             }
             else if (currentAdminTab === 'holidays') {
-                // ===== [ใหม่] ลบวันหยุดเก่าที่เก็บมาเกิน 1 ปีอัตโนมัติ (ทำแค่ครั้งเดียวต่อเซสชัน กันข้อมูลพอกพูนไม่มีที่สิ้นสุด) =====
+                // ===== ลบวันหยุดเก่าที่เก็บมาเกิน 1 ปีอัตโนมัติ (ทำแค่ครั้งเดียวต่อเซสชัน กันข้อมูลพอกพูนไม่มีที่สิ้นสุด) =====
                 if (!window.__holidaysPrunedThisSession) {
                     window.__holidaysPrunedThisSession = true;
                     const oneYearAgo = new Date(); oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
@@ -3688,7 +3705,7 @@ content.innerHTML = html;
         function deleteSubject(id) {
             if (guardTermLock('ลบวิชา')) return;
             const subCheck = subjects.find(s => s.id === id);
-            if (subCheck && subCheck.systemType) { showToast("วิชานี้เป็นคาบระบบ (เข้าแถวเช้า/โฮมรูม) ไม่สามารถลบได้", "error"); return; }
+            if (subCheck && subCheck.systemType) { showToast("วิชานี้เป็นคาบระบบ (เขตพื้นที่รับผิดชอบ/เข้าแถวเช้า/โฮมรูม) ไม่สามารถลบได้", "error"); return; }
             if (subCheck && subCheck.locked) { showToast("วิชานี้ถูกล็อคไว้ กรุณาปลดล็อคก่อนลบ", "error"); return; }
             showConfirm("ลบวิชา", "ข้อมูลการเช็คชื่อทั้งหมดในวิชานี้จะถูกลบไปด้วย แน่ใจหรือไม่?", async () => {
                 showToast("กำลังลบวิชา...", "info");
