@@ -87,7 +87,8 @@
             students.forEach(st => { if (st.status === 'resigned') return; const level = parseInt((st.roomId || '').split('_')[0].replace('m', '')); if (counts[level] !== undefined) counts[level]++; });
             return counts;
         }
-        const timeSlots = [ { period: 0, time: '08.00-08.30', name: 'เข้าแถวเช้า' }, { period: 1, time: '08.30-09.20' }, { period: 2, time: '09.20-10.10' }, { period: 3, time: '10.20-11.10' }, { period: 4, time: '11.10-12.00' }, { period: -1, time: '12.00-13.00', name: 'พักกลางวัน' }, { period: 5, time: '13.00-13.50' }, { period: 6, time: '13.50-14.40' }, { period: 7, time: '14.40-15.30' }, { period: 8, time: '15.30-16.20' } ];
+        const periodLabel = p => (Number(p) === -2 ? '00' : String(p));
+        const timeSlots = [ { period: -2, time: '07.30-08.00', name: 'เขตพื้นที่รับผิดชอบ' }, { period: 0, time: '08.00-08.30', name: 'เข้าแถวเช้า' }, { period: 1, time: '08.30-09.20' }, { period: 2, time: '09.20-10.10' }, { period: 3, time: '10.20-11.10' }, { period: 4, time: '11.10-12.00' }, { period: -1, time: '12.00-13.00', name: 'พักกลางวัน' }, { period: 5, time: '13.00-13.50' }, { period: 6, time: '13.50-14.40' }, { period: 7, time: '14.40-15.30' }, { period: 8, time: '15.30-16.20' } ];
         const daysLabel = ['วันจันทร์', 'วันอังคาร', 'วันพุธ', 'วันพฤหัสบดี', 'วันศุกร์'];
         // ===== [ใหม่] แปลง Date เป็นสตริง YYYY-MM-DD ตาม "เวลาท้องถิ่นของเครื่อง" (ไม่ใช่ UTC) =====
         // แก้บั๊ก: new Date().toISOString().split('T')[0] แปลงเป็นเวลา UTC เสมอ ซึ่งช้ากว่าไทย 7 ชั่วโมง
@@ -177,7 +178,7 @@
                 const dayKey = m[0].trim().replace(/^วัน/, '');
                 const day = SUBJECT_DAY_MAP[dayKey];
                 const period = parseInt(m[1].trim());
-                if (day && !isNaN(period) && period >= 0 && period <= 8) schedules.push({ day, period });
+                if (day && !isNaN(period) && (period === -2 || (period >= 0 && period <= 8))) schedules.push({ day, period });
             });
             return schedules;
         }
@@ -379,7 +380,7 @@
             });
             findTeacherConflicts(term, year).forEach(group => {
                 const t = group[0].teacher;
-                const daysTxt = group.map(g => `${daysLabel[g.day - 1].replace('วัน', '')} คาบ ${g.period} (${formatRoomName(g.roomId)} · ${g.name})`).join(', ');
+                const daysTxt = group.map(g => `${daysLabel[g.day - 1].replace('วัน', '')} คาบ ${periodLabel(g.period)} (${formatRoomName(g.roomId)} · ${g.name})`).join(', ');
                 items.push({ type: 'conflict', text: `ครู ${t} มีวิชาสอนชนกัน: ${daysTxt}`, action: () => { window.navigate('admin', { tab: 'subjects' }); } });
             });
             return items;
@@ -393,6 +394,7 @@
         //   3) ถ้าผลสรุป = มา/สาย แต่มีคาบที่ไม่ใช่มา/ร่วมกิจกรรม/สาย ตั้งแต่ 4 คาบขึ้นไป -> ติดธง "เข้าเรียนไม่ครบ"
         // คืนค่าเป็น object {status, incomplete, missingCount} เสมอ (ไม่ใช่ string เปล่าๆ แบบเดิม)
         function calculateDailyStatus(recordsArray) {
+            if (recordsArray) recordsArray = recordsArray.filter(r => parseInt(r.period) !== -2); // คาบ 00 (เขตพื้นที่รับผิดชอบ) แยกรายงานต่างหาก ไม่นับรวมสถานะรายวัน/สมุดทะเบียน
             if (!recordsArray || recordsArray.length === 0) return { status: null, incomplete: false, missingCount: 0 };
             const p0Record = recordsArray.find(r => parseInt(r.period) === 0);
             const otherRecords = recordsArray.filter(r => parseInt(r.period) !== 0);
@@ -1326,9 +1328,9 @@
         function openTeacherDashboard(teacherName) {
             const isDarkNow = document.documentElement.classList.contains('dark');
             const tSubjects = activeSubjects().filter(s => s.teacher === teacherName || s.teacher2 === teacherName);
-            const periods = [0, 1, 2, 3, 4, 'lunch', 5, 6, 7, 8];
+            const periods = [-2, 0, 1, 2, 3, 4, 'lunch', 5, 6, 7, 8];
             let scheduleHtml = `<div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6 mb-6 overflow-hidden"><h3 class="font-extrabold text-base sm:text-lg text-slate-800 mb-4 flex items-center gap-2"><i class="fas fa-calendar-alt text-indigo-500"></i> ตารางสอนรายสัปดาห์</h3><div class="overflow-x-auto border border-slate-200 rounded-xl shadow-sm w-full"><table class="w-full text-center border-collapse min-w-[700px] sm:min-w-[950px] text-[10px] sm:text-sm"><thead class="bg-slate-100 text-slate-700"><tr><th class="p-2 sm:p-3 border-b border-slate-300 w-16 sm:w-24 bg-slate-100 sticky left-0 z-10">วัน / คาบ</th>`;
-            periods.forEach(p => { if (p === 'lunch') { scheduleHtml += `<th class="p-2 sm:p-3 border-b border-l border-amber-200 w-14 sm:w-20 bg-amber-50 text-amber-700"><i class="fas fa-utensils"></i><span class="hidden sm:inline"> พักเที่ยง</span></th>`; } else { scheduleHtml += `<th class="p-2 sm:p-3 border-b border-l border-slate-200 w-16 sm:w-24">คาบ ${p}</th>`; } });
+            periods.forEach(p => { if (p === 'lunch') { scheduleHtml += `<th class="p-2 sm:p-3 border-b border-l border-amber-200 w-14 sm:w-20 bg-amber-50 text-amber-700"><i class="fas fa-utensils"></i><span class="hidden sm:inline"> พักเที่ยง</span></th>`; } else { scheduleHtml += `<th class="p-2 sm:p-3 border-b border-l border-slate-200 w-16 sm:w-24">คาบ ${periodLabel(p)}</th>`; } });
             scheduleHtml += `</tr></thead><tbody class="divide-y divide-slate-200">`;
             const teacherScheduleDayColors = { 1: 'bg-yellow-500', 2: 'bg-pink-500', 3: 'bg-green-600', 4: 'bg-orange-500', 5: 'bg-sky-500' };
             for(let d = 1; d <= 5; d++) {
@@ -1348,7 +1350,7 @@
             if (tSubjects.length === 0) { html += `<div class="col-span-full text-center text-slate-400 p-8 sm:p-12 bg-white rounded-3xl border border-slate-200 border-dashed shadow-sm text-sm sm:text-lg font-medium">ไม่มีรายวิชาที่สอนในระบบ</div>`;
             } else {
                 tSubjects.sort((a,b) => a.roomId.localeCompare(b.roomId) || a.name.localeCompare(b.name)).forEach(sub => {
-                    let schedCards = (sub.schedules || []).map(sch => `<div class="flex items-center justify-between border-b border-slate-100 last:border-0 py-1.5 sm:py-2"><span class="text-slate-600 text-[10px] sm:text-sm"><i class="far fa-calendar-alt text-indigo-400 w-4"></i> ${daysLabel[sch.day - 1] || 'ไม่ระบุ'}</span><span class="text-indigo-700 font-bold bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 text-[10px] sm:text-xs">คาบ ${sch.period}</span></div>`).join('');
+                    let schedCards = (sub.schedules || []).map(sch => `<div class="flex items-center justify-between border-b border-slate-100 last:border-0 py-1.5 sm:py-2"><span class="text-slate-600 text-[10px] sm:text-sm"><i class="far fa-calendar-alt text-indigo-400 w-4"></i> ${daysLabel[sch.day - 1] || 'ไม่ระบุ'}</span><span class="text-indigo-700 font-bold bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 text-[10px] sm:text-xs">คาบ ${periodLabel(sch.period)}</span></div>`).join('');
                     const isSubLocked = isAttendanceEntryLocked(sub.term, sub.year);
                     html += `<div class="teacher-subject-item bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-4 sm:p-5 hover:shadow-xl transition-all relative group flex flex-col h-full overflow-hidden stat-card-hover" data-search="${(sub.name + ' ' + (sub.code || '')).toLowerCase()}"><div class="absolute top-0 left-0 w-full h-1 bg-indigo-500"></div><div class="flex justify-between items-start mb-2 sm:mb-3 mt-1"><span class="bg-indigo-50 text-indigo-700 border border-indigo-100 text-[10px] sm:text-xs font-black px-2 py-1 rounded w-fit">ห้อง ${formatRoomName(sub.roomId)}</span><span class="bg-slate-100 text-slate-500 border border-slate-200 text-[9px] sm:text-xs font-bold px-2 py-1 rounded w-fit">${sub.credits || 0.5} นก.</span></div><h4 class="font-extrabold text-base sm:text-xl mb-1 text-slate-800 leading-tight line-clamp-2">${sub.name}</h4><p class="text-[10px] sm:text-sm text-slate-500 mb-3 font-mono bg-slate-50 px-2 py-1 rounded w-fit border border-slate-100">${sub.code || 'ไม่มีรหัสวิชา'}</p><div class="bg-slate-50 rounded-xl px-2.5 py-1 mb-4 border border-slate-100 font-medium text-slate-600 flex flex-col">${schedCards}</div><div class="mt-auto flex flex-col gap-2">${isSubLocked ? `<button disabled title="ไม่สามารถเช็คชื่อได้ในขณะนี้" class="w-full bg-slate-200 text-slate-400 py-2.5 sm:py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 cursor-not-allowed"><i class="fas fa-lock"></i> ล็อคแล้ว</button>` : `<button onclick="window.navigate('attendance', {subjectId: '${sub.id}', fromTeacherDash: true})" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 sm:py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-md"><i class="fas fa-clipboard-check"></i> เช็คชื่อ</button>`}<button onclick="window.navigate('subject_summary', {subjectId: '${sub.id}', fromTeacherDash: true})" class="w-full bg-emerald-50 hover:bg-emerald-600 text-emerald-600 hover:text-white border border-emerald-200 hover:border-emerald-600 py-2.5 sm:py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-sm"><i class="fas fa-chart-pie"></i> สรุปผล</button></div></div>`;
                 });
@@ -1359,7 +1361,7 @@
             if (tSubjects.length === 0) { html += `<div class="text-center text-slate-400 p-8 sm:p-12 bg-white rounded-3xl border border-slate-200 border-dashed shadow-sm text-sm sm:text-lg font-medium">ไม่มีรายวิชาที่สอนในระบบ</div>`;
             } else {
                 tSubjects.forEach(sub => {
-                    const schedInline = (sub.schedules || []).map(sch => `<span class="text-slate-500 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded text-[9px] sm:text-[11px] whitespace-nowrap">${(daysLabel[sch.day - 1] || '-').replace('วัน','')} คาบ ${sch.period}</span>`).join(' ');
+                    const schedInline = (sub.schedules || []).map(sch => `<span class="text-slate-500 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded text-[9px] sm:text-[11px] whitespace-nowrap">${(daysLabel[sch.day - 1] || '-').replace('วัน','')} คาบ ${periodLabel(sch.period)}</span>`).join(' ');
                     const isSubLocked = isAttendanceEntryLocked(sub.term, sub.year);
                     html += `<div class="teacher-subject-item bg-white border border-slate-200 rounded-xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center gap-3" data-search="${(sub.name + ' ' + (sub.code || '')).toLowerCase()}"><div class="flex-1 min-w-0"><div class="flex flex-wrap items-center gap-1.5 mb-1"><span class="bg-indigo-50 text-indigo-700 border border-indigo-100 text-[9px] sm:text-[11px] font-black px-1.5 py-0.5 rounded">ห้อง ${formatRoomName(sub.roomId)}</span>${schedInline}</div><div class="font-extrabold text-sm sm:text-base text-slate-800 truncate">${sub.name}</div><div class="text-[10px] sm:text-xs text-slate-400 font-mono">${sub.code || 'ไม่มีรหัสวิชา'}</div></div><div class="flex gap-2 shrink-0">${isSubLocked ? `<button disabled title="ไม่สามารถเช็คชื่อได้ในขณะนี้" class="bg-slate-100 text-slate-400 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-bold cursor-not-allowed whitespace-nowrap"><i class="fas fa-lock"></i></button>` : `<button onclick="window.navigate('attendance', {subjectId: '${sub.id}', fromTeacherDash: true})" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all shadow-sm whitespace-nowrap"><i class="fas fa-clipboard-check"></i> เช็คชื่อ</button>`}<button onclick="window.navigate('subject_summary', {subjectId: '${sub.id}', fromTeacherDash: true})" class="bg-emerald-50 hover:bg-emerald-600 text-emerald-600 hover:text-white border border-emerald-200 hover:border-emerald-600 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all whitespace-nowrap"><i class="fas fa-chart-pie"></i> สรุปผล</button></div></div>`;
                 });
@@ -1430,7 +1432,7 @@
             timeSlots.forEach(slot => {
                 if (slot.period === -1) { html += `<tr class="bg-amber-50/70 border-y border-amber-100"><td class="p-1.5 sm:p-3 lg:p-5 text-center font-bold text-amber-600 bg-amber-100/50 text-[9px] sm:text-base"><i class="fas fa-utensils"></i></td><td class="p-1.5 sm:p-3 lg:p-5 font-black text-amber-700 text-center tracking-widest text-[11px] sm:text-lg" colspan="3">${slot.name}</td></tr>`; } else {
                     const subjectInSlot = daySubjects.find(s => s.currentPeriod === slot.period);
-                    const periodCellHtml = (dim) => `<td class="p-1.5 sm:p-3 lg:p-5 text-center bg-slate-50/50"><div class="font-black ${dim ? 'text-slate-400' : 'text-slate-700'} text-sm sm:text-lg leading-none">${slot.period}</div><div class="font-bold ${dim ? 'text-slate-300' : 'text-slate-400'} font-mono text-[8px] sm:text-xs mt-0.5">${slot.time.split('-')[0]}</div></td>`;
+                    const periodCellHtml = (dim) => `<td class="p-1.5 sm:p-3 lg:p-5 text-center bg-slate-50/50"><div class="font-black ${dim ? 'text-slate-400' : 'text-slate-700'} text-sm sm:text-lg leading-none">${periodLabel(slot.period)}</div><div class="font-bold ${dim ? 'text-slate-300' : 'text-slate-400'} font-mono text-[8px] sm:text-xs mt-0.5">${slot.time.split('-')[0]}</div></td>`;
                     if (subjectInSlot) { const isSlotLocked = isAttendanceEntryLocked(subjectInSlot.term, subjectInSlot.year); html += `<tr class="hover:bg-indigo-50/40 transition-colors group">${periodCellHtml(false)}<td class="p-1.5 sm:p-3 lg:p-5 min-w-0"><div class="font-extrabold text-blue-700 text-[11px] sm:text-lg leading-tight break-words">${subjectInSlot.name}</div>${subjectInSlot.code ? `<div class="text-[8px] sm:text-xs font-bold text-slate-400 mt-1 uppercase bg-slate-100 inline-block px-1 sm:px-1.5 py-0.5 rounded border border-slate-200 truncate max-w-full">${subjectInSlot.code}</div>` : ''}</td><td class="p-1.5 sm:p-3 lg:p-5 font-bold text-slate-600 text-[9px] sm:text-base min-w-0"><span class="flex flex-col min-w-0">${subjectInSlot.teacher ? `<span class="truncate block" title="${subjectInSlot.teacher}">${subjectInSlot.teacher}</span>` : '<span>-</span>'}${subjectInSlot.teacher2 ? `<span class="truncate block" title="${subjectInSlot.teacher2}">${subjectInSlot.teacher2}</span>` : ''}</span></td><td class="p-1 sm:p-3 lg:p-5">${isSlotLocked ? `<button disabled title="ไม่สามารถเช็คชื่อได้ในขณะนี้" class="w-full bg-slate-100 text-slate-400 py-1 sm:py-1.5 rounded-full text-[9px] sm:text-sm font-bold cursor-not-allowed whitespace-nowrap"><i class="fas fa-lock"></i> <span>ล็อคแล้ว</span></button>` : `<button onclick="window.navigate('attendance', {subjectId: '${subjectInSlot.id}', period: ${slot.period}, date: '${dateToPass}'})" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-1 sm:py-1.5 pl-1 sm:pl-1.5 pr-2.5 sm:pr-3.5 rounded-full text-[9px] sm:text-sm font-bold transition-all shadow-sm whitespace-nowrap flex items-center justify-center gap-1 sm:gap-1.5"><span class="w-4 h-4 sm:w-5 sm:h-5 bg-white text-indigo-600 rounded-full flex items-center justify-center shrink-0 text-[8px] sm:text-xs"><i class="fas fa-check"></i></span><span>เริ่มเช็คชื่อ</span></button>`}</td></tr>`;
                     } 
                     else { html += `<tr>${periodCellHtml(true)}<td class="p-1.5 sm:p-3 lg:p-5 text-slate-300 font-medium italic text-[9px] sm:text-sm" colspan="3">- ว่าง -</td></tr>`;
@@ -1473,7 +1475,7 @@
             // ===== [ใหม่] แสดงตารางสอนทั้งหมดของวิชานี้เป็นป้ายสีตามวัน (สีเดียวกับหน้าห้องเรียน: จันทร์เหลือง อังคารชมพู พุธเขียว พฤหัสส้ม ศุกร์ฟ้า) ให้เห็นบริบทว่าวิชานี้สอนวันไหนคาบไหนบ้าง ไม่ต้องสลับไปดูหน้าอื่น =====
             const scheduleColorMap = { 1: 'bg-yellow-500', 2: 'bg-pink-500', 3: 'bg-green-600', 4: 'bg-orange-500', 5: 'bg-sky-500' };
             const sortedSchedules = (subject.schedules || []).slice().sort((a, b) => parseInt(a.day) - parseInt(b.day) || parseInt(a.period) - parseInt(b.period));
-            const scheduleBadgesHtml = sortedSchedules.length > 0 ? `<div class="mt-2 sm:mt-3 flex flex-wrap items-center gap-1.5"><span class="text-[10px] sm:text-xs font-bold text-slate-400 mr-0.5">วิชานี้มีสอน:</span>${sortedSchedules.map(sch => `<span class="${scheduleColorMap[parseInt(sch.day)] || 'bg-slate-400'} text-white font-bold text-[9px] sm:text-xs px-2 py-1 rounded-lg whitespace-nowrap">${daysLabel[sch.day - 1].replace('วัน', '')} คาบ ${sch.period}</span>`).join('')}</div>` : '';
+            const scheduleBadgesHtml = sortedSchedules.length > 0 ? `<div class="mt-2 sm:mt-3 flex flex-wrap items-center gap-1.5"><span class="text-[10px] sm:text-xs font-bold text-slate-400 mr-0.5">วิชานี้มีสอน:</span>${sortedSchedules.map(sch => `<span class="${scheduleColorMap[parseInt(sch.day)] || 'bg-slate-400'} text-white font-bold text-[9px] sm:text-xs px-2 py-1 rounded-lg whitespace-nowrap">${daysLabel[sch.day - 1].replace('วัน', '')} คาบ ${periodLabel(sch.period)}</span>`).join('')}</div>` : '';
             let html = `<div class="mb-4 sm:mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4 sm:gap-6 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="relative z-10 w-full"><div class="flex flex-wrap items-center gap-2 mb-2 sm:mb-3"><span class="bg-indigo-100 text-indigo-700 font-bold px-2 py-1 rounded text-[10px] sm:text-sm">ห้อง ${formatRoomName(subject.roomId)}</span></div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2"><i class="fas fa-clipboard-check text-indigo-500"></i> ${subject.name}</h2><p class="text-slate-500 mt-1 text-[11px] sm:text-base font-medium flex items-center gap-1.5"><i class="fas fa-chalkboard-teacher"></i> ครู: <span class="text-slate-700">${subject.teacher || '-'}${subject.teacher2 ? ' / ' + subject.teacher2 : ''}</span></p>${scheduleBadgesHtml}</div><div class="flex flex-col gap-3 relative z-10 w-full md:w-auto mt-2 md:mt-0"><div class="flex flex-row gap-2 w-full"><input type="date" id="attDate" value="${today}" onchange="window.navigate('attendance', {subjectId: '${subjectId}', fromTeacherDash: ${fromTeacherDash}, date: this.value}, true)" class="flex-1 bg-slate-50 border border-slate-200 text-slate-800 px-3 py-2 sm:py-3 rounded-xl shadow-inner focus:ring-2 focus:ring-indigo-500 text-base sm:text-sm font-bold outline-none"><select id="attPeriod" class="w-24 sm:w-32 bg-slate-50 border border-slate-200 text-slate-800 px-2 py-2 sm:py-3 rounded-xl shadow-inner focus:ring-2 focus:ring-indigo-500 text-base sm:text-sm font-bold outline-none"></select></div><label class="flex items-center gap-2 cursor-pointer bg-amber-50 p-2 sm:p-3 rounded-xl border border-amber-200 w-full"><input type="checkbox" id="isSubstitute" onchange="document.getElementById('substituteTeacher').classList.toggle('hidden', !this.checked)" class="w-4 h-4 text-amber-600 rounded"><span class="font-bold text-amber-800 text-[10px] sm:text-sm">มีการสอนแทน (ระบุชื่อผู้เช็คแทน)</span></label><select id="substituteTeacher" class="hidden w-full bg-white border border-amber-300 text-slate-800 px-3 py-2 rounded-xl shadow-inner focus:ring-2 focus:ring-amber-500 text-base sm:text-sm font-bold outline-none">${tcOptions}</select><button onclick="${backAction}" class="w-full bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2 sm:py-3 rounded-xl shadow-sm transition-all font-bold text-sm">ย้อนกลับ</button></div></div>`;
             
             html += `<div id="attHolidayNote" class="hidden mb-4 sm:mb-6 bg-rose-50 border-2 border-rose-300 rounded-2xl p-3 sm:p-4 flex items-center gap-3"><div class="w-9 h-9 sm:w-11 sm:h-11 bg-rose-500 text-white rounded-full flex items-center justify-center text-sm sm:text-lg shrink-0"><i class="fas fa-calendar-times"></i></div><span id="attHolidayNoteText" class="text-rose-700 font-bold text-xs sm:text-sm"></span></div>`;
@@ -1495,14 +1497,14 @@
                 const rec = attendanceData.find(a => a.subjectId === periodSubjectMap[p].id && a.date === today && String(a.period) === String(p));
                 if (rec) periodRecordMap[p] = rec;
             });
-            const buildDayDots = (studentId, big) => Array.from({ length: 9 }, (_, p) => {
+            const buildDayDots = (studentId, big) => [-2,0,1,2,3,4,5,6,7,8].map((p) => {
                 const sub = periodSubjectMap[p];
                 const rec = periodRecordMap[p];
                 const stStatus = rec ? rec.records[studentId] : null;
                 const isCurrent = String(p) === String(selectedPeriod);
                 const color = stStatus ? (STATUS_HEX[stStatus] || '#cbd5e1') : (sub ? '#e2e8f0' : 'transparent');
                 const sizeCls = big ? 'w-3 h-3' : 'w-2.5 h-2.5';
-                const detail = !sub ? `คาบ ${p}: ไม่มีวิชา` : (stStatus ? `คาบ ${p} (${sub.name}): ${stStatus}` : `คาบ ${p} (${sub.name}): ยังไม่เช็ค`);
+                const detail = !sub ? `คาบ ${periodLabel(p)}: ไม่มีวิชา` : (stStatus ? `คาบ ${periodLabel(p)} (${sub.name}): ${stStatus}` : `คาบ ${periodLabel(p)} (${sub.name}): ยังไม่เช็ค`);
                 return `<div title="${detail}" class="${sizeCls} rounded-full shrink-0 ${isCurrent ? 'ring-2 ring-offset-1 ring-indigo-400' : ''} ${sub ? '' : 'opacity-30'}" style="background-color:${color}"></div>`;
             }).join('');
             html += `<div class="block lg:hidden divide-y divide-slate-100">`;
@@ -1534,7 +1536,7 @@
                 const selectEl = document.getElementById('attPeriod'), saveBtn = document.getElementById('saveAttBtn');
                 const noPeriodBanner = document.getElementById('attNoPeriodBanner');
                 if (schedsOnDay.length > 0) {
-                    selectEl.innerHTML = schedsOnDay.map(sch => `<option value="${sch.period}" ${String(sch.period) === String(selectedPeriod) ? 'selected' : ''}>คาบ ${sch.period} (${daysLabel[sch.day-1]})</option>`).join('');
+                    selectEl.innerHTML = schedsOnDay.map(sch => `<option value="${sch.period}" ${String(sch.period) === String(selectedPeriod) ? 'selected' : ''}>คาบ ${periodLabel(sch.period)} (${daysLabel[sch.day-1]})</option>`).join('');
                     selectEl.disabled = false; saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-cloud-upload-alt text-xl"></i> บันทึกข้อมูลเช็คชื่อ';
                     saveBtn.classList.replace('bg-slate-400', 'bg-indigo-600'); saveBtn.classList.replace('hover:bg-slate-500', 'hover:bg-indigo-700');
                     if (noPeriodBanner) noPeriodBanner.classList.add('hidden');
@@ -1601,7 +1603,7 @@
                         const prevRecord = attendanceData.find(a => a.subjectId === subjectId && a.date === date && String(a.period) === String(prevPeriod));
                         if (prevRecord) {
                             Object.keys(prevRecord.records).forEach(stId => { syncRadio(stId, prevRecord.records[stId]); });
-                            showToast(`คัดลอกข้อมูลจากคาบ ${prevPeriod} ของวิชานี้ให้แล้ว - กรุณาตรวจสอบก่อนกดบันทึก`, "info");
+                            showToast(`คัดลอกข้อมูลจากคาบ ${periodLabel(prevPeriod)} ของวิชานี้ให้แล้ว - กรุณาตรวจสอบก่อนกดบันทึก`, "info");
                             copiedFromPrev = true;
                         }
                     }
@@ -1751,7 +1753,7 @@
             let subNotesHtml = '';
             if (subNotesList.length > 0) {
                 subNotesHtml = `<div class="mt-4 sm:mt-6 bg-amber-50 border border-amber-200 p-3 sm:p-4 rounded-xl shadow-inner"><h4 class="font-bold text-amber-800 text-xs sm:text-sm mb-2 flex items-center gap-2"><i class="fas fa-user-edit"></i> หมายเหตุ: การสอนแทน</h4><ul class="text-[10px] sm:text-xs text-amber-700 list-disc list-inside pl-2 sm:pl-5 space-y-1">`;
-                subNotesList.forEach(c => { subNotesHtml += `<li>วันที่ ${c.date.split('-').reverse().join('/')} คาบ ${c.period} - สอนแทนโดย <strong>${c.subTeacher}</strong></li>`; });
+                subNotesList.forEach(c => { subNotesHtml += `<li>วันที่ ${c.date.split('-').reverse().join('/')} คาบ ${periodLabel(c.period)} - สอนแทนโดย <strong>${c.subTeacher}</strong></li>`; });
                 subNotesHtml += `</ul></div>`;
             }
 
@@ -1822,7 +1824,7 @@
             const displayMonthYear = `${monthNames[parseInt(selectedMonth.split('-')[1])-1]} ${parseInt(selectedMonth.split('-')[0])+543}`;
             const backAction = 'history.back()';
             let roomTotals = null;
-            let html = `<div class="mb-4 sm:mb-8 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-1/3 h-full ${isDarkNow ? '' : 'bg-gradient-to-l from-emerald-50 to-transparent opacity-60'}"></div><div class="relative z-10 flex gap-3 items-center"><div class="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center text-white text-xl sm:text-3xl shadow-lg shrink-0"><i class="fas fa-chart-bar"></i></div><div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">รายงานห้อง ${roomName}</h2></div></div><div class="relative z-10 flex gap-1.5 sm:gap-2 w-full lg:w-auto mt-2 lg:mt-0">${tab === 'monthly' ? `<button onclick="window.downloadRoomMonthlyRegisterPDF('${roomId}', '${selectedMonth}')" title="สมุดทะเบียนรวมทุกวันในเดือนนี้ (ปก + สรุปทั้งเดือน + ลงนามท้ายเล่ม + บันทึกรายวันเป็นภาคผนวก)" class="flex-1 lg:flex-none px-2 sm:px-3 py-2 rounded-xl font-bold text-[9px] sm:text-sm bg-indigo-700 hover:bg-indigo-800 text-white shadow-md flex items-center justify-center gap-1 sm:gap-1.5"><i class="fas fa-book"></i> <span class="whitespace-nowrap">สมุดทะเบียน</span></button>` : ''}<button onclick="window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'monthly'})" class="flex-1 lg:flex-none px-2 sm:px-3 py-2 rounded-xl font-bold text-[9px] sm:text-sm whitespace-nowrap ${tab === 'monthly' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 border border-slate-200'}">สรุปรายเดือน</button><button onclick="window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'daily'})" class="flex-1 lg:flex-none px-2 sm:px-3 py-2 rounded-xl font-bold text-[9px] sm:text-sm whitespace-nowrap ${tab === 'daily' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 border border-slate-200'}">สรุปรายวัน</button><button onclick="${backAction}" class="flex-1 lg:flex-none px-2 sm:px-3 py-2 rounded-xl font-bold text-[9px] sm:text-sm whitespace-nowrap bg-white border border-slate-200 lg:ml-auto">กลับ</button></div></div>`;
+            let html = `<div class="mb-4 sm:mb-8 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-1/3 h-full ${isDarkNow ? '' : 'bg-gradient-to-l from-emerald-50 to-transparent opacity-60'}"></div><div class="relative z-10 flex gap-3 items-center"><div class="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center text-white text-xl sm:text-3xl shadow-lg shrink-0"><i class="fas fa-chart-bar"></i></div><div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">รายงานห้อง ${roomName}</h2></div></div><div class="relative z-10 flex gap-1.5 sm:gap-2 w-full lg:w-auto mt-2 lg:mt-0">${tab === 'monthly' ? `<button onclick="window.downloadRoomMonthlyRegisterPDF('${roomId}', '${selectedMonth}')" title="สมุดทะเบียนรวมทุกวันในเดือนนี้ (ปก + สรุปทั้งเดือน + ลงนามท้ายเล่ม + บันทึกรายวันเป็นภาคผนวก)" class="flex-1 lg:flex-none px-2 sm:px-3 py-2 rounded-xl font-bold text-[9px] sm:text-sm bg-indigo-700 hover:bg-indigo-800 text-white shadow-md flex items-center justify-center gap-1 sm:gap-1.5"><i class="fas fa-book"></i> <span class="whitespace-nowrap">สมุดทะเบียน</span></button><button onclick="window.downloadZoneSummaryPDF('${roomId}', '${selectedMonth}')" title="สรุปคาบ 00 เขตพื้นที่รับผิดชอบ (แยกจากสมุดทะเบียน)" class="flex-1 lg:flex-none px-2 sm:px-3 py-2 rounded-xl font-bold text-[9px] sm:text-sm bg-teal-600 hover:bg-teal-700 text-white shadow-md flex items-center justify-center gap-1 sm:gap-1.5"><i class="fas fa-map-marked-alt"></i> <span class="whitespace-nowrap">สรุปเขตรับผิดชอบ</span></button>` : ''}<button onclick="window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'monthly'})" class="flex-1 lg:flex-none px-2 sm:px-3 py-2 rounded-xl font-bold text-[9px] sm:text-sm whitespace-nowrap ${tab === 'monthly' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 border border-slate-200'}">สรุปรายเดือน</button><button onclick="window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'daily'})" class="flex-1 lg:flex-none px-2 sm:px-3 py-2 rounded-xl font-bold text-[9px] sm:text-sm whitespace-nowrap ${tab === 'daily' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 border border-slate-200'}">สรุปรายวัน</button><button onclick="${backAction}" class="flex-1 lg:flex-none px-2 sm:px-3 py-2 rounded-xl font-bold text-[9px] sm:text-sm whitespace-nowrap bg-white border border-slate-200 lg:ml-auto">กลับ</button></div></div>`;
 
             if (tab === 'monthly') {
                 const { studentSummaries, incompleteAttendanceList, roomTotals: computedRoomTotals } = computeRoomIncompleteList(roomId, selectedMonth);
@@ -2003,6 +2005,7 @@
                 for(let i=1; i<=6; i++) { html += `<div class="bg-slate-50 p-2 sm:p-3 rounded-lg border border-slate-100 text-center"><label class="block font-black text-[10px] sm:text-xs text-slate-700 mb-1 sm:mb-2">ม.${i}</label><input type="number" id="setCountM${i}" value="${settings.roomCounts[`m${i}`]}" min="0" max="15" ${!isSuperAdminSettings ? 'disabled' : ''} class="w-full text-center py-1.5 sm:py-2 rounded border border-slate-200 font-bold ${!isSuperAdminSettings ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'text-indigo-600'} outline-none text-base sm:text-sm"></div>`;
                 }
                 html += `</div>${isSuperAdminSettings ? `<div class="flex justify-end mb-6"><button onclick="window.saveRoomCountsSettings()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกจำนวนห้อง</button></div>` : '<div class="mb-6"></div>'}<h3 class="text-lg sm:text-xl font-extrabold text-rose-600 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-exclamation-triangle"></i> ล้างข้อมูลทั้งระบบ</h3><div class="bg-rose-50 p-4 rounded-xl border border-rose-200 shadow-sm flex flex-col sm:flex-row justify-between items-center gap-4"><div><h4 class="font-bold text-rose-800 text-sm sm:text-base">ล้างข้อมูลการเช็คชื่อทั้งหมด</h4><p class="text-[10px] sm:text-xs text-rose-600 font-medium">ลบประวัติการเช็คชื่อของทุกวิชา ทุกห้อง ทุกวัน (ไม่สามารถกู้คืนได้)</p>${!isSuperAdminSettings ? `<p class="text-[10px] sm:text-xs text-slate-400 font-bold mt-1"><i class="fas fa-lock"></i> เฉพาะ Super Admin เท่านั้นที่ใช้งานส่วนนี้ได้</p>` : ''}</div>${isSuperAdminSettings ? `<button onclick="window.resetAllAttendanceData()" class="w-full sm:w-auto bg-rose-600 hover:bg-rose-700 text-white px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-bold shadow-sm transition-colors text-sm whitespace-nowrap"><i class="fas fa-trash-alt"></i> ล้างข้อมูลทั้งหมด</button>` : `<button disabled title="เฉพาะ Super Admin เท่านั้น" class="w-full sm:w-auto bg-slate-200 text-slate-400 px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-bold text-sm whitespace-nowrap cursor-not-allowed"><i class="fas fa-lock"></i> ล้างข้อมูลทั้งหมด</button>`}</div>`;
+                html += `<div class="mt-8 pt-4 border-t border-slate-200 text-center"><span class="text-[11px] sm:text-xs font-bold text-slate-400"><i class="fas fa-code-branch"></i> Version 1.60.081026</span></div>`;
                 content.innerHTML = html;
             } 
             else if (currentAdminTab === 'term_settings') {
@@ -2275,7 +2278,7 @@ content.innerHTML = html;
                                 <div class="flex items-center gap-2 shrink-0 text-slate-500">
                                     <span>${formatRoomName(ev.roomId)}</span>
                                     <span class="font-bold text-slate-700"><i class="far fa-calendar-alt"></i> ${new Date(ev.date).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
-                                    <span>คาบ ${ev.period}</span>
+                                    <span>คาบ ${periodLabel(ev.period)}</span>
                                     <span class="font-bold text-indigo-600"><i class="far fa-clock"></i> ${firstCheckStr}</span>
                                 </div>
                             </div>
@@ -2393,11 +2396,11 @@ content.innerHTML = html;
                     if (dupes.size > 0) html += `<span class="bg-rose-50 border border-rose-200 text-rose-600 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded-full"><i class="fas fa-clone"></i> พบวิชาซ้ำ ${dupes.size} รายการ (ชื่อ/รหัสวิชาซ้ำกัน)</span>`;
                     html += `</div>`;
                     // ===== ตารางเรียนรายสัปดาห์ของห้องนี้ (แถว = วันจันทร์-ศุกร์, คอลัมน์ = คาบ 0-8) เพื่อให้ดูง่ายว่าคาบไหนยังขาดวิชา คลิกช่องว่างเพื่อเพิ่มวิชาในคาบนั้นได้ทันที =====
-                    const gridPeriods = timeSlots.filter(t => t.period >= 0);
+                    const gridPeriods = timeSlots.filter(t => t.period >= 0 || t.period === -2);
                     const gridMatrix = {};
                     getRoomSubjects(window.adminSelectedSubjectRoom, adminTerm(), adminYear()).sort((a, b) => (a.systemType === 'homeroom' ? -1 : 0) - (b.systemType === 'homeroom' ? -1 : 0)).forEach(s => (s.schedules || []).forEach(sch => { gridMatrix[sch.day + '-' + sch.period] = s; }));
                     const gridDayColors = { 1: { bg: 'bg-yellow-50', text: 'text-yellow-800' }, 2: { bg: 'bg-pink-50', text: 'text-pink-800' }, 3: { bg: 'bg-green-50', text: 'text-green-800' }, 4: { bg: 'bg-orange-50', text: 'text-orange-800' }, 5: { bg: 'bg-sky-50', text: 'text-sky-800' } };
-                    html += `<div class="mb-4"><h4 class="text-xs sm:text-sm font-extrabold text-slate-600 mb-2 flex items-center gap-1.5"><i class="fas fa-table text-indigo-400"></i> ตารางเรียนห้อง ${formatRoomName(window.adminSelectedSubjectRoom)} <span class="text-[9px] sm:text-[10px] font-medium text-slate-400">(คลิกช่องว่างเพื่อเพิ่มวิชาในคาบนั้น)</span></h4><div class="overflow-x-auto rounded-xl border border-slate-200"><table class="w-full text-center text-[9px] sm:text-[11px] border-collapse min-w-[720px]"><thead><tr class="bg-slate-100"><th class="p-1.5 sm:p-2 border border-slate-200 sticky left-0 bg-slate-100 z-10">วัน \\ คาบ</th>${gridPeriods.map(p => `<th class="p-1.5 sm:p-2 border border-slate-200 font-bold">${p.period}${p.period === 0 ? '<div class="font-normal text-slate-400 text-[8px] sm:text-[9px]">(แถว)</div>' : ''}</th>${p.period === 4 ? `<th class="p-1 border border-amber-200 font-bold bg-amber-50 text-amber-600 w-6 sm:w-8" title="พักกลางวัน"><i class="fas fa-utensils"></i></th>` : ''}`).join('')}</tr></thead><tbody>`;
+                    html += `<div class="mb-4"><h4 class="text-xs sm:text-sm font-extrabold text-slate-600 mb-2 flex items-center gap-1.5"><i class="fas fa-table text-indigo-400"></i> ตารางเรียนห้อง ${formatRoomName(window.adminSelectedSubjectRoom)} <span class="text-[9px] sm:text-[10px] font-medium text-slate-400">(คลิกช่องว่างเพื่อเพิ่มวิชาในคาบนั้น)</span></h4><div class="overflow-x-auto rounded-xl border border-slate-200"><table class="w-full text-center text-[9px] sm:text-[11px] border-collapse min-w-[720px]"><thead><tr class="bg-slate-100"><th class="p-1.5 sm:p-2 border border-slate-200 sticky left-0 bg-slate-100 z-10">วัน \\ คาบ</th>${gridPeriods.map(p => `<th class="p-1.5 sm:p-2 border border-slate-200 font-bold">${periodLabel(p.period)}${p.period === -2 ? '<div class="font-normal text-slate-400 text-[8px]">(เขตฯ)</div>' : ''}${p.period === 0 ? '<div class="font-normal text-slate-400 text-[8px] sm:text-[9px]">(แถว)</div>' : ''}</th>${p.period === 4 ? `<th class="p-1 border border-amber-200 font-bold bg-amber-50 text-amber-600 w-6 sm:w-8" title="พักกลางวัน"><i class="fas fa-utensils"></i></th>` : ''}`).join('')}</tr></thead><tbody>`;
                     for (let d = 1; d <= 5; d++) {
                         const dc = gridDayColors[d];
                         html += `<tr><td class="p-1.5 sm:p-2 border border-slate-200 font-bold ${dc.bg} ${dc.text} sticky left-0 z-10 whitespace-nowrap">${daysLabel[d-1].replace('วัน','')}</td>`;
@@ -3331,8 +3334,8 @@ content.innerHTML = html;
             const roomId = document.getElementById('newSubRoom') ? document.getElementById('newSubRoom').value : null;
             const otherSubs = roomId ? getRoomSubjects(roomId, adminTerm(), adminYear()).filter(s => s.id !== editingSubjectId && s.systemType !== 'homeroom') : [];
             const homeroomSub = roomId ? getRoomSubjects(roomId, adminTerm(), adminYear()).find(s => s.systemType === 'homeroom' && s.id !== editingSubjectId) : null;
-            const gridPeriods = timeSlots.filter(t => t.period >= 0);
-            let html = `<div class="col-span-full"><div class="flex items-center justify-between mb-2"><span class="text-[10px] sm:text-xs font-bold text-slate-600">คลิกช่องเพื่อเลือกคาบสอน <span class="text-indigo-600">(เลือกแล้ว ${window.__scheduleSelection.length}/${count})</span></span>${window.__scheduleSelection.length > 0 ? `<button type="button" onclick="window.clearScheduleSelection()" class="text-[10px] sm:text-xs font-bold text-rose-500 hover:underline"><i class="fas fa-eraser"></i> ล้างทั้งหมด</button>` : ''}</div><div class="overflow-x-auto rounded-xl border border-slate-200"><table class="w-full text-center text-[9px] sm:text-[11px] border-collapse min-w-[600px]"><thead><tr class="bg-slate-100"><th class="p-1.5 border border-slate-200 sticky left-0 bg-slate-100 z-10">วัน\\คาบ</th>${gridPeriods.map(p => `<th class="p-1.5 border border-slate-200 font-bold">${p.period}${p.period === 0 ? '<div class="font-normal text-slate-400 text-[8px]">(แถว)</div>' : ''}</th>${p.period === 4 ? `<th class="p-1 border border-amber-200 bg-amber-50 text-amber-500 w-5" title="พักกลางวัน"><i class="fas fa-utensils"></i></th>` : ''}`).join('')}</tr></thead><tbody>`;
+            const gridPeriods = timeSlots.filter(t => t.period >= 0 || t.period === -2);
+            let html = `<div class="col-span-full"><div class="flex items-center justify-between mb-2"><span class="text-[10px] sm:text-xs font-bold text-slate-600">คลิกช่องเพื่อเลือกคาบสอน <span class="text-indigo-600">(เลือกแล้ว ${window.__scheduleSelection.length}/${count})</span></span>${window.__scheduleSelection.length > 0 ? `<button type="button" onclick="window.clearScheduleSelection()" class="text-[10px] sm:text-xs font-bold text-rose-500 hover:underline"><i class="fas fa-eraser"></i> ล้างทั้งหมด</button>` : ''}</div><div class="overflow-x-auto rounded-xl border border-slate-200"><table class="w-full text-center text-[9px] sm:text-[11px] border-collapse min-w-[600px]"><thead><tr class="bg-slate-100"><th class="p-1.5 border border-slate-200 sticky left-0 bg-slate-100 z-10">วัน\\คาบ</th>${gridPeriods.map(p => `<th class="p-1.5 border border-slate-200 font-bold">${periodLabel(p.period)}${p.period === -2 ? '<div class="font-normal text-slate-400 text-[8px]">(เขตฯ)</div>' : ''}${p.period === 0 ? '<div class="font-normal text-slate-400 text-[8px]">(แถว)</div>' : ''}</th>${p.period === 4 ? `<th class="p-1 border border-amber-200 bg-amber-50 text-amber-500 w-5" title="พักกลางวัน"><i class="fas fa-utensils"></i></th>` : ''}`).join('')}</tr></thead><tbody>`;
             for (let d = 1; d <= 5; d++) {
                 const dc = window.__scheduleGridDayBg[d];
                 html += `<tr><td class="p-1.5 border border-slate-200 font-bold ${dc.bg} ${dc.text} sticky left-0 z-10">${daysLabel[d-1].replace('วัน','')}</td>`;
@@ -3450,7 +3453,7 @@ content.innerHTML = html;
             };
 
             if (conflicts.length > 0) {
-                const conflictListText = conflicts.map(c => `${daysLabel[c.day-1] || ''} คาบ ${c.period} ชนกับวิชา "${c.withName}"`).join('\n');
+                const conflictListText = conflicts.map(c => `${daysLabel[c.day-1] || ''} คาบ ${periodLabel(c.period)} ชนกับวิชา "${c.withName}"`).join('\n');
                 showConfirm("พบคาบสอนชนกันในห้องนี้", `ห้อง ${formatRoomName(roomId)} มีคาบที่ชนกับวิชาอื่นในตารางเดียวกัน:\n\n${conflictListText}\n\nต้องการบันทึกต่อไปหรือไม่? (ระบบจะยังบันทึกให้ แต่ทั้งสองวิชาจะซ้อนกันในตาราง)`, doActualSave);
             } else {
                 await doActualSave();
@@ -3501,7 +3504,7 @@ content.innerHTML = html;
             if (mode === 'full') {
                 ws_data = [["รหัสวิชา", "ชื่อวิชา", "หน่วยกิต", "ครู (หลัก)", "ครู (ร่วมสอน)", "คาบสอน"]];
                 subs.forEach(s => {
-                    const schedText = (s.schedules || []).map(sch => `${(daysLabel[sch.day-1]||'').replace('วัน','')} คาบ ${sch.period}`).join(', ');
+                    const schedText = (s.schedules || []).map(sch => `${(daysLabel[sch.day-1]||'').replace('วัน','')} คาบ ${periodLabel(sch.period)}`).join(', ');
                     ws_data.push([s.code || '', s.name, s.credits || '', s.teacher || '', s.teacher2 || '', schedText]);
                 });
                 colWidths = [{wch:10},{wch:30},{wch:8},{wch:22},{wch:22},{wch:35}];
@@ -4078,7 +4081,7 @@ content.innerHTML = html;
             subjectAtt.forEach(att => { const key = `${att.date}_${att.period}`; if (!uniqueCols.find(c => c.key === key)) uniqueCols.push({ key, data: att.records, subTeacher: att.substituteTeacher }); });
             const totalClasses = uniqueCols.length;
             const staffName = getRoomStaff(subject.roomId);
-            let subNotes = uniqueCols.filter(c => c.subTeacher).map(c => `วันที่ ${c.key.split('_')[0].split('-').reverse().join('/')} คาบ ${c.key.split('_')[1]} (แทนโดย: ${c.subTeacher})`);
+            let subNotes = uniqueCols.filter(c => c.subTeacher).map(c => `วันที่ ${c.key.split('_')[0].split('-').reverse().join('/')} คาบ ${periodLabel(c.key.split('_')[1])} (แทนโดย: ${c.subTeacher})`);
             let subNotesHtml = '';
             if (subNotes.length > 0) { subNotesHtml = `<div class="mb-4 text-[10px] font-bold text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-200"><span class="text-amber-800 underline mr-1">หมายเหตุการสอนแทน:</span> ${subNotes.join(', ')}</div>`;
             }
@@ -4189,7 +4192,7 @@ content.innerHTML = html;
                 const dataChunk = roomStudents.slice(page * STUDENTS_PER_PAGE, (page + 1) * STUDENTS_PER_PAGE);
                 let tableHTML = `<table class="w-full text-center border-collapse text-[12px] bg-white border border-slate-500" style="table-layout: fixed; width: 100%;"><thead class="bg-slate-100 text-slate-700"><tr><th class="p-2 border border-slate-500" style="width: 10%;">เลขที่</th><th class="p-2 border border-slate-500 text-left" style="width: 35%;">ชื่อ-นามสกุล</th>`;
                 if (subjectsToday.length === 0) { tableHTML += `<th class="p-2 border border-slate-500 w-auto">ไม่มีวิชาเรียน</th>`;
-                } else { const subColWidth = 55 / subjectsToday.length; subjectsToday.forEach(sub => { tableHTML += `<th class="p-2 border border-slate-500" style="width: ${subColWidth}%;"><div class="leading-tight" title="${sub.name}">${sub.name}</div><div class="text-[9px] mt-1 text-slate-500">คาบ ${sub.period}</div></th>`; });
+                } else { const subColWidth = 55 / subjectsToday.length; subjectsToday.forEach(sub => { tableHTML += `<th class="p-2 border border-slate-500" style="width: ${subColWidth}%;"><div class="leading-tight" title="${sub.name}">${sub.name}</div><div class="text-[9px] mt-1 text-slate-500">คาบ ${periodLabel(sub.period)}</div></th>`; });
                 }
                 tableHTML += `</tr></thead><tbody class="divide-y divide-slate-400">`;
                 dataChunk.forEach((st) => {
@@ -4240,6 +4243,77 @@ content.innerHTML = html;
             showConfirm("สร้างสมุดทะเบียนรายเดือน", `จะสร้างสมุดทะเบียนแบบ "${modeLabel}" ซึ่งอาจใช้เวลาสักครู่ พร้อมดำเนินการหรือไม่?`, () => {
                 window.__runDownloadRoomMonthlyRegisterPDF(roomId, month, mode);
             });
+        };
+
+        // ===== [ใหม่] สรุปเขตพื้นที่รับผิดชอบ (คาบ 00) - รายงานแยกจากสมุดทะเบียน =====
+        window.downloadZoneSummaryPDF = function(roomId, month) {
+            const report = window.tempRoomReport; if (!report || report.roomId !== roomId) { showToast("กรุณาเปิดหน้าสรุปห้องนี้ก่อน", "error"); return; }
+            const zoneSubs = getRoomSubjects(roomId).filter(sb => (sb.schedules || []).some(sc => parseInt(sc.period) === -2));
+            if (zoneSubs.length === 0) { showToast("ห้องนี้ยังไม่มีวิชา/กิจกรรมในคาบ 00 (เขตพื้นที่รับผิดชอบ)", "error"); return; }
+            showConfirm("สรุปเขตรับผิดชอบ", `จะสร้างรายงานสรุปคาบ 00 เขตพื้นที่รับผิดชอบ ของห้อง ${formatRoomName(roomId)} ประจำเดือนที่เลือก พร้อมดำเนินการหรือไม่?`, () => { window.__runZoneSummaryPDF(roomId, month, zoneSubs); });
+        };
+        window.__runZoneSummaryPDF = async function(roomId, month, zoneSubs) {
+            showProgressModal("กำลังจัดทำสรุปเขตรับผิดชอบ", "กำลังเตรียมข้อมูล...");
+            const wasDark = document.documentElement.classList.contains('dark'); if (wasDark) document.documentElement.classList.remove('dark');
+            await document.fonts.ready; await new Promise(r => setTimeout(r, 400));
+            const roomName = formatRoomName(roomId);
+            const students = getRoomStudents(roomId).sort((a,b) => parseInt(a.number) - parseInt(b.number));
+            const advData = getRoomAdvisors(roomId); const staffName = getRoomStaff(roomId);
+            const signers = []; if (advData[0]) signers.push({ name: advData[0], role: advData[1] ? 'ครูที่ปรึกษาคนที่ 1' : 'ครูที่ปรึกษา' }); if (advData[1]) signers.push({ name: advData[1], role: 'ครูที่ปรึกษาคนที่ 2' }); signers.push({ name: staffName, role: 'เจ้าหน้าที่ / นายทะเบียน' });
+            const monthNames = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+            const [ys, ms] = month.split('-'); const year = parseInt(ys), mNum = parseInt(ms);
+            const daysInMonth = new Date(year, mNum, 0).getDate();
+            const zoneIds = new Set(zoneSubs.map(x => x.id));
+            const cols = [];
+            for (let d = 1; d <= daysInMonth; d++) {
+                const dow = new Date(year, mNum - 1, d).getDay(); if (dow === 0 || dow === 6) continue;
+                const dateStr = `${year}-${String(mNum).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                const hol = getHolidayForDate(dateStr);
+                const effDow = getEffectiveDayOfWeek(dateStr);
+                const hasZone = zoneSubs.some(sb => (sb.schedules || []).some(sc => parseInt(sc.period) === -2 && parseInt(sc.day) === effDow));
+                const isHoliday = !!(hol && (!hol.type || hol.type === 'holiday'));
+                const recs = attendanceData.filter(a => a.date === dateStr && parseInt(a.period) === -2 && zoneIds.has(a.subjectId));
+                cols.push({ d, dateStr, hasZone, isHoliday, recs });
+            }
+            const activeCols = cols.filter(c => c.hasZone && !c.isHoliday);
+            const abbr = { 'มา':'/', 'ร่วมกิจกรรม':'/', 'สาย':'ส', 'ลาป่วย':'ป', 'ลากิจ':'ก', 'ขาด':'ข', 'โดดเรียน':'ด' };
+            const colorOf = { 'มา':'#047857', 'ร่วมกิจกรรม':'#047857', 'สาย':'#d97706' };
+            const PER = 28; const pages = Math.ceil(students.length / PER) || 1;
+            const zoneNames = zoneSubs.map(x => x.name).join(', ');
+            let html = `<div id="pdf-zone-container" class="a4-export-container text-slate-800" style="font-family: 'Sarabun', sans-serif;">`;
+            for (let p = 0; p < pages; p++) {
+                const chunk = students.slice(p * PER, (p + 1) * PER);
+                let t = `<table class="w-full text-center border-collapse bg-white border border-slate-500" style="table-layout:fixed; width:100%; font-size:10px;"><thead class="bg-slate-100"><tr><th class="p-1 border border-slate-500" style="width:5%;">ที่</th><th class="p-1 border border-slate-500 text-left" style="width:24%;">ชื่อ-นามสกุล</th>${activeCols.map(c => `<th class="p-0.5 border border-slate-500">${c.d}</th>`).join('')}<th class="p-1 border border-slate-500" style="width:4.5%;">มา</th><th class="p-1 border border-slate-500" style="width:4.5%;">สาย</th><th class="p-1 border border-slate-500" style="width:4.5%;">ลา</th><th class="p-1 border border-slate-500" style="width:4.5%;">ขาด</th></tr></thead><tbody>`;
+                chunk.forEach(st => {
+                    let present = 0, late = 0, leave = 0, absent = 0;
+                    const cells = activeCols.map(c => {
+                        const rec = c.recs.find(r => r.records && r.records[st.id]); const stt = rec ? rec.records[st.id] : null;
+                        if (!stt) return `<td class="border border-slate-500 p-0.5 text-slate-300">-</td>`;
+                        if (stt === 'มา' || stt === 'ร่วมกิจกรรม') present++; else if (stt === 'สาย') late++; else if (stt === 'ลาป่วย' || stt === 'ลากิจ') leave++; else absent++;
+                        return `<td class="border border-slate-500 p-0.5 font-bold" style="color:${colorOf[stt] || '#e11d48'}">${abbr[stt] || stt}</td>`;
+                    }).join('');
+                    const res = st.status === 'resigned';
+                    t += `<tr class="${res ? 'bg-slate-100 text-slate-500' : ''}"><td class="border border-slate-500 p-0.5 font-bold">${st.number}</td><td class="border border-slate-500 p-0.5 text-left font-bold" style="white-space:nowrap; overflow:hidden;">${st.name}${res ? ' (ออก/ย้าย)' : ''}</td>${cells}<td class="border border-slate-500 p-0.5 font-bold text-emerald-700">${present}</td><td class="border border-slate-500 p-0.5 font-bold text-amber-600">${late}</td><td class="border border-slate-500 p-0.5 font-bold text-indigo-600">${leave}</td><td class="border border-slate-500 p-0.5 font-bold text-rose-600">${absent}</td></tr>`;
+                });
+                t += `</tbody></table><p class="text-[10px] text-slate-500 mt-2 font-semibold">สัญลักษณ์: / = มา · ส = สาย · ป = ลาป่วย · ก = ลากิจ · ข = ขาด · ด = โดดเรียน · - = ยังไม่เช็ค · จำนวนวันที่มีคาบ 00 ในเดือนนี้ ${activeCols.length} วัน</p>`;
+                html += `<div class="a4-page flex flex-col justify-between bg-white">${pdfPageBadge(pages > 1 ? `หน้า ${p+1}/${pages}` : '')}<div><div class="text-center mb-5 border-b-2 border-slate-700 pb-4">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-2xl font-black" style="margin-bottom:14px; line-height:1.6;">สรุปเขตพื้นที่รับผิดชอบ (คาบ 00)</h1><h2 class="text-lg font-bold bg-teal-100 px-4 py-1.5 rounded-full inline-block border border-teal-300" style="line-height:1.6;">ห้อง ${roomName} · ${monthNames[mNum-1]} ${year+543}</h2><p class="text-xs text-slate-500 mt-2 font-semibold">กิจกรรม/วิชา: ${zoneNames}</p></div>${t}</div>${p === pages - 1 ? buildPdfSignatureBlock(signers) : ''}</div>`;
+            }
+            html += `</div>`; document.body.insertAdjacentHTML('beforeend', html);
+            await document.fonts.ready; await new Promise(r => setTimeout(r, 500));
+            try {
+                const pdfDoc = new jspdf.jsPDF('p', 'pt', 'a4');
+                const els = document.querySelectorAll('#pdf-zone-container .a4-page');
+                for (let i = 0; i < els.length; i++) {
+                    updateProgressModal((i / els.length) * 100, `กำลังสร้างหน้าที่ ${i+1} จาก ${els.length}...`);
+                    const canvas = await html2canvas(els[i], { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false });
+                    if (i > 0) pdfDoc.addPage(); pdfDoc.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, 595.28, 841.89);
+                }
+                updateProgressModal(100, "กำลังบันทึกไฟล์...");
+                pdfDoc.save(`สรุปเขตรับผิดชอบ_${roomName}_${month}.pdf`);
+                completeProgressModal("ดำเนินการเสร็จสิ้น", `สร้างสรุปเขตรับผิดชอบ (${els.length} หน้า) สำเร็จ ไฟล์ถูกดาวน์โหลดแล้ว`);
+            } catch (err) { errorProgressModal("เกิดข้อผิดพลาดในการสร้างรายงาน กรุณาลองใหม่อีกครั้ง"); }
+            const el = document.getElementById('pdf-zone-container'); if (el) el.remove();
+            if (wasDark) document.documentElement.classList.add('dark');
         };
         window.__runDownloadRoomMonthlyRegisterPDF = async function(roomId, month, mode = 'full') {
             const report = window.tempRoomReport; if (!report || report.roomId !== roomId) { showToast("กรุณาเปิดหน้าสรุปห้องนี้ก่อนสร้างสมุดทะเบียน", "error"); return; }
@@ -4346,7 +4420,7 @@ content.innerHTML = html;
                     htmlContainer += `<div class="a4-page flex flex-col bg-white">${pdfPageBadge('ภาคผนวก')}<div class="text-center mb-6 border-b-2 border-slate-700 pb-4">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-3xl font-black" style="margin-bottom:22px; line-height:1.5;">บันทึกประจำวันที่ ${displayDateStr}</h1><h2 class="text-xl font-bold bg-indigo-100 px-4 py-1.5 rounded-full inline-block border border-indigo-300">ห้อง: ${roomName}</h2></div><div class="flex-1 flex flex-col items-center justify-center text-center py-16"><div class="w-20 h-20 bg-rose-100 text-rose-500 rounded-full flex items-center justify-center text-4xl mb-6"><i class="fas fa-calendar-times"></i></div><p class="text-2xl font-black text-rose-600 mb-2">วันหยุด</p><p class="text-lg font-bold text-slate-600">${w.holiday.label}</p><p class="text-sm text-slate-400 mt-4">ไม่มีการเรียนการสอนในวันนี้</p></div></div>`;
                     return;
                 }
-                const subjectsToday = []; roomSubjects.forEach(s => { if (s.schedules) { s.schedules.forEach(sch => { if (parseInt(sch.day) === w.dow) { subjectsToday.push({ ...s, period: parseInt(sch.period) }); } }); } });
+                const subjectsToday = []; roomSubjects.forEach(s => { if (s.schedules) { s.schedules.forEach(sch => { if (parseInt(sch.day) === w.dow && parseInt(sch.period) !== -2) { subjectsToday.push({ ...s, period: parseInt(sch.period) }); } }); } });
                 subjectsToday.sort((a,b) => a.period - b.period);
                 const dailyAttRecords = attendanceData.filter(a => a.date === w.dateStr && subjectsToday.some(st => st.id === a.subjectId && String(st.period) === String(a.period)));
                 const pagesForDay = Math.ceil(roomStudents.length / STUDENTS_PER_PAGE) || 1;
@@ -4354,7 +4428,7 @@ content.innerHTML = html;
                     const dataChunk = roomStudents.slice(p * STUDENTS_PER_PAGE, (p + 1) * STUDENTS_PER_PAGE);
                     let tableHTML = `<table class="w-full text-center border-collapse text-[12px] bg-white border border-slate-500" style="table-layout: fixed; width: 100%;"><thead class="bg-slate-100 text-slate-700"><tr><th class="p-2 border border-slate-500" style="width: 10%;">เลขที่</th><th class="p-2 border border-slate-500 text-left" style="width: 35%;">ชื่อ-นามสกุล</th>`;
                     if (subjectsToday.length === 0) { tableHTML += `<th class="p-2 border border-slate-500 w-auto">ไม่มีวิชาเรียน</th>`;
-                    } else { const subColWidth = 55 / subjectsToday.length; subjectsToday.forEach(sub => { tableHTML += `<th class="p-2 border border-slate-500" style="width: ${subColWidth}%;"><div class="leading-tight" title="${sub.name}">${sub.name}</div><div class="text-[9px] mt-1 text-slate-500">คาบ ${sub.period}</div></th>`; }); }
+                    } else { const subColWidth = 55 / subjectsToday.length; subjectsToday.forEach(sub => { tableHTML += `<th class="p-2 border border-slate-500" style="width: ${subColWidth}%;"><div class="leading-tight" title="${sub.name}">${sub.name}</div><div class="text-[9px] mt-1 text-slate-500">คาบ ${periodLabel(sub.period)}</div></th>`; }); }
                     tableHTML += `</tr></thead><tbody class="divide-y divide-slate-400">`;
                     dataChunk.forEach((st) => {
                         const isRes = st.status === 'resigned'; let bgRow = isRes ? 'bg-slate-100 text-slate-500 opacity-80' : 'bg-white';
