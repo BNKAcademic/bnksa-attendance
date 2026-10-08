@@ -539,6 +539,7 @@
                                     settings.logoDataUrl = data.settings.logoDataUrl;
                                     applyHeaderLogo();
                                 }
+                                if (Array.isArray(data.settings.externalLinks)) settings.externalLinks = data.settings.externalLinks;
                                 if (JSON.stringify(data.settings.announcements || []) !== JSON.stringify(settings.announcements || [])) {
                                     settings.announcements = data.settings.announcements || [];
                                     updateAnnouncementBar();
@@ -877,6 +878,7 @@
                             if (data.settings.logoDataUrl !== undefined) { settings.logoDataUrl = data.settings.logoDataUrl; applyHeaderLogo(); }
                             settings.announcements = data.settings.announcements || []; updateAnnouncementBar();
                             settings.holidays = data.settings.holidays || []; updateHolidayBar();
+                            settings.externalLinks = Array.isArray(data.settings.externalLinks) ? data.settings.externalLinks : [];
                             if (data.settings.serverOnline !== undefined) { settings.serverOnline = data.settings.serverOnline; applyServerStatusBadge(); }
                         }
                     }
@@ -1199,7 +1201,7 @@
             }).join('')}</div>` : '';
             const stCfg = termStatusCardConfig(getTermStatus(viewTerm(), settings.year));
             const justSwitched = !!window.__justSwitchedTerm; window.__justSwitchedTerm = false;
-            let html = `<div id="termStatusCard" class="mb-6 sm:mb-8 ${stCfg.wrap} border-2 rounded-2xl sm:rounded-3xl p-4 sm:p-6 transition-all ${justSwitched ? 'term-switch-flash term-switch-ring' : ''}"><div class="flex flex-col items-center text-center gap-1.5"><div class="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-white shadow-sm flex items-center justify-center relative"><span class="absolute top-0 right-0 inline-flex h-3 w-3 rounded-full ${stCfg.dot}"></span><i class="fas ${stCfg.icon} ${stCfg.iconCls} text-xl sm:text-2xl"></i></div><p class="font-extrabold text-sm sm:text-lg ${stCfg.textCls}">${stCfg.text}</p><p class="text-[10px] sm:text-xs text-slate-500 font-bold"><i class="fas fa-calendar-alt"></i> ภาคเรียนที่ ${viewTerm()} ปีการศึกษา ${settings.year}</p></div>${previewButtonsHtml}</div>`;
+            let html = buildExternalLinksHtml() + `<div id="termStatusCard" class="mb-6 sm:mb-8 ${stCfg.wrap} border-2 rounded-2xl sm:rounded-3xl p-4 sm:p-6 transition-all ${justSwitched ? 'term-switch-flash term-switch-ring' : ''}"><div class="flex flex-col items-center text-center gap-1.5"><div class="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-white shadow-sm flex items-center justify-center relative"><span class="absolute top-0 right-0 inline-flex h-3 w-3 rounded-full ${stCfg.dot}"></span><i class="fas ${stCfg.icon} ${stCfg.iconCls} text-xl sm:text-2xl"></i></div><p class="font-extrabold text-sm sm:text-lg ${stCfg.textCls}">${stCfg.text}</p><p class="text-[10px] sm:text-xs text-slate-500 font-bold"><i class="fas fa-calendar-alt"></i> ภาคเรียนที่ ${viewTerm()} ปีการศึกษา ${settings.year}</p></div>${previewButtonsHtml}</div>`;
             html += `<div class="text-center mb-8 sm:mb-12"><h2 class="text-2xl sm:text-4xl font-extrabold text-slate-800 tracking-tight">เลือกห้องเรียน</h2><p class="text-sm sm:text-lg text-slate-500 mt-2 sm:mt-3">เลือกระดับชั้นเพื่อดำเนินการเช็คชื่อหรือดูรายงาน</p></div><div class="grid grid-cols-1 gap-6 sm:gap-10">`;
             const levelColors = {
                 1: { gradient: 'from-blue-500 to-indigo-600', icon: 'text-blue-500', cardBg: 'bg-blue-50/70', cardBorder: 'border-blue-200', cardHoverBorder: 'hover:border-blue-400', cardText: 'text-blue-800', cardHoverText: 'group-hover:text-blue-600', cardShadow: 'hover:shadow-blue-200/60', arrow: 'text-blue-400' },
@@ -2022,7 +2024,8 @@
                 for(let i=1; i<=6; i++) { html += `<div class="bg-slate-50 p-2 sm:p-3 rounded-lg border border-slate-100 text-center"><label class="block font-black text-[10px] sm:text-xs text-slate-700 mb-1 sm:mb-2">ม.${i}</label><input type="number" id="setCountM${i}" value="${settings.roomCounts[`m${i}`]}" min="0" max="15" ${!isSuperAdminSettings ? 'disabled' : ''} class="w-full text-center py-1.5 sm:py-2 rounded border border-slate-200 font-bold ${!isSuperAdminSettings ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'text-indigo-600'} outline-none text-base sm:text-sm"></div>`;
                 }
                 html += `</div>${isSuperAdminSettings ? `<div class="flex justify-end mb-6"><button onclick="window.saveRoomCountsSettings()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกจำนวนห้อง</button></div>` : '<div class="mb-6"></div>'}<h3 class="text-lg sm:text-xl font-extrabold text-rose-600 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-exclamation-triangle"></i> ล้างข้อมูลทั้งระบบ</h3><div class="bg-rose-50 p-4 rounded-xl border border-rose-200 shadow-sm flex flex-col sm:flex-row justify-between items-center gap-4"><div><h4 class="font-bold text-rose-800 text-sm sm:text-base">ล้างข้อมูลการเช็คชื่อทั้งหมด</h4><p class="text-[10px] sm:text-xs text-rose-600 font-medium">ลบประวัติการเช็คชื่อของทุกวิชา ทุกห้อง ทุกวัน (ไม่สามารถกู้คืนได้)</p>${!isSuperAdminSettings ? `<p class="text-[10px] sm:text-xs text-slate-400 font-bold mt-1"><i class="fas fa-lock"></i> เฉพาะ Super Admin เท่านั้นที่ใช้งานส่วนนี้ได้</p>` : ''}</div>${isSuperAdminSettings ? `<button onclick="window.resetAllAttendanceData()" class="w-full sm:w-auto bg-rose-600 hover:bg-rose-700 text-white px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-bold shadow-sm transition-colors text-sm whitespace-nowrap"><i class="fas fa-trash-alt"></i> ล้างข้อมูลทั้งหมด</button>` : `<button disabled title="เฉพาะ Super Admin เท่านั้น" class="w-full sm:w-auto bg-slate-200 text-slate-400 px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-bold text-sm whitespace-nowrap cursor-not-allowed"><i class="fas fa-lock"></i> ล้างข้อมูลทั้งหมด</button>`}</div>`;
-                html += `<div class="mt-8 pt-4 border-t border-slate-200 text-center"><span class="text-[11px] sm:text-xs font-bold text-slate-400"><i class="fas fa-code-branch"></i> Version 1.62.081026</span></div>`;
+                if (isSuperAdminSettings) html += buildExternalLinksSettingsHtml();
+                html += `<div class="mt-8 pt-4 border-t border-slate-200 text-center"><span class="text-[11px] sm:text-xs font-bold text-slate-400"><i class="fas fa-code-branch"></i> Version 1.63.081026</span></div>`;
                 content.innerHTML = html;
             } 
             else if (currentAdminTab === 'term_settings') {
@@ -3123,6 +3126,73 @@ content.innerHTML = html;
             reader.onerror = () => showToast("เกิดข้อผิดพลาดในการอ่านไฟล์", "error");
             reader.readAsDataURL(file);
             event.target.value = '';
+        };
+
+
+        // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
+        const EXTERNAL_LINK_MAX = 8;
+        function __extEsc(t) { return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+        function __extSafeUrl(u) { u = String(u || '').trim(); return /^https?:\/\/[^\s]+$/i.test(u) ? u : ''; }
+        function buildExternalLinksHtml() {
+            const list = (Array.isArray(settings.externalLinks) ? settings.externalLinks : []).filter(x => x && x.img && __extSafeUrl(x.url));
+            if (list.length === 0) return '';
+            return `<div class="mb-6 sm:mb-8 flex flex-wrap justify-center gap-3 sm:gap-4">${list.map(x => `<a href="${__extEsc(__extSafeUrl(x.url))}" target="_blank" rel="noopener noreferrer" title="${__extEsc(x.title || '')}" aria-label="${__extEsc(x.title || 'ลิงก์เว็บภายนอก')}" class="block rounded-2xl overflow-hidden shadow-sm hover:shadow-lg hover:-translate-y-0.5 active:scale-95 transition-all border border-slate-200 bg-white" style="width:320px; max-width:46%; aspect-ratio:320/120;"><img src="${x.img}" alt="${__extEsc(x.title || '')}" style="width:100%; height:100%; object-fit:cover; display:block;"></a>`).join('')}</div>`;
+        }
+        function buildExternalLinksSettingsHtml() {
+            const list = Array.isArray(settings.externalLinks) ? settings.externalLinks : [];
+            const rows = list.map((x, i) => `<div class="bg-white border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row gap-3 sm:items-center"><img src="${x.img}" class="rounded-lg border border-slate-200 shrink-0" style="width:160px; height:60px; object-fit:cover;"><div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0"><input type="text" id="extTitle_${i}" value="${__extEsc(x.title || '')}" placeholder="ชื่อกำกับ (ไม่บังคับ)" class="px-3 py-2 rounded-lg border border-slate-200 text-sm font-bold outline-none focus:border-indigo-400"><input type="url" id="extUrl_${i}" value="${__extEsc(x.url || '')}" placeholder="https://..." class="px-3 py-2 rounded-lg border border-slate-200 text-sm outline-none focus:border-indigo-400"></div><div class="flex gap-1.5 shrink-0"><button onclick="window.moveExternalLink(${i}, -1)" ${i === 0 ? 'disabled' : ''} class="w-9 h-9 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 disabled:opacity-30" title="เลื่อนขึ้น"><i class="fas fa-arrow-up"></i></button><button onclick="window.moveExternalLink(${i}, 1)" ${i === list.length - 1 ? 'disabled' : ''} class="w-9 h-9 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 disabled:opacity-30" title="เลื่อนลง"><i class="fas fa-arrow-down"></i></button><button onclick="window.saveExternalLink(${i})" class="w-9 h-9 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white" title="บันทึกการแก้ไข"><i class="fas fa-save"></i></button><button onclick="window.deleteExternalLink(${i})" class="w-9 h-9 rounded-lg bg-rose-100 hover:bg-rose-200 text-rose-600" title="ลบปุ่มนี้"><i class="fas fa-trash"></i></button></div></div>`).join('');
+            const full = list.length >= EXTERNAL_LINK_MAX;
+            return `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-1 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-link text-indigo-500"></i> ปุ่มลิงก์เว็บภายนอก</h3><p class="text-xs sm:text-sm text-slate-500 mb-3">แสดงที่หน้าแรกให้ผู้ใช้ทุกคน เหนือการ์ดสถานะเทอม กดแล้วเปิดในแท็บใหม่ (สูงสุด ${EXTERNAL_LINK_MAX} ปุ่ม · รูปจะถูกปรับเป็น 320×120 พิกเซลอัตโนมัติ)</p><div class="space-y-2 mb-3">${rows || '<div class="text-sm text-slate-400 italic bg-slate-50 rounded-xl p-4 text-center border border-dashed border-slate-200">ยังไม่มีปุ่มลิงก์</div>'}</div><div class="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-6"><p class="text-xs font-extrabold text-slate-600 mb-2"><i class="fas fa-plus-circle text-indigo-500"></i> เพิ่มปุ่มใหม่</p><div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2"><input type="file" id="extNewImg" accept="image/*" ${full ? 'disabled' : ''} class="text-xs file:mr-2 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 file:font-bold"><input type="text" id="extNewTitle" placeholder="ชื่อกำกับ (ไม่บังคับ)" ${full ? 'disabled' : ''} class="px-3 py-2 rounded-lg border border-slate-200 text-sm font-bold outline-none focus:border-indigo-400"><input type="url" id="extNewUrl" placeholder="https://..." ${full ? 'disabled' : ''} class="px-3 py-2 rounded-lg border border-slate-200 text-sm outline-none focus:border-indigo-400"></div><button onclick="window.addExternalLink()" ${full ? 'disabled' : ''} class="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm"><i class="fas fa-plus"></i> เพิ่มปุ่ม</button>${full ? '<span class="text-xs text-rose-500 font-bold ml-2">ครบจำนวนสูงสุดแล้ว</span>' : ''}</div>`;
+        }
+        function __extGuard() { if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้", "error"); return false; } if (!Array.isArray(settings.externalLinks)) settings.externalLinks = []; return true; }
+        function __extResizeImage(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onerror = () => reject(new Error('read'));
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onerror = () => reject(new Error('img'));
+                    img.onload = () => {
+                        const W = 320, H = 120; const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
+                        const ctx = canvas.getContext('2d'); const scale = Math.max(W / img.width, H / img.height); const w = img.width * scale, h = img.height * scale;
+                        ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
+                        let out = canvas.toDataURL('image/png'); if (out.length > 60000) out = canvas.toDataURL('image/jpeg', 0.85);
+                        resolve(out);
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+        window.addExternalLink = async function() {
+            if (!__extGuard()) return;
+            if (settings.externalLinks.length >= EXTERNAL_LINK_MAX) { showToast(`เพิ่มได้สูงสุด ${EXTERNAL_LINK_MAX} ปุ่ม`, "error"); return; }
+            const fileEl = document.getElementById('extNewImg'); const file = fileEl && fileEl.files && fileEl.files[0];
+            const url = __extSafeUrl(document.getElementById('extNewUrl').value); const title = document.getElementById('extNewTitle').value.trim();
+            if (!file || !file.type.startsWith('image/')) { showToast("กรุณาเลือกรูปภาพของปุ่ม", "error"); return; }
+            if (!url) { showToast("กรุณาใส่ลิงก์ที่ขึ้นต้นด้วย https:// หรือ http://", "error"); return; }
+            try {
+                const img = await __extResizeImage(file);
+                settings.externalLinks.push({ id: generateId(), title, url, img });
+                logAction('เพิ่มปุ่มลิงก์เว็บภายนอก', title || url, 'settings'); saveData('full'); showToast("เพิ่มปุ่มเรียบร้อย"); renderAdminTab();
+            } catch (err) { showToast("ไม่สามารถอ่านไฟล์รูปภาพนี้ได้", "error"); }
+        };
+        window.saveExternalLink = function(i) {
+            if (!__extGuard()) return; const x = settings.externalLinks[i]; if (!x) return;
+            const url = __extSafeUrl(document.getElementById('extUrl_' + i).value); if (!url) { showToast("ลิงก์ต้องขึ้นต้นด้วย https:// หรือ http://", "error"); return; }
+            x.url = url; x.title = document.getElementById('extTitle_' + i).value.trim();
+            logAction('แก้ไขปุ่มลิงก์เว็บภายนอก', x.title || url, 'settings'); saveData('full'); showToast("บันทึกการแก้ไขเรียบร้อย"); renderAdminTab();
+        };
+        window.moveExternalLink = function(i, dir) {
+            if (!__extGuard()) return; const j = i + dir; if (j < 0 || j >= settings.externalLinks.length) return;
+            const t = settings.externalLinks[i]; settings.externalLinks[i] = settings.externalLinks[j]; settings.externalLinks[j] = t;
+            saveData('full'); renderAdminTab();
+        };
+        window.deleteExternalLink = function(i) {
+            if (!__extGuard()) return; const x = settings.externalLinks[i]; if (!x) return;
+            showConfirm("ลบปุ่มลิงก์", `ต้องการลบปุ่ม "${x.title || x.url}" ออกจากหน้าแรกหรือไม่?`, () => {
+                settings.externalLinks.splice(i, 1); logAction('ลบปุ่มลิงก์เว็บภายนอก', x.title || x.url, 'settings'); saveData('full'); showToast("ลบปุ่มเรียบร้อย"); renderAdminTab();
+            });
         };
 
         window.removeHeaderLogo = function() {
