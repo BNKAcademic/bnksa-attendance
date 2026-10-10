@@ -506,6 +506,7 @@
                     case 'student_summary': openStudentSummary(state.studentId, state.month); break;
                     case 'room_summary': openRoomSummary(state.roomId, state.month, state.tab); break;
                     case 'school_summary': renderSchoolSummary(state.month); break;
+                    case 'privacy': renderPrivacyPolicy(); break;
                     default: renderDashboard();
                 }
             } catch (error) { renderDashboard(); }
@@ -2025,7 +2026,6 @@
                 }
                 html += `</div>${isSuperAdminSettings ? `<div class="flex justify-end mb-6"><button onclick="window.saveRoomCountsSettings()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกจำนวนห้อง</button></div>` : '<div class="mb-6"></div>'}<h3 class="text-lg sm:text-xl font-extrabold text-rose-600 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-exclamation-triangle"></i> ล้างข้อมูลทั้งระบบ</h3><div class="bg-rose-50 p-4 rounded-xl border border-rose-200 shadow-sm flex flex-col sm:flex-row justify-between items-center gap-4"><div><h4 class="font-bold text-rose-800 text-sm sm:text-base">ล้างข้อมูลการเช็คชื่อทั้งหมด</h4><p class="text-[10px] sm:text-xs text-rose-600 font-medium">ลบประวัติการเช็คชื่อของทุกวิชา ทุกห้อง ทุกวัน (ไม่สามารถกู้คืนได้)</p>${!isSuperAdminSettings ? `<p class="text-[10px] sm:text-xs text-slate-400 font-bold mt-1"><i class="fas fa-lock"></i> เฉพาะ Super Admin เท่านั้นที่ใช้งานส่วนนี้ได้</p>` : ''}</div>${isSuperAdminSettings ? `<button onclick="window.resetAllAttendanceData()" class="w-full sm:w-auto bg-rose-600 hover:bg-rose-700 text-white px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-bold shadow-sm transition-colors text-sm whitespace-nowrap"><i class="fas fa-trash-alt"></i> ล้างข้อมูลทั้งหมด</button>` : `<button disabled title="เฉพาะ Super Admin เท่านั้น" class="w-full sm:w-auto bg-slate-200 text-slate-400 px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-bold text-sm whitespace-nowrap cursor-not-allowed"><i class="fas fa-lock"></i> ล้างข้อมูลทั้งหมด</button>`}</div>`;
                 if (isSuperAdminSettings) html += buildExternalLinksSettingsHtml();
-                html += `<div class="mt-8 pt-4 border-t border-slate-200 text-center"><span class="text-[11px] sm:text-xs font-bold text-slate-400"><i class="fas fa-code-branch"></i> Version 1.66.081026</span></div>`;
                 content.innerHTML = html;
             } 
             else if (currentAdminTab === 'term_settings') {
@@ -3130,6 +3130,87 @@ content.innerHTML = html;
 
 
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
+
+        // ===== เลขเวอร์ชัน (รูปแบบ 1.X.DDMMYY) + ข้อมูล footer =====
+        const APP_VERSION = '1.68.101026';
+        const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
+        function renderSiteFooter() {
+            const y = document.getElementById('footerYear'); if (y) y.textContent = new Date().getFullYear() + 543;
+            const v = document.getElementById('footerVersion'); if (v) v.textContent = APP_VERSION;
+            const l = document.getElementById('footerLinks'); if (l) {
+                const links = [];
+                links.push(`<a href="javascript:void(0)" onclick="window.navigate('privacy')" class="hover:text-indigo-500 underline underline-offset-2">นโยบายความเป็นส่วนตัว</a>`);
+                if (SUPPORT_EMAIL) links.push(`<a href="mailto:${SUPPORT_EMAIL}" class="hover:text-indigo-500 underline underline-offset-2">แจ้งปัญหาการใช้งาน</a>`);
+                l.innerHTML = links.join(' · '); l.classList.toggle('hidden', links.length === 0);
+            }
+        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', renderSiteFooter); else renderSiteFooter();
+
+        // ===== หน้านโยบายความเป็นส่วนตัว (ตาม พ.ร.บ.คุ้มครองข้อมูลส่วนบุคคล พ.ศ. 2562) =====
+        function renderPrivacyPolicy() {
+            const mc = document.getElementById('mainContent'); if (!mc) return;
+            const th = 'p-2 sm:p-3 border border-slate-200 bg-slate-100 text-left font-extrabold text-slate-700';
+            const td = 'p-2 sm:p-3 border border-slate-200 align-top text-slate-600';
+            const h2 = (n, t) => `<h2 class="text-base sm:text-xl font-extrabold text-slate-800 mt-8 mb-3 flex items-center gap-2"><span class="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-indigo-600 text-white text-xs sm:text-sm flex items-center justify-center shrink-0">${n}</span>${t}</h2>`;
+            const email = SUPPORT_EMAIL ? `<a href="mailto:${SUPPORT_EMAIL}" class="text-indigo-600 underline">${SUPPORT_EMAIL}</a>` : '[ อีเมลผู้ดูแลระบบ ]';
+            const html = `<div class="max-w-3xl mx-auto bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 p-5 sm:p-10 text-sm sm:text-base leading-relaxed text-slate-600">
+                <button onclick="history.length > 1 ? history.back() : window.navigate('dashboard')" class="mb-4 text-xs sm:text-sm font-bold text-indigo-600 hover:underline"><i class="fas fa-arrow-left"></i> กลับ</button>
+                <h1 class="text-xl sm:text-3xl font-black text-slate-800 mb-1">นโยบายความเป็นส่วนตัว</h1>
+                <p class="text-xs sm:text-sm text-slate-400 font-semibold">ระบบเช็คชื่อนักเรียนออนไลน์ · โรงเรียนบุ่งคล้านคร · ใช้บังคับตั้งแต่ 10 ตุลาคม 2569 (เวอร์ชันระบบ ${APP_VERSION})</p>
+
+                ${h2(1, 'บทนำ')}
+                <p>โรงเรียนบุ่งคล้านคร (โรงเรียนรัฐบาล) เป็น <b>ผู้ควบคุมข้อมูลส่วนบุคคล</b> ของระบบนี้ นโยบายนี้จัดทำตาม พ.ร.บ.คุ้มครองข้อมูลส่วนบุคคล พ.ศ. 2562 เพื่อแจ้งว่าระบบเก็บ ใช้ และเปิดเผยข้อมูลอะไร ใช้กับ <b>นักเรียน ครู เจ้าหน้าที่ และผู้ดูแลระบบ</b> ที่เกี่ยวข้องกับระบบเช็คชื่อนี้ ข้อมูลของนักเรียนเป็นข้อมูลของผู้เยาว์ โรงเรียนจึงเก็บและเปิดเผยเท่าที่จำเป็นเท่านั้น</p>
+
+                ${h2(2, 'ข้อมูลที่เก็บ')}
+                <div class="overflow-x-auto"><table class="w-full text-xs sm:text-sm border-collapse"><thead><tr><th class="${th}">ประเภท</th><th class="${th}">ตัวอย่างข้อมูล</th></tr></thead><tbody>
+                <tr><td class="${td} font-bold">ข้อมูลนักเรียน (ผู้เยาว์)</td><td class="${td}">ชื่อ-นามสกุล เลขที่ ห้องเรียน สถานะการเป็นนักเรียน (ปกติ/ออก-ย้าย)</td></tr>
+                <tr><td class="${td} font-bold">ข้อมูลการเช็คชื่อ</td><td class="${td}">วันที่ คาบเรียน วิชา และสถานะของนักเรียนแต่ละคน (มา สาย ลาป่วย ลากิจ ขาด โดดเรียน ร่วมกิจกรรม) รวมถึงรายการติดตามนักเรียนที่ขาดบ่อย</td></tr>
+                <tr><td class="${td} font-bold">ข้อมูลครูและเจ้าหน้าที่</td><td class="${td}">ชื่อ กลุ่มสาระ/ตำแหน่ง ชื่อผู้ใช้ และรหัสผ่าน (เก็บในรูปแบบเข้ารหัสทางเดียว ไม่สามารถอ่านกลับเป็นรหัสจริงได้)</td></tr>
+                <tr><td class="${td} font-bold">บันทึกการใช้งาน (Log)</td><td class="${td}">วันเวลา ชื่อผู้ใช้ และการกระทำที่เจ้าหน้าที่ทำในระบบ เช่น เพิ่ม/แก้ไขข้อมูล</td></tr>
+                <tr><td class="${td} font-bold">ข้อมูลสำรอง</td><td class="${td}">สำเนาของข้อมูลข้างต้นที่ระบบสำรองไว้อัตโนมัติเป็นรายวัน เพื่อกู้คืนกรณีข้อมูลเสียหาย</td></tr>
+                </tbody></table></div>
+                <p class="mt-3"><b>ระบบไม่เก็บ:</b> เลขบัตรประชาชน ที่อยู่ เบอร์โทรศัพท์ ข้อมูลผู้ปกครอง รูปถ่ายนักเรียน ข้อมูลสุขภาพ ข้อมูลทางการเงิน และตำแหน่งที่ตั้งของผู้ใช้ ระบบไม่ใช้คุกกี้เพื่อการโฆษณาหรือติดตามพฤติกรรม (เบราว์เซอร์อาจจำค่าการแสดงผล เช่น โหมดมืด ไว้ในเครื่องของผู้ใช้เอง)</p>
+
+                ${h2(3, 'วัตถุประสงค์การใช้ข้อมูล')}
+                <p>โรงเรียนใช้ข้อมูลเพื่อ <b>งานของโรงเรียนเท่านั้น</b> ได้แก่ การบันทึกและสรุปเวลาเรียน จัดทำรายงานและสมุดทะเบียนการเช็คชื่อ ติดตามและช่วยเหลือนักเรียนที่ขาดเรียนบ่อย และการรักษาความปลอดภัยและตรวจสอบการใช้งานระบบ โดยอาศัยฐานภารกิจเพื่อประโยชน์สาธารณะและการปฏิบัติหน้าที่ตามกฎหมายของสถานศึกษา <b>ไม่นำข้อมูลไปใช้เชิงการค้า</b> ไม่ขาย และไม่เปิดเผยให้บุคคลภายนอกเพื่อการตลาด</p>
+
+                ${h2(4, 'ผู้ที่เข้าถึงข้อมูล')}
+                <div class="overflow-x-auto"><table class="w-full text-xs sm:text-sm border-collapse"><thead><tr><th class="${th}">บทบาท</th><th class="${th}">สิ่งที่เห็นและทำได้</th></tr></thead><tbody>
+                <tr><td class="${td} font-bold">ผู้เข้าชมทั่วไป</td><td class="${td}">เปิดดูรายชื่อห้องเรียนและสถานะการเช็คชื่อรายห้อง/รายวิชาได้โดยไม่ต้องเข้าสู่ระบบ</td></tr>
+                <tr><td class="${td} font-bold">ครูผู้สอน / ครูที่ปรึกษา</td><td class="${td}">เช็คชื่อในวิชาที่ตนสอน ดูตารางสอนและสรุปของตนเอง ครูที่ปรึกษาดูรายงานของห้องที่ปรึกษา</td></tr>
+                <tr><td class="${td} font-bold">เจ้าหน้าที่ / แอดมิน</td><td class="${td}">จัดการข้อมูลนักเรียน ครู วิชา รายงาน การติดตามนักเรียน และดูบันทึกการใช้งาน</td></tr>
+                <tr><td class="${td} font-bold">Super Admin</td><td class="${td}">สิทธิ์ทั้งหมดของแอดมิน รวมถึงตั้งค่าระบบ จัดการบัญชีผู้ใช้ และสำรอง/กู้คืนข้อมูล</td></tr>
+                <tr><td class="${td} font-bold">ผู้พัฒนาระบบ</td><td class="${td}">เข้าถึงฐานข้อมูลในฐานะผู้ดูแลด้านเทคนิคเท่าที่จำเป็นต่อการดูแลและแก้ไขระบบ</td></tr>
+                <tr><td class="${td} font-bold">ผู้ปกครอง</td><td class="${td}">ไม่มีบัญชีและไม่สามารถเข้าถึงข้อมูลในระบบโดยตรง หากต้องการทราบข้อมูลของบุตรหลาน ให้ติดต่อครูที่ปรึกษา</td></tr>
+                </tbody></table></div>
+
+                ${h2(5, 'การจัดเก็บและระยะเวลา')}
+                <p>ข้อมูลทั้งหมดเก็บบนบริการคลาวด์ของ <b>Cloudflare</b> (ฐานข้อมูล KV และ D1) ส่วนหน้าเว็บให้บริการผ่าน GitHub Pages ผู้ให้บริการเหล่านี้อาจมีเซิร์ฟเวอร์อยู่นอกประเทศไทย โรงเรียนเลือกใช้บริการที่มีมาตรการรักษาความปลอดภัยตามมาตรฐานสากล</p>
+                <div class="overflow-x-auto mt-3"><table class="w-full text-xs sm:text-sm border-collapse"><thead><tr><th class="${th}">ข้อมูล</th><th class="${th}">ระยะเวลาเก็บ</th></tr></thead><tbody>
+                <tr><td class="${td} font-bold">ข้อมูลนักเรียนและการเช็คชื่อ</td><td class="${td}">เก็บไว้ <b>1 ปี</b> นับจากสิ้นสุดปีการศึกษานั้น แล้วลบออกจากระบบ</td></tr>
+                <tr><td class="${td} font-bold">บัญชีครู/เจ้าหน้าที่</td><td class="${td}">ตลอดช่วงที่ปฏิบัติหน้าที่ และลบเมื่อพ้นหน้าที่</td></tr>
+                <tr><td class="${td} font-bold">บันทึกการใช้งาน (Log)</td><td class="${td}">เก็บเฉพาะรายการล่าสุด ระบบลบรายการเก่าออกอัตโนมัติ</td></tr>
+                <tr><td class="${td} font-bold">ข้อมูลสำรอง</td><td class="${td}">ตามอายุของข้อมูลต้นฉบับ ลบพร้อมกับข้อมูลที่หมดระยะเก็บ</td></tr>
+                </tbody></table></div>
+
+                ${h2(6, 'ลิขสิทธิ์')}
+                <p><b>ตัวระบบ</b> (ซอฟต์แวร์ การออกแบบ และโค้ด) เป็นลิขสิทธิ์ของโรงเรียนบุ่งคล้านคร พัฒนาโดย Jeerasak Chomphuwattana โดยใช้ AI ช่วยพัฒนา (ระบบไม่ได้ใช้ AI ประมวลผลข้อมูลของผู้ใช้ขณะใช้งาน) ระบบนี้ไม่มีการอัปโหลดผลงานของผู้ใช้</p>
+
+                ${h2(7, 'สิทธิของเจ้าของข้อมูล')}
+                <p>เจ้าของข้อมูล (หรือผู้ปกครองในกรณีนักเรียนที่เป็นผู้เยาว์) มีสิทธิ <b>ขอเข้าถึงและขอสำเนา · แก้ไขให้ถูกต้อง · ลบหรือทำลาย · คัดค้านหรือระงับการใช้ · ขอรับ/โอนข้อมูล</b> ตามที่กฎหมายกำหนด โรงเรียนจะตอบกลับภายใน <b>30 วัน</b> นับจากได้รับคำขอ หากเห็นว่าโรงเรียนไม่ปฏิบัติตามกฎหมาย มีสิทธิร้องเรียนต่อ <b>สำนักงานคณะกรรมการคุ้มครองข้อมูลส่วนบุคคล (สคส.)</b></p>
+
+                ${h2(8, 'การเปลี่ยนแปลงและช่องทางติดต่อ')}
+                <p>โรงเรียนอาจปรับปรุงนโยบายนี้เป็นครั้งคราว โดยแจ้งการเปลี่ยนแปลงที่หน้านี้และปรับวันที่ใช้บังคับ</p>
+                <div class="mt-3 bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs sm:text-sm space-y-1">
+                    <p><b>ผู้ควบคุมข้อมูล:</b> โรงเรียนบุ่งคล้านคร</p>
+                    <p><b>ฝ่ายที่รับผิดชอบ:</b> [ ระบุฝ่าย/ชื่อผู้รับผิดชอบ ]</p>
+                    <p><b>อีเมลติดต่อ:</b> ${email}</p>
+                    <p><b>ผู้พัฒนาระบบ:</b> Jeerasak Chomphuwattana</p>
+                </div>
+            </div>`;
+            mc.innerHTML = html;
+            window.scrollTo({ top: 0 });
+        }
         const EXTERNAL_LINK_MAX = 8;
         function __extEsc(t) { return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
         function __extSafeUrl(u) { u = String(u || '').trim(); return /^https?:\/\/[^\s]+$/i.test(u) ? u : ''; }
