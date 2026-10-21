@@ -6,7 +6,7 @@
 // ==========================================================
 
         // 🚨 นำ Web App URL ของคุณจาก Google Apps Script มาใส่ในบรรทัดด้านล่างนี้
-        const GOOGLE_APP_SCRIPT_URL = "https://bnksa-attendance-api.tear-jeerasak.workers.dev"; // ระบบเช็คชื่อรุ่นใหม่ ใช้ Cloudflare Worker แทน Google Apps Script 
+        const GOOGLE_APP_SCRIPT_URL = "https://bnksa-attendance-api.bnkschool.workers.dev"; // ระบบเช็คชื่อรุ่นใหม่ ใช้ Cloudflare Worker แทน Google Apps Script 
 
         let isAdmin = false, isDbInitialized = false, currentAdminTab = 'settings', currentRoomId = null, currentSubjectId = null;
         let editingTeacherId = null, editingSubjectId = null, editingStudentId = null, editingUserId = null;
@@ -3132,7 +3132,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ 1.X.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '1.68.101026';
+        const APP_VERSION = '1.69.211026';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         function renderSiteFooter() {
             const y = document.getElementById('footerYear'); if (y) y.textContent = new Date().getFullYear() + 543;
