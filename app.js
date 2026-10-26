@@ -14,6 +14,30 @@
         let settings = { title: "ระบบเช็คชื่อนักเรียนอัจฉริยะ", faviconDataUrl: "", logoDataUrl: "", announcement: "", announcementStart: "", announcementEnd: "", announcements: [], term: "1", year: "2567", academicYears: [{ year: "2567", status: "active" }], roomCounts: { m1: 4, m2: 4, m3: 4, m4: 3, m5: 3, m6: 3 }, advisors: {}, staffs: {}, thresholds: { late: 4, absent: 4 }, storageLimitChars: 8000000, holidays: [], serverOnline: true, termLocks: {}, termCount: 2, users: [{ id: 'super_admin_root', username: 'BNKAdmin', password: '042499078', name: 'ผู้ดูแลระบบหลัก', role: 'super_admin', createdAt: new Date().toISOString() }] };
         let teachers = [], subjects = [], students = [], attendanceData = [], followUps = [], logs = [];
         let currentUser = null;
+        // ===== [v1.71.5] บัตรผ่านผู้ดูแล (token) — Worker ตรวจสิทธิ์งานของผู้ดูแลทุกครั้ง ส่วนครูเช็คชื่อ/บันทึกโฮมรูมไม่ต้องเข้าสู่ระบบเหมือนเดิม =====
+        // แนบบัตรผ่านไปกับทุกคำขอที่ส่งไป Worker อัตโนมัติ (GET = ?token= · POST = __token ใน body) — ไม่ต้องแก้ทุกจุดที่เรียก fetch
+        let adminToken = '';
+        (function () {
+            const origFetch = window.fetch.bind(window);
+            window.fetch = function (input, init) {
+                let withToken = false;
+                try {
+                    const url = typeof input === 'string' ? input : '';
+                    if (adminToken && url && url.indexOf(GOOGLE_APP_SCRIPT_URL) === 0) {
+                        const method = ((init && init.method) || 'GET').toUpperCase();
+                        if (method === 'POST' && init && typeof init.body === 'string') {
+                            const b = JSON.parse(init.body);
+                            if (b && typeof b === 'object' && !Array.isArray(b)) { b.__token = adminToken; init = Object.assign({}, init, { body: JSON.stringify(b) }); withToken = true; }
+                        } else if (method === 'GET') {
+                            input = url + (url.indexOf('?') === -1 ? '?' : '&') + 'token=' + encodeURIComponent(adminToken); withToken = true;
+                        }
+                    }
+                } catch (e) { /* ส่งแบบเดิม */ }
+                const p = origFetch(input, init);
+                if (withToken) p.then(res => { if (res && res.status === 401) setTimeout(() => window.__adminSessionExpired && window.__adminSessionExpired(), 0); }).catch(() => {});
+                return p;
+            };
+        })();
         // ===== [ใหม่] กันสระ/วรรณยุกต์ไทยที่อยู่ใต้บรรทัด (เช่น สระอุ สระอู) โดนตัดตอนแคปภาพเป็น PDF/รูปภาพ (html2canvas) - ใส่ไว้ถาวรสำหรับทุกหน้า PDF (.a4-page) เพราะ class นี้ใช้เฉพาะตอนสร้างเอกสารส่งออกเท่านั้น ไม่กระทบการแสดงผลหน้าเว็บปกติ
         (function () { const s = document.createElement('style'); s.textContent = `.a4-page * { line-height: 2 !important; }`; document.head.appendChild(s); })();
         const statuses = {
@@ -1181,28 +1205,37 @@
             const uname = document.getElementById('adminUser').value.trim();
             const pass = document.getElementById('adminPass').value;
             const passHash = await sha256Hex(pass);
-            // ล็อกอินด้วยชื่อผู้ใช้ตัวพิมพ์เล็ก-ใหญ่แบบไหนก็ได้ (ไม่สนตัวพิมพ์ใหญ่-เล็ก) ส่วนรหัสผ่านยังคงตรวจสอบตามตัวพิมพ์จริง
-            // [ใหม่] เช็คแบบ hash ก่อน (มาตรฐานใหม่) ถ้าไม่ตรงลองเทียบแบบตัวหนังสือธรรมดา (บัญชีเก่าที่ยังไม่ถูกย้ายมาเป็น hash) - ถ้าตรงแบบเก่า จะอัพเกรดเป็น hash ให้อัตโนมัติทันทีที่ล็อกอินสำเร็จ
-            let found = (settings.users || []).find(u => u.username.toLowerCase() === uname.toLowerCase() && u.password === passHash);
-            let needsUpgrade = false;
-            if (!found) { found = (settings.users || []).find(u => u.username.toLowerCase() === uname.toLowerCase() && u.password === pass); if (found) needsUpgrade = true; }
-            if (found) {
-                if (needsUpgrade) { found.password = passHash; saveData('full'); } // อัพเกรดรหัสผ่านเก่าเป็น hash แบบเงียบๆ ไม่ต้องให้ผู้ใช้ทำอะไรเพิ่ม
-                isAdmin = true; currentUser = { id: found.id, username: found.username, name: found.name, role: found.role };
-                const remember = document.getElementById('rememberLoginCheck').checked;
-                try {
-                    if (remember) localStorage.setItem('bnksa_remember_login', JSON.stringify({ u: uname, p: pass }));
-                    else localStorage.removeItem('bnksa_remember_login');
-                } catch (e) {}
-                document.getElementById('btnAdminLogin').classList.add('hidden'); document.getElementById('btnAdminPanel').classList.remove('hidden'); document.getElementById('btnAdminLogout').classList.remove('hidden'); updateCurrentUserBadge(); showToast("เข้าสู่ระบบสำเร็จ");
-                logAction('เข้าสู่ระบบ', `เข้าสู่ระบบด้วยบัญชีเจ้าหน้าที่`, 'account'); saveData('full');
-                navigate('admin');
-            } else showToast("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง", "error");
+            // [v1.71.5] ตรวจชื่อผู้ใช้/รหัสผ่านที่ Worker (หน้าเว็บไม่มีรายชื่อบัญชีและรหัสผ่านอีกต่อไป) — ชื่อผู้ใช้ไม่สนตัวพิมพ์เล็ก-ใหญ่ · บัญชีเก่าที่เก็บรหัสผ่านตรงๆ Worker เปลี่ยนเป็น hash ให้เอง
+            let j = null;
+            try {
+                const res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'login', username: uname, passHash }) });
+                j = await res.json();
+            } catch (e) { showToast("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองใหม่", "error"); return; }
+            if (!j || j.status !== 'success' || !j.token) { showToast((j && j.message) || "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง", "error"); return; }
+            adminToken = j.token;
+            settings.users = Array.isArray(j.users) ? j.users : [];
+            isAdmin = true; currentUser = { id: j.user.id, username: j.user.username, name: j.user.name, role: j.user.role };
+            const remember = document.getElementById('rememberLoginCheck').checked;
+            try {
+                if (remember) localStorage.setItem('bnksa_remember_login', JSON.stringify({ u: uname, p: pass }));
+                else localStorage.removeItem('bnksa_remember_login');
+            } catch (e) {}
+            document.getElementById('btnAdminLogin').classList.add('hidden'); document.getElementById('btnAdminPanel').classList.remove('hidden'); document.getElementById('btnAdminLogout').classList.remove('hidden'); updateCurrentUserBadge(); showToast("เข้าสู่ระบบสำเร็จ");
+            logAction('เข้าสู่ระบบ', `เข้าสู่ระบบด้วยบัญชีเจ้าหน้าที่`, 'account');
+            navigate('admin');
         }
+        // [v1.71.5] บัตรผ่านหมดอายุ (เกิน 12 ชั่วโมง) หรือบัญชีถูกลบ/เปลี่ยนสิทธิ์ — ออกจากระบบแล้วให้เข้าสู่ระบบใหม่
+        window.__adminSessionExpired = function () {
+            if (!isAdmin) return;
+            isAdmin = false; currentUser = null; adminToken = ''; adminWorkingTerm = null;
+            document.getElementById('btnAdminLogin').classList.remove('hidden'); document.getElementById('btnAdminPanel').classList.add('hidden'); document.getElementById('btnAdminLogout').classList.add('hidden'); updateCurrentUserBadge();
+            showToast("หมดเวลาเข้าสู่ระบบ กรุณาเข้าสู่ระบบใหม่", "error");
+            navigate('admin_login');
+        };
         function logoutAdmin() {
             showConfirm("ออกจากระบบ", "คุณต้องการออกจากระบบผู้ดูแลใช่หรือไม่?", () => {
-                if (currentUser) { logAction('ออกจากระบบ', `ออกจากระบบบัญชีเจ้าหน้าที่`, 'account'); saveData('full'); }
-                isAdmin = false; currentUser = null; adminWorkingTerm = null;
+                if (currentUser) { logAction('ออกจากระบบ', `ออกจากระบบบัญชีเจ้าหน้าที่`, 'account'); }
+                isAdmin = false; currentUser = null; adminWorkingTerm = null; adminToken = '';
                 document.getElementById('btnAdminLogin').classList.remove('hidden'); document.getElementById('btnAdminPanel').classList.add('hidden'); document.getElementById('btnAdminLogout').classList.add('hidden'); updateCurrentUserBadge(); showToast("ออกจากระบบแล้ว"); navigate('dashboard');
             });
         }
@@ -1223,8 +1256,8 @@
         function autoLogoutDueToInactivity() {
             if (!isAdmin) return;
             const uname = currentUser ? currentUser.username : '';
-            if (currentUser) { logAction('ออกจากระบบอัตโนมัติ (หมดเวลา)', `ไม่มีการใช้งานเกิน 30 นาที บัญชี ${uname}`, 'account'); saveData('full'); }
-            isAdmin = false; currentUser = null;
+            if (currentUser) { logAction('ออกจากระบบอัตโนมัติ (หมดเวลา)', `ไม่มีการใช้งานเกิน 30 นาที บัญชี ${uname}`, 'account'); }
+            isAdmin = false; currentUser = null; adminToken = '';
             document.getElementById('btnAdminLogin').classList.remove('hidden'); document.getElementById('btnAdminPanel').classList.add('hidden'); document.getElementById('btnAdminLogout').classList.add('hidden'); updateCurrentUserBadge();
             showToast("ออกจากระบบอัตโนมัติ เนื่องจากไม่มีการใช้งานเกิน 30 นาที", "error");
             navigate('dashboard');
@@ -1540,7 +1573,7 @@
             const scheduleColorMap = { 1: 'bg-yellow-500', 2: 'bg-pink-500', 3: 'bg-green-600', 4: 'bg-orange-500', 5: 'bg-sky-500' };
             const sortedSchedules = (subject.schedules || []).slice().sort((a, b) => parseInt(a.day) - parseInt(b.day) || parseInt(a.period) - parseInt(b.period));
             const scheduleBadgesHtml = sortedSchedules.length > 0 ? `<div class="mt-2 sm:mt-3 flex flex-wrap items-center gap-1.5"><span class="text-[10px] sm:text-xs font-bold text-slate-400 mr-0.5">วิชานี้มีสอน:</span>${sortedSchedules.map(sch => `<span class="${scheduleColorMap[parseInt(sch.day)] || 'bg-slate-400'} text-white font-bold text-[9px] sm:text-xs px-2 py-1 rounded-lg whitespace-nowrap">${daysLabel[sch.day - 1].replace('วัน', '')} คาบ ${periodLabel(sch.period)}</span>`).join('')}</div>` : '';
-            let html = `<div class="mb-4 sm:mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4 sm:gap-6 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="relative z-10 w-full"><div class="flex flex-wrap items-center gap-2 mb-2 sm:mb-3"><span class="bg-indigo-100 text-indigo-700 font-bold px-2 py-1 rounded text-[10px] sm:text-sm">ห้อง ${formatRoomName(subject.roomId)}</span></div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2"><i class="fas fa-clipboard-check text-indigo-500"></i> ${subject.name}</h2><p class="text-slate-500 mt-1 text-[11px] sm:text-base font-medium flex items-center gap-1.5"><i class="fas fa-chalkboard-teacher"></i> ครู: <span class="text-slate-700">${subject.teacher || '-'}${subject.teacher2 ? ' / ' + subject.teacher2 : ''}</span></p>${scheduleBadgesHtml}</div><div class="flex flex-col gap-3 relative z-10 w-full md:w-auto mt-2 md:mt-0"><div class="flex flex-row gap-2 w-full"><input type="date" id="attDate" value="${today}" onchange="window.navigate('attendance', {subjectId: '${subjectId}', fromTeacherDash: ${fromTeacherDash}, date: this.value}, true)" class="flex-1 bg-slate-50 border border-slate-200 text-slate-800 px-3 py-2 sm:py-3 rounded-xl shadow-inner focus:ring-2 focus:ring-indigo-500 text-base sm:text-sm font-bold outline-none"><select id="attPeriod" class="w-24 sm:w-32 bg-slate-50 border border-slate-200 text-slate-800 px-2 py-2 sm:py-3 rounded-xl shadow-inner focus:ring-2 focus:ring-indigo-500 text-base sm:text-sm font-bold outline-none"></select></div><label class="flex items-center gap-2 cursor-pointer bg-amber-50 p-2 sm:p-3 rounded-xl border border-amber-200 w-full"><input type="checkbox" id="isSubstitute" onchange="document.getElementById('substituteTeacher').classList.toggle('hidden', !this.checked)" class="w-4 h-4 text-amber-600 rounded"><span class="font-bold text-amber-800 text-[10px] sm:text-sm">มีการสอนแทน (ระบุชื่อผู้เช็คแทน)</span></label><select id="substituteTeacher" class="hidden w-full bg-white border border-amber-300 text-slate-800 px-3 py-2 rounded-xl shadow-inner focus:ring-2 focus:ring-amber-500 text-base sm:text-sm font-bold outline-none">${tcOptions}</select><button onclick="${backAction}" class="w-full bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2 sm:py-3 rounded-xl shadow-sm transition-all font-bold text-sm">ย้อนกลับ</button></div></div>`;
+            let html = `<div class="mb-4 sm:mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4 sm:gap-6 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="relative z-10 w-full"><div class="flex flex-wrap items-center gap-2 mb-2 sm:mb-3"><span class="bg-indigo-100 text-indigo-700 font-bold px-2 py-1 rounded text-[10px] sm:text-sm">ห้อง ${formatRoomName(subject.roomId)}</span></div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2"><i class="fas fa-clipboard-check text-indigo-500"></i> ${subject.name}</h2><p class="text-slate-500 mt-1 text-[11px] sm:text-base font-medium flex items-center gap-1.5"><i class="fas fa-chalkboard-teacher"></i> ครู: <span class="text-slate-700">${subject.teacher || '-'}${subject.teacher2 ? ' / ' + subject.teacher2 : ''}</span></p>${scheduleBadgesHtml}</div><div class="flex flex-col gap-3 relative z-10 w-full md:w-auto mt-2 md:mt-0"><div class="flex flex-row gap-2 w-full"><input type="date" id="attDate" value="${today}" onchange="window.navigate('attendance', {subjectId: '${subjectId}', fromTeacherDash: ${fromTeacherDash}, date: this.value}, true)" class="flex-1 bg-slate-50 border border-slate-200 text-slate-800 px-3 py-2 sm:py-3 rounded-xl shadow-inner focus:ring-2 focus:ring-indigo-500 text-base sm:text-sm font-bold outline-none"><select id="attPeriod" class="w-24 sm:w-32 bg-slate-50 border border-slate-200 text-slate-800 px-2 py-2 sm:py-3 rounded-xl shadow-inner focus:ring-2 focus:ring-indigo-500 text-base sm:text-sm font-bold outline-none"></select></div><label class="flex items-center gap-2 cursor-pointer bg-amber-50 p-2 sm:p-3 rounded-xl border border-amber-200 w-full"><input type="checkbox" id="isSubstitute" onchange="window.subOnToggle(this.checked)" class="w-4 h-4 text-amber-600 rounded"><span class="font-bold text-amber-800 text-[10px] sm:text-sm">มีการสอนแทน (ระบุชื่อผู้เช็คแทน)</span></label><select id="substituteTeacher" class="hidden w-full bg-white border border-amber-300 text-slate-800 px-3 py-2 rounded-xl shadow-inner focus:ring-2 focus:ring-amber-500 text-base sm:text-sm font-bold outline-none">${tcOptions}</select>${recFeatureOn('substitute') ? subPhotoSectionHtml() : ''}<button onclick="${backAction}" class="w-full bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2 sm:py-3 rounded-xl shadow-sm transition-all font-bold text-sm">ย้อนกลับ</button></div></div>`;
             
             html += `<div id="attHolidayNote" class="hidden mb-4 sm:mb-6 bg-rose-50 border-2 border-rose-300 rounded-2xl p-3 sm:p-4 flex items-center gap-3"><div class="w-9 h-9 sm:w-11 sm:h-11 bg-rose-500 text-white rounded-full flex items-center justify-center text-sm sm:text-lg shrink-0"><i class="fas fa-calendar-times"></i></div><span id="attHolidayNoteText" class="text-rose-700 font-bold text-xs sm:text-sm"></span></div>`;
             html += `<div id="attNoPeriodBanner" class="hidden mb-4 sm:mb-6 bg-orange-50 border-2 border-orange-400 rounded-2xl p-4 sm:p-5 flex items-center gap-3"><div class="w-10 h-10 sm:w-12 sm:h-12 bg-orange-500 text-white rounded-full flex items-center justify-center text-lg sm:text-xl shrink-0"><i class="fas fa-exclamation-triangle"></i></div><div><p class="text-orange-800 font-extrabold text-sm sm:text-lg">ไม่มีคาบสอนในวันที่นี้</p><p class="text-orange-600 font-medium text-[10px] sm:text-sm">วิชานี้ไม่มีตารางสอนตรงกับวันที่เลือก จึงไม่สามารถเช็คชื่อหรือบันทึกข้อมูลได้ กรุณาเลือกวันที่อื่น</p></div></div>`;
@@ -1654,9 +1687,10 @@
             document.querySelectorAll('input[type="radio"]').forEach(r => r.checked = false);
             document.getElementById('isSubstitute').checked = false; document.getElementById('substituteTeacher').classList.add('hidden'); document.getElementById('substituteTeacher').value = "";
             let record = attendanceData.find(a => a.subjectId === subjectId && a.date === date && String(a.period) === String(period));
+            subResetState(record); // [v1.71.6] รูปการสอนแทนของคาบนี้ (ถ้ามี)
             if (record) {
                 if(record.substituteTeacher) { document.getElementById('isSubstitute').checked = true;
-                    document.getElementById('substituteTeacher').classList.remove('hidden'); document.getElementById('substituteTeacher').value = record.substituteTeacher; }
+                    document.getElementById('substituteTeacher').classList.remove('hidden'); document.getElementById('substituteTeacher').value = record.substituteTeacher; window.subOnToggle(true); }
                 Object.keys(record.records).forEach(stId => { syncRadio(stId, record.records[stId]); });
                 showToast(`โหลดข้อมูลเก่าแล้ว`, "success");
             } else {
@@ -1690,7 +1724,7 @@
         const HOMEROOM_DRIVE_TOKEN = 'bnksa-hr-2569'; // ต้องตรงกับ TOKEN ใน Apps Script และ RELAY_TOKEN ใน Worker
         window.__hrLogsCache = window.__hrLogsCache || {};
 
-        function recFeatureOn(kind) { return kind === 'zone' ? settings.recordZone === true : settings.recordHomeroom !== false; }
+        function recFeatureOn(kind) { return kind === 'zone' ? settings.recordZone === true : (kind === 'substitute' ? settings.recordSubstitute === true : settings.recordHomeroom !== false); }
         function recStoreRoomId(kind, roomId) { return kind === 'zone' ? `${roomId}#zone` : roomId; } // คาบ A เก็บแยกด้วยรหัสห้อง + #zone (ใช้ตารางเดียวกับโฮมรูม)
         async function hrFetchJson(url, body, timeoutMs) {
             const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), timeoutMs || 30000);
@@ -1721,11 +1755,11 @@
             return window.__hrLogsCache[key] || null; // null = โหลดไม่สำเร็จ
         }
         // [v1.71.4] โครงสร้างโฟลเดอร์: โฮมรูม|เขตพื้นที่ / ปีการศึกษา 2569 / ภาคเรียน 2 / ห้อง ม.2-3
-        function hrTermFolderPath(term, year, kind) { return `${kind === 'zone' ? 'เขตพื้นที่' : 'โฮมรูม'}/ปีการศึกษา ${year}/ภาคเรียน ${term}`; }
+        function hrTermFolderPath(term, year, kind) { return `${kind === 'zone' ? 'เขตพื้นที่' : (kind === 'substitute' ? 'สอนแทน' : 'โฮมรูม')}/ปีการศึกษา ${year}/ภาคเรียน ${term}`; }
         function hrFolderPath(term, year, roomId, kind) { return `${hrTermFolderPath(term, year, kind)}/ห้อง ${formatRoomName(roomId).replace(/\//g, '-')}`; }
         // ย้ายโฟลเดอร์รูปของเทอมนั้นลงถังขยะของ Drive (กู้คืนได้ภายใน 30 วัน) - ส่งตรงก่อน ไม่ผ่านค่อยใช้ Relay
         async function hrTrashTermFolders(term, year) {
-            for (const kind of ['homeroom', 'zone']) {
+            for (const kind of ['homeroom', 'zone', 'substitute']) {
                 const path = hrTermFolderPath(term, year, kind);
                 const r = HOMEROOM_DRIVE_URL ? await hrFetchJson(HOMEROOM_DRIVE_URL, { action: 'trashPath', token: HOMEROOM_DRIVE_TOKEN, path }, 30000) : null;
                 if (!r || r.status !== 'success') await hrFetchJson(GOOGLE_APP_SCRIPT_URL, { __mode: 'relay_folder_trash', path }, 30000);
@@ -1925,16 +1959,122 @@
             return true;
         }
 
+        // ===== [v1.71.6] รูปการสอนแทน (เปิด/ปิดได้: settings.recordSubstitute ค่าเริ่มต้นปิด) =====
+        // ติ๊ก "มีการสอนแทน" แล้วต้องแนบรูป 1 รูป · เก็บใน Drive โฟลเดอร์ สอนแทน/ปีการศึกษา/ภาคเรียน/ห้อง · ข้อมูลรูปอยู่ในรายการเช็คชื่อ (subPhoto)
+        function subPhotoSectionHtml() {
+            return `<div id="subPhotoWrap" class="hidden w-full bg-amber-50 border border-amber-200 rounded-xl p-2.5 sm:p-3 text-left transition-shadow"><p class="text-[11px] sm:text-xs font-extrabold text-amber-800 mb-1.5"><i class="fas fa-camera"></i> รูปการสอนแทน <span class="text-rose-500">* 1 รูป</span> <span class="font-semibold text-amber-700">(ระบบย่อรูปให้อัตโนมัติ)</span></p>
+                <input type="file" id="subCamInput" accept="image/*" capture="environment" class="hidden" onchange="window.subPickPhoto(event)">
+                <input type="file" id="subGalInput" accept="image/*" class="hidden" onchange="window.subPickPhoto(event)">
+                <div id="subPhotoBox"></div></div>`;
+        }
+        function subResetState(record) { window.__subNewPhoto = null; window.__subExisting = record && record.subPhoto ? record.subPhoto : null; const w = document.getElementById('subPhotoWrap'); if (w) w.classList.add('hidden'); subRenderPhoto(); }
+        function subHasPhoto() { return !!window.__subNewPhoto || !!window.__subExisting; }
+        window.subOnToggle = function(on) {
+            document.getElementById('substituteTeacher').classList.toggle('hidden', !on);
+            const w = document.getElementById('subPhotoWrap'); if (w) { w.classList.toggle('hidden', !on); subRenderPhoto(); }
+        };
+        function subRenderPhoto() {
+            const box = document.getElementById('subPhotoBox'); if (!box) return;
+            const p = window.__subNewPhoto, old = window.__subExisting;
+            const btns = (t1) => `<div class="grid grid-cols-2 gap-2"><button type="button" onclick="document.getElementById('subCamInput').click()" class="min-h-[52px] rounded-xl border-2 border-amber-500 bg-white text-amber-700 font-extrabold text-xs sm:text-sm flex flex-col items-center justify-center gap-0.5"><i class="fas fa-camera"></i>${t1}</button><button type="button" onclick="document.getElementById('subGalInput').click()" class="min-h-[52px] rounded-xl border-2 border-slate-200 bg-white text-slate-700 font-extrabold text-xs sm:text-sm flex flex-col items-center justify-center gap-0.5"><i class="fas fa-images"></i>เลือกจากคลังรูป</button></div>`;
+            if (p) {
+                const kb = Math.round(String(p.dataUrl).length * 0.75 / 1024);
+                box.innerHTML = `<div class="relative rounded-xl overflow-hidden bg-slate-100"><img src="${p.dataUrl}" alt="รูปการสอนแทน" class="w-full max-h-44 object-cover"><span class="absolute left-2 bottom-2 bg-slate-900/75 text-white text-[11px] font-bold px-2 py-0.5 rounded-full">ย่อแล้ว ${kb} KB</span></div>
+                    <div class="grid grid-cols-3 gap-2 mt-2"><button type="button" onclick="document.getElementById('subCamInput').click()" class="h-9 rounded-xl border-2 border-slate-200 bg-white text-slate-700 font-extrabold text-xs">ถ่ายใหม่</button><button type="button" onclick="document.getElementById('subGalInput').click()" class="h-9 rounded-xl border-2 border-slate-200 bg-white text-slate-700 font-extrabold text-xs">เลือกรูปอื่น</button><button type="button" onclick="window.subRemovePhoto()" class="h-9 rounded-xl border-2 border-rose-200 bg-rose-50 text-rose-600 font-extrabold text-xs">ลบรูป</button></div>${old ? '<p class="text-[11px] text-amber-700 font-semibold mt-1.5">รูปใหม่จะแทนที่รูปเดิมเมื่อกดบันทึก</p>' : ''}`;
+            } else if (old) {
+                box.innerHTML = `<div class="flex items-center gap-2 bg-emerald-50 border-2 border-emerald-200 rounded-xl px-3 py-2 mb-2"><i class="fas fa-check-circle text-emerald-600 text-lg"></i><div class="flex-1 text-xs font-bold text-emerald-800">ส่งรูปไว้แล้ว${isAdmin ? ` · <button type="button" onclick="window.subViewOldPhoto()" class="underline">ดูรูป</button>` : ''}<br><span class="font-semibold text-emerald-700">ไม่ต้องส่งใหม่ ถ้าไม่ต้องการเปลี่ยนรูป</span></div></div><div id="subOldView"></div>${btns('ถ่ายรูปใหม่')}`;
+            } else box.innerHTML = btns('ถ่ายรูปเลย');
+        }
+        window.subPickPhoto = async function(e) {
+            const f = (e.target && e.target.files && e.target.files[0]) || null; e.target.value = '';
+            if (!f || !(f.type || '').startsWith('image/')) { if (f) showToast('กรุณาเลือกไฟล์รูปภาพ', 'error'); return; }
+            try { window.__subNewPhoto = { dataUrl: await hrResizeImage(f), uploaded: null }; subRenderPhoto(); }
+            catch (err) { showToast('ไม่สามารถอ่านไฟล์รูปนี้ได้', 'error'); }
+        };
+        window.subRemovePhoto = function() { window.__subNewPhoto = null; subRenderPhoto(); };
+        window.subViewOldPhoto = async function() {
+            const old = window.__subExisting, v = document.getElementById('subOldView'); if (!isAdmin || !old || !v) return;
+            v.innerHTML = '<div class="h-32 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400 mb-2"><i class="fas fa-circle-notch fa-spin"></i></div>';
+            const u = await hrGetPhoto(old.id);
+            v.innerHTML = u ? `<a href="${u}" target="_blank" rel="noopener" class="block rounded-xl overflow-hidden bg-slate-100 mb-2"><img src="${u}" alt="รูปการสอนแทน" class="w-full max-h-44 object-cover"></a>` : '<div class="rounded-xl bg-rose-50 text-rose-500 text-xs font-bold p-2 mb-2 text-center">โหลดรูปไม่สำเร็จ</div>';
+        };
+
+        // ===== [v1.71.6] รายงานสอนแทน (รายห้อง รายเดือน) — มีเฉพาะเมื่อเปิดการสอนแทนไว้ =====
+        window.downloadSubstituteReportPDF = function(roomId, month) {
+            if (!recFeatureOn('substitute')) { showToast('ยังไม่ได้เปิดการบันทึกการสอนแทน', 'error'); return; }
+            const report = window.tempRoomReport; if (!report || report.roomId !== roomId) { showToast("กรุณาเปิดหน้าสรุปห้องนี้ก่อน", "error"); return; }
+            const subIds = new Set(getRoomSubjects(roomId).map(s => s.id));
+            const recs = attendanceData.filter(a => a.substituteTeacher && subIds.has(a.subjectId) && String(a.date || '').startsWith(month));
+            if (!recs.length) { showToast('ไม่มีการสอนแทนของห้องนี้ในเดือนที่เลือก', 'error'); return; }
+            showConfirm("รายงานสอนแทน", `จะสร้างรายงานการสอนแทนของห้อง ${formatRoomName(roomId)} ประจำเดือนที่เลือก (${recs.length} ครั้ง) พร้อมดำเนินการหรือไม่?`, () => { window.__runSubstituteReportPDF(roomId, month, recs); });
+        };
+        window.__runSubstituteReportPDF = async function(roomId, month, recs) {
+            showProgressModal('กำลังจัดทำรายงานสอนแทน', 'กำลังเตรียมข้อมูล...');
+            const roomName = formatRoomName(roomId);
+            const monthNames = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+            const thMs = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+            const [ys, ms] = month.split('-'); const year = parseInt(ys), mNum = parseInt(ms);
+            const fmtD = (s) => { const d = new Date(s); return `${d.getDate()} ${thMs[d.getMonth()]} ${d.getFullYear() + 543}`; };
+            const rows = recs.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)) || parseInt(a.period) - parseInt(b.period)).map(a => {
+                const sub = subjects.find(s => s.id === a.subjectId) || {};
+                const c = { 'มา': 0, 'สาย': 0, 'ลา': 0, 'ขาด': 0 };
+                Object.values(a.records || {}).forEach(st => { if (st === 'มา' || st === 'ร่วมกิจกรรม') c['มา']++; else if (st === 'สาย') c['สาย']++; else if (st === 'ลาป่วย' || st === 'ลากิจ') c['ลา']++; else c['ขาด']++; });
+                return { a, sub, c, owner: [sub.teacher, sub.teacher2].filter(Boolean).join(', ') || '-' };
+            });
+            const urls = [];
+            for (let i = 0; i < rows.length; i++) {
+                updateProgressModal((i / rows.length) * 40, `กำลังโหลดรูปการสอนแทน ${i + 1}/${rows.length}...`);
+                urls.push(rows[i].a.subPhoto ? await hrGetPhoto(rows[i].a.subPhoto.id) : null);
+            }
+            const adv = getRoomAdvisors(roomId).filter(Boolean); const staff = getRoomStaff(roomId);
+            const signers = []; if (adv[0]) signers.push({ name: adv[0], role: adv[1] ? 'ครูที่ปรึกษาคนที่ 1' : 'ครูที่ปรึกษา' }); if (adv[1]) signers.push({ name: adv[1], role: 'ครูที่ปรึกษาคนที่ 2' }); signers.push({ name: staff, role: 'เจ้าหน้าที่' });
+            const head = (t) => `<div class="text-center mb-5 border-b-2 border-slate-700 pb-4">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-2xl font-black" style="margin-bottom:12px; line-height:1.6;">${t}</h1><h2 class="text-lg font-bold bg-amber-100 px-4 py-1.5 rounded-full inline-block border border-amber-300" style="line-height:1.6;">ห้อง ${roomName} · ${monthNames[mNum - 1]} ${year + 543}</h2></div>`;
+            const tile = (n, t, c, bg) => `<div style="border:1px solid #e2e8f0; background:${bg}; border-radius:12px; padding:10px; text-align:center;"><div style="font-size:24px; font-weight:800; color:${c};">${n}</div><div style="font-size:12px; font-weight:700; color:${c};">${t}</div></div>`;
+            const nTeachers = new Set(rows.map(r => r.a.substituteTeacher)).size, nPhotos = rows.filter(r => r.a.subPhoto).length;
+            const PER = 14; const pages = Math.ceil(rows.length / PER) || 1;
+            let html = `<div id="pdf-sub-container" class="a4-export-container text-slate-800" style="font-family: 'Sarabun', sans-serif;">`;
+            for (let p = 0; p < pages; p++) {
+                const chunk = rows.slice(p * PER, (p + 1) * PER);
+                const tbl = `<table class="w-full border-collapse bg-white border border-slate-500" style="table-layout:fixed; font-size:11px;"><thead class="bg-slate-100"><tr><th class="p-1.5 border border-slate-500" style="width:15%;">วันที่</th><th class="p-1.5 border border-slate-500" style="width:7%;">คาบ</th><th class="p-1.5 border border-slate-500 text-left" style="width:19%;">วิชา</th><th class="p-1.5 border border-slate-500 text-left" style="width:18%;">ครูผู้สอน</th><th class="p-1.5 border border-slate-500 text-left" style="width:18%;">ครูที่สอนแทน</th><th class="p-1.5 border border-slate-500">นักเรียน มา/สาย/ลา/ขาด</th><th class="p-1.5 border border-slate-500" style="width:6%;">รูป</th></tr></thead><tbody>${chunk.map(r => `<tr><td class="p-1.5 border border-slate-500 font-bold">${fmtD(r.a.date)}</td><td class="p-1.5 border border-slate-500 text-center">${hrEsc(periodLabel(r.a.period))}</td><td class="p-1.5 border border-slate-500">${hrEsc(r.sub.name || '-')}</td><td class="p-1.5 border border-slate-500">${hrEsc(r.owner)}</td><td class="p-1.5 border border-slate-500 font-bold" style="color:#92400e;">${hrEsc(r.a.substituteTeacher)}</td><td class="p-1.5 border border-slate-500 text-center">${r.c['มา']}/${r.c['สาย']}/${r.c['ลา']}/${r.c['ขาด']}</td><td class="p-1.5 border border-slate-500 text-center">${r.a.subPhoto ? '1' : '–'}</td></tr>`).join('')}</tbody></table>`;
+                const tiles = p === 0 ? `<div style="display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-bottom:16px;">${tile(rows.length, 'คาบที่มีการสอนแทน', '#92400e', '#fffbeb')}${tile(nTeachers, 'ครูที่สอนแทน (คน)', '#334155', '#ffffff')}${tile(nPhotos, 'มีรูปประกอบ', '#047857', '#ecfdf5')}</div>` : '';
+                html += `<div class="a4-page flex flex-col justify-between bg-white">${pdfPageBadge(pages > 1 ? `หน้าสรุป ${p + 1}/${pages}` : '')}<div>${head('รายงานการสอนแทน')}${tiles}${tbl}</div>${p === pages - 1 ? buildPdfSignatureBlock(signers) : ''}</div>`;
+            }
+            const withPhoto = rows.map((r, i) => ({ r, u: urls[i] })).filter(x => x.r.a.subPhoto);
+            const PERP = 4;
+            for (let p = 0; p < Math.ceil(withPhoto.length / PERP); p++) {
+                const cells = withPhoto.slice(p * PERP, (p + 1) * PERP).map(({ r, u }) => `<div style="border:1px solid #cbd5e1; border-radius:12px; padding:10px; display:flex; flex-direction:column; gap:6px;"><div style="font-size:13px; font-weight:800; line-height:1.6;">${fmtD(r.a.date)} · คาบ ${hrEsc(periodLabel(r.a.period))}</div><div style="font-size:12px; color:#475569; line-height:1.6;">${hrEsc(r.sub.name || '-')} · สอนแทนโดย <b style="color:#92400e;">${hrEsc(r.a.substituteTeacher)}</b></div>${u ? `<div style="aspect-ratio:4/3; border-radius:8px; overflow:hidden; background:#e2e8f0;"><img src="${u}" style="width:100%; height:100%; object-fit:cover; display:block;"></div>` : `<div style="aspect-ratio:4/3; border-radius:8px; background:#fff1f2; color:#be123c; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700;">โหลดรูปไม่สำเร็จ</div>`}</div>`).join('');
+                html += `<div class="a4-page flex flex-col bg-white">${pdfPageBadge('รูปการสอนแทน')}${head('รูปการสอนแทน')}<div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px;">${cells}</div></div>`;
+            }
+            html += `</div>`;
+            const wasDark = document.documentElement.classList.contains('dark'); if (wasDark) document.documentElement.classList.remove('dark');
+            document.body.insertAdjacentHTML('beforeend', html);
+            await document.fonts.ready; await new Promise(res => setTimeout(res, 500));
+            try {
+                const pdfDoc = new jspdf.jsPDF('p', 'pt', 'a4');
+                const els = document.querySelectorAll('#pdf-sub-container .a4-page');
+                for (let i = 0; i < els.length; i++) {
+                    updateProgressModal(40 + (i / els.length) * 60, `กำลังสร้างหน้าที่ ${i + 1} จาก ${els.length}...`);
+                    const canvas = await html2canvas(els[i], { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+                    if (i > 0) pdfDoc.addPage(); pdfDoc.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 595.28, 841.89);
+                }
+                updateProgressModal(100, 'กำลังบันทึกไฟล์...');
+                pdfDoc.save(`รายงานสอนแทน_${roomName.replace(/\//g, '-')}_${month}.pdf`);
+                completeProgressModal('ดำเนินการเสร็จสิ้น', `สร้างรายงานสอนแทน (${els.length} หน้า) สำเร็จ ไฟล์ถูกดาวน์โหลดแล้ว`);
+            } catch (err) { errorProgressModal('เกิดข้อผิดพลาดในการสร้างรายงาน กรุณาลองใหม่อีกครั้ง'); }
+            const el = document.getElementById('pdf-sub-container'); if (el) el.remove();
+            if (wasDark) document.documentElement.classList.add('dark');
+        };
+
         // ===== สวิตช์เปิด/ปิดการบันทึกพร้อมรูป (Super Admin) =====
         function buildRecordToggleSettingsHtml() {
             const row = (key, on, title, desc) => `<div class="flex items-center gap-3 bg-white border border-slate-200 rounded-xl p-3"><div class="flex-1 min-w-0"><p class="font-extrabold text-slate-800 text-sm sm:text-base">${title}</p><p class="text-xs text-slate-500 font-semibold">${desc}</p></div><button type="button" role="switch" aria-checked="${on}" aria-label="${title}" onclick="window.toggleRecordFeature('${key}')" class="relative w-14 h-8 rounded-full transition-colors shrink-0 ${on ? 'bg-emerald-500' : 'bg-slate-300'}"><span class="absolute top-1 ${on ? 'left-7' : 'left-1'} w-6 h-6 rounded-full bg-white shadow transition-all"></span></button></div>`;
-            return `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-1 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-camera text-indigo-500"></i> บันทึกกิจกรรมพร้อมรูป</h3><p class="text-xs sm:text-sm text-slate-500 mb-3">เมื่อปิด หน้าเช็คชื่อคาบนั้นจะเหลือแค่เช็คชื่อตามปกติ ข้อมูลที่บันทึกไว้แล้วยังอยู่ครบ</p><div class="space-y-2 mb-6">${row('recordHomeroom', settings.recordHomeroom !== false, 'คาบโฮมรูม', 'จัดกิจกรรมหรือไม่ + กิจกรรม + รูป 1 รูป')}${row('recordZone', settings.recordZone === true, 'คาบ A เขตพื้นที่รับผิดชอบ', 'สภาพเขตพื้นที่ + รูปรายงาน 1 รูป')}</div>`;
+            return `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-1 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-camera text-indigo-500"></i> บันทึกกิจกรรมพร้อมรูป</h3><p class="text-xs sm:text-sm text-slate-500 mb-3">เมื่อปิด หน้าเช็คชื่อคาบนั้นจะเหลือแค่เช็คชื่อตามปกติ ข้อมูลที่บันทึกไว้แล้วยังอยู่ครบ</p><div class="space-y-2 mb-6">${row('recordHomeroom', settings.recordHomeroom !== false, 'คาบโฮมรูม', 'จัดกิจกรรมหรือไม่ + กิจกรรม + รูป 1 รูป')}${row('recordZone', settings.recordZone === true, 'คาบ A เขตพื้นที่รับผิดชอบ', 'สภาพเขตพื้นที่ + รูปรายงาน 1 รูป')}${row('recordSubstitute', settings.recordSubstitute === true, 'การสอนแทน', 'รูปการสอนแทน 1 รูปตอนเช็คชื่อ + รายงานสอนแทน (หน้ารายงานห้อง)')}</div>`;
         }
         window.toggleRecordFeature = function(key) {
             if (!currentUser || currentUser.role !== 'super_admin') { showToast('เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้', 'error'); return; }
-            const cur = key === 'recordZone' ? settings.recordZone === true : settings.recordHomeroom !== false;
+            const cur = key === 'recordHomeroom' ? settings.recordHomeroom !== false : settings[key] === true;
             settings[key] = !cur;
-            logAction(`${!cur ? 'เปิด' : 'ปิด'}การบันทึกพร้อมรูป`, key === 'recordZone' ? 'คาบ A เขตพื้นที่รับผิดชอบ' : 'คาบโฮมรูม', 'settings');
+            logAction(`${!cur ? 'เปิด' : 'ปิด'}การบันทึกพร้อมรูป`, key === 'recordZone' ? 'คาบ A เขตพื้นที่รับผิดชอบ' : (key === 'recordSubstitute' ? 'การสอนแทน' : 'คาบโฮมรูม'), 'settings');
             saveData('full'); showToast(!cur ? 'เปิดใช้งานแล้ว' : 'ปิดใช้งานแล้ว'); renderAdminTab();
         };
 
@@ -2093,8 +2233,25 @@
             const hrActive = !!document.getElementById('hrSection');
             if (hrActive) { const hrErr = hrValidate(); if (hrErr) { showToast(hrErr, 'error'); const sec = document.getElementById('hrSection'); sec.scrollIntoView({ behavior: 'smooth', block: 'center' }); __ensureToastStyle(); sec.classList.remove('__shake'); void sec.offsetWidth; sec.classList.add('ring-4', 'ring-rose-200', '__shake'); setTimeout(() => sec.classList.remove('ring-4', 'ring-rose-200', '__shake'), 1800); return; } }
             const existingRec = attendanceData.find(a => a.subjectId === currentSubjectId && a.date === date && String(a.period) === String(period));
+            const subPhotoOn = isSub && recFeatureOn('substitute');
+            if (subPhotoOn && !subHasPhoto()) { showToast('กรุณาแนบรูปการสอนแทน 1 รูปก่อนบันทึก', 'error'); const w = document.getElementById('subPhotoWrap'); if (w) { w.scrollIntoView({ behavior: 'smooth', block: 'center' }); __ensureToastStyle(); w.classList.remove('__shake'); void w.offsetWidth; w.classList.add('ring-4', 'ring-rose-200', '__shake'); setTimeout(() => w.classList.remove('ring-4', 'ring-rose-200', '__shake'), 1800); } return; }
             const payloadData = { id: (existingRec && existingRec.id) || generateId(), subjectId: currentSubjectId, date: date, period: period, records: records, createdAt: (existingRec && existingRec.createdAt) || new Date().toISOString(), checkedAt: new Date().toISOString(), checkedBy: currentUser ? currentUser.name : '' };
             if(isSub) payloadData.substituteTeacher = subTeacher;
+            // [v1.71.6] รูปการสอนแทน: ส่งรูปใหม่ก่อน (ส่งแล้วจำไว้ ลองใหม่ไม่ต้องส่งซ้ำ) · ไม่ได้เปลี่ยนรูป = ใช้รูปเดิม · ปิดฟีเจอร์อยู่ = คงรูปเดิมไว้ในข้อมูล
+            const oldSubPhoto = existingRec && existingRec.subPhoto ? existingRec.subPhoto : null;
+            if (isSub && oldSubPhoto) payloadData.subPhoto = oldSubPhoto;
+            if (subPhotoOn && window.__subNewPhoto) {
+                const np = window.__subNewPhoto;
+                if (!np.uploaded) {
+                    setAttSaveBtnState('saving');
+                    const b0 = document.getElementById('saveAttBtn'); if (b0) b0.innerHTML = '<i class="fas fa-circle-notch fa-spin text-xl"></i> กำลังส่งรูปการสอนแทน…';
+                    const subj0 = subjects.find(s => s.id === currentSubjectId);
+                    const res = await hrUploadPhoto(np.dataUrl, `${date}_คาบ${periodLabel(period)}_${formatRoomName(subj0.roomId).replace(/\//g, '-')}_${String(subj0.name || '').replace(/[\\/:*?"<>|]/g, ' ')}.jpg`, hrFolderPath(subj0.term, subj0.year, subj0.roomId, 'substitute'), (pct, route) => hrBar(pct, route, false));
+                    if (!res) { setAttSaveBtnState('failed'); setAttSaveBanner('error', 0, 'ส่งรูปการสอนแทนไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้วกดบันทึกอีกครั้ง'); return; }
+                    np.uploaded = res; hrBar(100, res.route, true);
+                }
+                payloadData.subPhoto = { id: np.uploaded.id, at: new Date().toISOString() };
+            }
             // ===== [v1.70] บันทึกแบบไม่บล็อกหน้าจอ: ปุ่มเปลี่ยนสถานะในตัว → ติ๊กเขียว → กลับหน้าเดิมเอง (ไม่ต้องกด "ตกลง") =====
             clearInterval(window.__attRetryTick); window.__attRetryTick = null;
             setAttSaveBtnState('saving'); setAttSaveBanner(null);
@@ -2114,6 +2271,9 @@
                 } else setAttSaveBanner('error', 0, title);
             };
             if (!saveSuccess) { failAndRetry(); return; }
+            // [v1.71.6] รูปการสอนแทนเดิมที่ถูกแทนที่ / ยกเลิกการสอนแทน → ย้ายลงถังขยะ Drive
+            if (oldSubPhoto && (!payloadData.subPhoto || payloadData.subPhoto.id !== oldSubPhoto.id)) hrTrashPhotos([oldSubPhoto.id]);
+            window.__subNewPhoto = null;
             await ensureAttendanceLoadedForRoom(subject.term, subject.year, subject.roomId, true);
             if (hrActive) {
                 const hrOk = await hrSubmit(subject, date, (txt) => { const b = document.getElementById('saveAttBtn'); if (b) b.innerHTML = `<i class="fas fa-circle-notch fa-spin text-xl"></i> ${txt}`; });
@@ -2323,7 +2483,7 @@
             const displayMonthYear = `${monthNames[parseInt(selectedMonth.split('-')[1])-1]} ${parseInt(selectedMonth.split('-')[0])+543}`;
             const backAction = 'history.back()';
             let roomTotals = null;
-            let html = summaryHeaderHtml({ iconHtml: `<div class="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center text-white text-xl sm:text-3xl shadow-lg shrink-0"><i class="fas fa-chart-bar"></i></div>`, title: `รายงานห้อง ${roomName}`, backAction: backAction, tabs: [{ label: 'สรุปรายเดือน', active: tab === 'monthly', onclick: `window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'monthly'})` }, { label: 'สรุปรายวัน', active: tab === 'daily', onclick: `window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'daily'})` }], actionsLabel: 'ดาวน์โหลดเอกสาร PDF', actions: tab === 'monthly' ? [{ label: 'สมุดทะเบียน', icon: 'fa-book', tone: 'indigo', onclick: `window.downloadRoomMonthlyRegisterPDF('${roomId}', '${selectedMonth}')` }, { label: 'สรุปเขตรับผิดชอบ', icon: 'fa-map-marked-alt', tone: 'teal', onclick: `window.downloadZoneSummaryPDF('${roomId}', '${selectedMonth}')` }, { label: 'สรุปโฮมรูม', icon: 'fa-users', tone: 'violet', onclick: `window.openHomeroomBookletChooser('${roomId}', '${selectedMonth}')` }] : [] });
+            let html = summaryHeaderHtml({ iconHtml: `<div class="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center text-white text-xl sm:text-3xl shadow-lg shrink-0"><i class="fas fa-chart-bar"></i></div>`, title: `รายงานห้อง ${roomName}`, backAction: backAction, tabs: [{ label: 'สรุปรายเดือน', active: tab === 'monthly', onclick: `window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'monthly'})` }, { label: 'สรุปรายวัน', active: tab === 'daily', onclick: `window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'daily'})` }], actionsLabel: 'ดาวน์โหลดเอกสาร PDF', actions: tab === 'monthly' ? [{ label: 'สมุดทะเบียน', icon: 'fa-book', tone: 'indigo', onclick: `window.downloadRoomMonthlyRegisterPDF('${roomId}', '${selectedMonth}')` }, { label: 'สรุปเขตรับผิดชอบ', icon: 'fa-map-marked-alt', tone: 'teal', onclick: `window.downloadZoneSummaryPDF('${roomId}', '${selectedMonth}')` }, { label: 'สรุปโฮมรูม', icon: 'fa-users', tone: 'violet', onclick: `window.openHomeroomBookletChooser('${roomId}', '${selectedMonth}')` }].concat(recFeatureOn('substitute') ? [{ label: 'รายงานสอนแทน', icon: 'fa-user-clock', tone: 'orange', onclick: `window.downloadSubstituteReportPDF('${roomId}', '${selectedMonth}')` }] : []) : [] });
 
             if (tab === 'monthly') {
                 const { studentSummaries, incompleteAttendanceList, roomTotals: computedRoomTotals } = computeRoomIncompleteList(roomId, selectedMonth);
@@ -3640,7 +3800,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '1.71.4.261026';
+        const APP_VERSION = '1.71.6.261026';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         function renderSiteFooter() {
             const y = document.getElementById('footerYear'); if (y) y.textContent = new Date().getFullYear() + 543;
