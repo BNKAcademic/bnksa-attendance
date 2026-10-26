@@ -449,6 +449,7 @@
 
 
         function navigate(view, params = {}, forceReplace = false) {
+            if (view === 'attendance') window.__attReturnState = history.state; // จำว่าเข้าหน้าเช็คชื่อมาจากหน้าไหน
             closeAllModals();
             window.scrollTo({ top: 0, behavior: 'smooth' });
             const state = { view, ...params };
@@ -556,6 +557,8 @@
                                     applyHeaderLogo();
                                 }
                                 if (Array.isArray(data.settings.externalLinks)) settings.externalLinks = data.settings.externalLinks;
+                                if (data.settings.recordHomeroom !== undefined) settings.recordHomeroom = data.settings.recordHomeroom;
+                                if (data.settings.recordZone !== undefined) settings.recordZone = data.settings.recordZone;
                                 if (JSON.stringify(data.settings.announcements || []) !== JSON.stringify(settings.announcements || [])) {
                                     settings.announcements = data.settings.announcements || [];
                                     updateAnnouncementBar();
@@ -1031,7 +1034,7 @@
         function __ensureToastStyle() {
             if (document.getElementById('__toastStyleV170')) return;
             const st = document.createElement('style'); st.id = '__toastStyleV170';
-            st.textContent = `@keyframes __tRise{from{transform:translateY(16px);opacity:0}to{transform:translateY(0);opacity:1}}@keyframes __tShrink{from{width:100%}to{width:0%}}@keyframes __tFlash{0%{background-color:#bbf7d0;box-shadow:inset 0 0 0 2px #34d399}100%{background-color:transparent;box-shadow:inset 0 0 0 2px transparent}}@keyframes __tDrop{0%{transform:translate(-50%,-24px);opacity:0}10%{transform:translate(-50%,0);opacity:1}88%{transform:translate(-50%,0);opacity:1}100%{transform:translate(-50%,-8px);opacity:0}}.__t-rise{animation:__tRise .28s cubic-bezier(.2,.8,.2,1)}.__t-out{transition:opacity .25s, transform .25s;opacity:0;transform:translateY(12px)}.__t-bar{height:3px;background:rgba(255,255,255,.15)}.__t-bar>div{height:100%;background:#34d399;animation:__tShrink linear forwards}.row-flash,.row-flash>td{animation:__tFlash 2s ease-out}.__rt-chip{animation:__tDrop 3.4s ease forwards}`;
+            st.textContent = `@keyframes __tRise{from{transform:translateY(16px);opacity:0}to{transform:translateY(0);opacity:1}}@keyframes __tDropIn{from{transform:translateY(-18px) scale(.92);opacity:0}to{transform:translateY(0) scale(1);opacity:1}}@keyframes __tFlash{0%{background-color:#bbf7d0;box-shadow:inset 0 0 0 2px #34d399}100%{background-color:transparent;box-shadow:inset 0 0 0 2px transparent}}@keyframes __tDrop{0%{transform:translate(-50%,-24px);opacity:0}10%{transform:translate(-50%,0);opacity:1}88%{transform:translate(-50%,0);opacity:1}100%{transform:translate(-50%,-8px);opacity:0}}@keyframes __tTick{from{stroke-dashoffset:24}to{stroke-dashoffset:0}}@keyframes __tShake{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}@keyframes __tBolt{0%{transform:scale(.3);opacity:0}70%{transform:scale(1.25);opacity:1}100%{transform:scale(1)}}.__t-rise{animation:__tRise .28s cubic-bezier(.2,.8,.2,1)}.__t-drop{animation:__tDropIn .3s cubic-bezier(.2,.8,.2,1)}.__t-out{transition:opacity .25s, transform .25s;opacity:0;transform:translateY(-10px)}.__t-tick{stroke-dasharray:24;animation:__tTick .4s .12s ease-out both}.row-flash,.row-flash>td{animation:__tFlash 2s ease-out}.__rt-chip{animation:__tDrop 3.4s ease forwards}.__shake{animation:__tShake .3s ease-in-out 2}.__bolt{animation:__tBolt .35s ease-out both}`;
             document.head.appendChild(st);
         }
         function hideToast() {
@@ -1039,28 +1042,27 @@
             const el = __toastEl; if (!el) return;
             __toastEl = null; el.classList.add('__t-out'); setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 260);
         }
+        // [v1.71.3] ป้ายแจ้งเตือนแบบ C: ป้ายเล็กกลางจอด้านบน สีเขียว = สำเร็จ, สีม่วง = กำลังทำ, สีแดง = ผิดพลาด (ค้างนานกว่า + ปุ่มปิด)
         function showToast(message, type = 'success', opts = {}) {
             const container = document.getElementById('toastContainer'); if (!container) return;
             __ensureToastStyle();
-            container.className = 'fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-[70] w-full max-w-md px-4 pointer-events-none';
+            container.className = 'fixed top-20 sm:top-24 left-1/2 -translate-x-1/2 z-[70] w-max max-w-[92vw] pointer-events-none flex justify-center';
             container.setAttribute('role', 'status'); container.setAttribute('aria-live', 'polite');
+            const tick = '<span class="w-6 h-6 rounded-full bg-white flex items-center justify-center shrink-0"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="__t-tick" d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>';
             const conf = {
-                success: { bg: '#0f172a', icon: '<i class="fas fa-check-circle" style="color:#34d399"></i>', dur: 3000 },
-                info: { bg: '#0f172a', icon: '<i class="fas fa-circle-notch fa-spin" style="color:#a5b4fc"></i>', dur: 10000 },
-                error: { bg: '#be123c', icon: '<i class="fas fa-exclamation-circle" style="color:#ffe4e6"></i>', dur: 7000 }
-            }[type] || { bg: '#0f172a', icon: '<i class="fas fa-info-circle" style="color:#a5b4fc"></i>', dur: 3500 };
+                success: { cls: 'bg-emerald-600 rounded-full pl-2 pr-4', icon: tick, dur: 3000 },
+                info: { cls: 'bg-indigo-600 rounded-full pl-3 pr-4', icon: '<i class="fas fa-circle-notch fa-spin text-indigo-100"></i>', dur: 10000 },
+                error: { cls: 'bg-rose-600 rounded-2xl pl-3 pr-2', icon: '<i class="fas fa-exclamation-circle text-rose-100 text-lg"></i>', dur: 7000 }
+            }[type] || { cls: 'bg-slate-700 rounded-full pl-3 pr-4', icon: '<i class="fas fa-info-circle"></i>', dur: 3500 };
             const dur = opts.duration || conf.dur;
-            if (!__toastEl) {
-                __toastEl = document.createElement('div');
-                __toastEl.className = 'pointer-events-auto rounded-2xl overflow-hidden text-white __t-rise';
-                __toastEl.style.boxShadow = '0 10px 30px rgba(15,23,42,.28)';
-                container.appendChild(__toastEl);
-            }
-            const el = __toastEl; el.style.background = conf.bg; el.style.transition = 'background .25s';
+            const isNew = !__toastEl;
+            if (isNew) { __toastEl = document.createElement('div'); container.appendChild(__toastEl); }
+            const el = __toastEl;
+            el.className = `pointer-events-auto text-white shadow-lg flex items-center gap-2 py-2 ${conf.cls} ${isNew ? '__t-drop' : ''}`;
             const safeMsg = String(message == null ? '' : message).replace(/&/g, '&amp;').replace(/</g, '&lt;');
-            const actionBtn = opts.action ? `<button type="button" class="__t-action shrink-0 h-9 px-3.5 rounded-xl bg-white font-extrabold text-xs sm:text-sm" style="color:${type === 'error' ? '#be123c' : '#4338ca'}">${opts.action.label}</button>` : '';
-            const closeBtn = type === 'error' ? `<button type="button" class="__t-close shrink-0 w-8 h-8 rounded-lg text-white/80 hover:text-white" aria-label="ปิดการแจ้งเตือน"><i class="fas fa-times"></i></button>` : '';
-            el.innerHTML = `<div class="flex items-center gap-3 px-4 py-3"><span class="text-lg sm:text-xl shrink-0">${conf.icon}</span><span class="flex-1 font-bold text-sm sm:text-base leading-snug">${safeMsg}</span>${actionBtn}${closeBtn}</div>${type === 'success' ? `<div class="__t-bar"><div style="animation-duration:${dur}ms"></div></div>` : ''}`;
+            const actionBtn = opts.action ? `<button type="button" class="__t-action shrink-0 h-8 px-3 rounded-full bg-white font-extrabold text-xs sm:text-sm" style="color:${type === 'error' ? '#be123c' : '#4338ca'}">${opts.action.label}</button>` : '';
+            const closeBtn = type === 'error' ? `<button type="button" class="__t-close shrink-0 w-8 h-8 rounded-full text-white/80 hover:text-white" aria-label="ปิดการแจ้งเตือน"><i class="fas fa-times"></i></button>` : '';
+            el.innerHTML = `${conf.icon}<span class="font-bold text-sm sm:text-base leading-snug">${safeMsg}</span>${actionBtn}${closeBtn}`;
             const a = el.querySelector('.__t-action'); if (a) a.onclick = () => { hideToast(); try { opts.action.onClick(); } catch (e) {} };
             const c = el.querySelector('.__t-close'); if (c) c.onclick = hideToast;
             clearTimeout(__toastTimer); __toastTimer = setTimeout(hideToast, dur);
@@ -1301,6 +1303,15 @@
             else { detail.classList.add('hidden'); if (chevron) chevron.classList.remove('rotate-90'); }
         };
 
+        // ===== [v1.71.3] หัวหน้าสรุปแบบเดียวกันทุกหน้า: ชื่อหน้า + ปุ่มกลับ / ปุ่มสลับมุมมอง / ปุ่มดาวน์โหลด-จัดการ ขนาดเท่ากัน =====
+        function summaryHeaderHtml(o) {
+            const tones = { indigo: 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100', teal: 'bg-teal-50 border-teal-200 text-teal-700 hover:bg-teal-100', violet: 'bg-violet-50 border-violet-200 text-violet-700 hover:bg-violet-100', purple: 'bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100', emerald: 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100', pink: 'bg-pink-50 border-pink-200 text-pink-700 hover:bg-pink-100', blue: 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100', rose: 'bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100', orange: 'bg-orange-50 border-orange-200 text-orange-700 hover:bg-orange-100', locked: 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed' };
+            const tabs = o.tabs || [], actions = o.actions || [];
+            const tabHtml = tabs.length ? `<div class="grid gap-1 bg-slate-100 p-1 rounded-xl w-full sm:max-w-md" style="grid-template-columns:repeat(${tabs.length},minmax(0,1fr))">${tabs.map(t => `<button onclick="${t.onclick}" class="h-9 sm:h-10 rounded-lg text-xs sm:text-sm font-extrabold transition-colors ${t.active ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}">${t.label}</button>`).join('')}</div>` : '';
+            const cols = Math.min(actions.length, 3);
+            const actHtml = actions.length ? `<div>${o.actionsLabel !== '' ? `<p class="text-[11px] sm:text-xs font-extrabold text-slate-500 mb-1.5">${o.actionsLabel || 'ดาวน์โหลด / จัดการ'}</p>` : ''}<div class="grid gap-2 sm:flex sm:flex-wrap" style="grid-template-columns:repeat(${cols},minmax(0,1fr))">${actions.map(x => `<button ${x.disabled ? 'disabled' : `onclick="${x.onclick}"`} ${x.title ? `title="${x.title}"` : ''} class="min-h-[56px] sm:min-h-0 sm:h-11 sm:px-4 rounded-xl border-2 ${tones[x.tone] || tones.indigo} px-1 py-1.5 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 text-[11px] sm:text-sm font-extrabold text-center leading-tight transition-colors"><i class="fas ${x.icon} text-base sm:text-sm"></i><span>${x.label}</span></button>`).join('')}</div></div>` : '';
+            return `<div class="mb-4 sm:mb-8 bg-white p-4 sm:p-6 rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 flex flex-col gap-3 sm:gap-4"><div class="flex items-center gap-3">${o.iconHtml || ''}<div class="flex-1 min-w-0"><h2 class="text-lg sm:text-3xl font-extrabold text-slate-800 tracking-tight leading-tight break-words">${o.title}</h2>${o.subHtml || ''}</div><button onclick="${o.backAction}" class="shrink-0 h-10 sm:h-11 px-3 sm:px-5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-sm flex items-center gap-1.5"><i class="fas fa-arrow-left"></i> กลับ</button></div>${tabHtml}${o.controlsHtml || ''}${actHtml}</div>`;
+        }
         function renderSchoolSummary(selectedMonth = null) {
             const schoolTerm = settings.term, schoolYear = settings.year;
             const schoolTermYearKey = String(schoolTerm) + '_' + String(schoolYear);
@@ -1324,7 +1335,7 @@
             const totalRecorded = Object.values(totals).reduce((a, b) => a + b, 0);
             const roomCount = getRoomList().length;
 
-            let html = `<div class="mb-4 sm:mb-8 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 p-4 sm:p-8 relative overflow-hidden"><div class="absolute right-0 top-0 w-1/3 h-full bg-gradient-to-l from-slate-100 to-transparent opacity-60"></div><div class="relative z-10 flex gap-3 sm:gap-4 items-center"><div class="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-slate-700 to-slate-900 rounded-2xl flex items-center justify-center text-white text-2xl sm:text-3xl shadow-lg shrink-0"><i class="fas fa-school"></i></div><div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">รวมทุกห้อง (ภาพรวมทั้งโรงเรียน)</h2><p class="text-slate-500 font-bold mt-1 text-xs sm:text-sm">${roomCount} ห้องเรียน ทุกระดับชั้น</p></div></div><div class="relative z-10 flex flex-wrap gap-1.5 sm:gap-2 w-full lg:w-auto mt-2 lg:mt-0 items-center"><input type="month" value="${selectedMonth}" onchange="window.navigate('school_summary', {month: this.value})" class="flex-1 lg:flex-none bg-slate-50 border border-slate-200 text-slate-700 px-3 py-2 sm:py-2.5 rounded-xl text-sm font-bold outline-none"><button onclick="window.exportSectionInfographicPDF('schoolInfographicSection', 'ภาพรวมทั้งโรงเรียน_${selectedMonth}', 'pdf')" class="flex-1 lg:flex-none bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 sm:py-2.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-sm"><i class="fas fa-file-pdf"></i> <span class="hidden sm:inline">PDF</span></button><button onclick="window.exportSectionInfographicPDF('schoolInfographicSection', 'ภาพรวมทั้งโรงเรียน_${selectedMonth}', 'image')" class="flex-1 lg:flex-none bg-pink-600 hover:bg-pink-700 text-white px-3 py-2 sm:py-2.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-sm"><i class="fas fa-file-image"></i> <span class="hidden sm:inline">รูปภาพ</span></button><button onclick="window.navigate('dashboard')" class="flex-1 lg:flex-none bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-2 sm:py-2.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-sm"><i class="fas fa-arrow-left"></i> กลับ</button></div></div>`;
+            let html = summaryHeaderHtml({ iconHtml: `<div class="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-slate-700 to-slate-900 rounded-2xl flex items-center justify-center text-white text-2xl sm:text-3xl shadow-lg shrink-0"><i class="fas fa-school"></i></div>`, title: `รวมทุกห้อง (ภาพรวมทั้งโรงเรียน)`, subHtml: `<p class="text-slate-500 font-bold mt-1 text-xs sm:text-sm">${roomCount} ห้องเรียน ทุกระดับชั้น</p>`, backAction: `window.navigate('dashboard')`, controlsHtml: `<label class="block"><span class="text-[11px] sm:text-xs font-extrabold text-slate-500">เดือน</span><input type="month" value="${selectedMonth}" onchange="window.navigate('school_summary', {month: this.value})" class="mt-1 w-full sm:w-auto h-10 bg-slate-50 border-2 border-slate-200 text-slate-700 rounded-xl px-3 font-bold text-sm outline-none"></label>`, actions: [{ label: 'PDF', icon: 'fa-file-pdf', tone: 'purple', onclick: `window.exportSectionInfographicPDF('schoolInfographicSection', 'ภาพรวมทั้งโรงเรียน_${selectedMonth}', 'pdf')` }, { label: 'รูปภาพ', icon: 'fa-file-image', tone: 'pink', onclick: `window.exportSectionInfographicPDF('schoolInfographicSection', 'ภาพรวมทั้งโรงเรียน_${selectedMonth}', 'image')` }] });
 
             html += `<div id="schoolInfographicSection">`;
 
@@ -1486,7 +1497,7 @@
                 if (slot.period === -1) { html += `<tr class="bg-amber-50/70 border-y border-amber-100"><td class="p-1.5 sm:p-3 lg:p-5 text-center font-bold text-amber-600 bg-amber-100/50 text-[9px] sm:text-base"><i class="fas fa-utensils"></i></td><td class="p-1.5 sm:p-3 lg:p-5 font-black text-amber-700 text-center tracking-widest text-[11px] sm:text-lg" colspan="3">${slot.name}</td></tr>`; } else {
                     const subjectInSlot = daySubjects.find(s => s.currentPeriod === slot.period);
                     const periodCellHtml = (dim) => `<td class="p-1.5 sm:p-3 lg:p-5 text-center bg-slate-50/50"><div class="font-black ${dim ? 'text-slate-400' : 'text-slate-700'} text-sm sm:text-lg leading-none">${periodLabel(slot.period)}</div><div class="font-bold ${dim ? 'text-slate-300' : 'text-slate-400'} font-mono text-[8px] sm:text-xs mt-0.5">${slot.time.split('-')[0]}</div></td>`;
-                    if (subjectInSlot) { const isSlotLocked = isAttendanceEntryLocked(subjectInSlot.term, subjectInSlot.year); const replacedSys = !subjectInSlot.systemType ? roomSubjects.find(rs => rs.systemType && (rs.schedules || []).some(sc => parseInt(sc.day) === effectiveDayForSchedule && parseInt(sc.period) === slot.period)) : null; html += `<tr data-att-key="${subjectInSlot.id}|${slot.period}|${dateToPass}" class="hover:bg-indigo-50/40 transition-colors group">${periodCellHtml(false)}<td class="p-1.5 sm:p-3 lg:p-5 min-w-0"><div class="font-extrabold text-blue-700 text-[11px] sm:text-lg leading-tight break-words">${subjectInSlot.name}</div>${replacedSys ? `<div class="text-[8px] sm:text-xs font-bold text-amber-700 mt-0.5">สอนแทน${replacedSys.name}</div>` : ''}${subjectInSlot.code ? `<div class="text-[8px] sm:text-xs font-bold text-slate-400 mt-1 uppercase bg-slate-100 inline-block px-1 sm:px-1.5 py-0.5 rounded border border-slate-200 truncate max-w-full">${subjectInSlot.code}</div>` : ''}</td><td class="p-1.5 sm:p-3 lg:p-5 font-bold text-slate-600 text-[9px] sm:text-base min-w-0"><span class="flex flex-col min-w-0">${subjectInSlot.teacher ? `<span class="truncate block" title="${subjectInSlot.teacher}">${subjectInSlot.teacher}</span>` : '<span>-</span>'}${subjectInSlot.teacher2 ? `<span class="truncate block" title="${subjectInSlot.teacher2}">${subjectInSlot.teacher2}</span>` : ''}</span></td><td class="p-1 sm:p-3 lg:p-5">${isSlotLocked ? `<button disabled title="ไม่สามารถเช็คชื่อได้ในขณะนี้" class="w-full bg-slate-100 text-slate-400 py-1 sm:py-1.5 rounded-full text-[9px] sm:text-sm font-bold cursor-not-allowed whitespace-nowrap"><i class="fas fa-lock"></i> <span>ล็อคแล้ว</span></button>` : `<button onclick="window.navigate('attendance', {subjectId: '${subjectInSlot.id}', period: ${slot.period}, date: '${dateToPass}'})" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-1 sm:py-1.5 pl-1 sm:pl-1.5 pr-2.5 sm:pr-3.5 rounded-full text-[9px] sm:text-sm font-bold transition-all shadow-sm whitespace-nowrap flex items-center justify-center gap-1 sm:gap-1.5"><span class="w-4 h-4 sm:w-5 sm:h-5 bg-white text-indigo-600 rounded-full flex items-center justify-center shrink-0 text-[8px] sm:text-xs"><i class="fas fa-check"></i></span><span>เริ่มเช็คชื่อ</span></button>`}</td></tr>`;
+                    if (subjectInSlot) { const isSlotLocked = isAttendanceEntryLocked(subjectInSlot.term, subjectInSlot.year); const replacedSys = !subjectInSlot.systemType ? roomSubjects.find(rs => rs.systemType && (rs.schedules || []).some(sc => parseInt(sc.day) === effectiveDayForSchedule && parseInt(sc.period) === slot.period)) : null; const isSlotChecked = attendanceData.some(a => a.subjectId === subjectInSlot.id && a.date === dateToPass && String(a.period) === String(slot.period)); html += `<tr data-att-key="${subjectInSlot.id}|${slot.period}|${dateToPass}" class="${isSlotChecked ? 'bg-emerald-50 hover:bg-emerald-100/60' : 'hover:bg-indigo-50/40'} transition-colors group">${isSlotChecked ? `<td class="p-1.5 sm:p-3 lg:p-5 text-center"><div class="w-6 h-6 sm:w-8 sm:h-8 mx-auto rounded-full bg-emerald-500 text-white flex items-center justify-center text-[10px] sm:text-sm"><i class="fas fa-check"></i></div><div class="font-extrabold text-emerald-700 text-[8px] sm:text-xs mt-0.5">คาบ ${periodLabel(slot.period)}</div></td>` : periodCellHtml(false)}<td class="p-1.5 sm:p-3 lg:p-5 min-w-0"><div class="font-extrabold ${isSlotChecked ? 'text-emerald-800' : 'text-blue-700'} text-[11px] sm:text-lg leading-tight break-words">${subjectInSlot.name}</div>${replacedSys ? `<div class="text-[8px] sm:text-xs font-bold text-amber-700 mt-0.5">สอนแทน${replacedSys.name}</div>` : ''}${subjectInSlot.code ? `<div class="text-[8px] sm:text-xs font-bold text-slate-400 mt-1 uppercase bg-slate-100 inline-block px-1 sm:px-1.5 py-0.5 rounded border border-slate-200 truncate max-w-full">${subjectInSlot.code}</div>` : ''}</td><td class="p-1.5 sm:p-3 lg:p-5 font-bold text-slate-600 text-[9px] sm:text-base min-w-0"><span class="flex flex-col min-w-0">${subjectInSlot.teacher ? `<span class="truncate block" title="${subjectInSlot.teacher}">${subjectInSlot.teacher}</span>` : '<span>-</span>'}${subjectInSlot.teacher2 ? `<span class="truncate block" title="${subjectInSlot.teacher2}">${subjectInSlot.teacher2}</span>` : ''}</span></td><td class="p-1 sm:p-3 lg:p-5">${isSlotLocked ? `<button disabled title="ไม่สามารถเช็คชื่อได้ในขณะนี้" class="w-full bg-slate-100 text-slate-400 py-1 sm:py-1.5 rounded-full text-[9px] sm:text-sm font-bold cursor-not-allowed whitespace-nowrap"><i class="fas fa-lock"></i> <span>ล็อคแล้ว</span></button>` : (isSlotChecked ? `<button onclick="window.navigate('attendance', {subjectId: '${subjectInSlot.id}', period: ${slot.period}, date: '${dateToPass}'})" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-1 sm:py-1.5 px-1 rounded-xl sm:rounded-2xl shadow-sm transition-all flex flex-col items-center justify-center leading-tight"><span class="flex items-center gap-1 text-[9px] sm:text-sm font-extrabold whitespace-nowrap"><i class="fas fa-check"></i> เช็คแล้ว</span><span class="flex items-center gap-1 text-[8px] sm:text-[11px] font-bold text-emerald-100 whitespace-nowrap"><i class="fas fa-pen text-[7px] sm:text-[9px]"></i> แตะเพื่อแก้ไข</span></button>` : `<button onclick="window.navigate('attendance', {subjectId: '${subjectInSlot.id}', period: ${slot.period}, date: '${dateToPass}'})" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-1 sm:py-1.5 pl-1 sm:pl-1.5 pr-2.5 sm:pr-3.5 rounded-full text-[9px] sm:text-sm font-bold transition-all shadow-sm whitespace-nowrap flex items-center justify-center gap-1 sm:gap-1.5"><span class="w-4 h-4 sm:w-5 sm:h-5 bg-white text-indigo-600 rounded-full flex items-center justify-center shrink-0 text-[8px] sm:text-xs"><i class="fas fa-check"></i></span><span>เริ่มเช็คชื่อ</span></button>`)}</td></tr>`;
                     } 
                     else { html += `<tr>${periodCellHtml(true)}<td class="p-1.5 sm:p-3 lg:p-5 text-slate-300 font-medium italic text-[9px] sm:text-sm" colspan="3">- ว่าง -</td></tr>`;
                     }
@@ -1579,8 +1590,9 @@
                     html += `</div></td></tr>`;
                 });
             }
-            const hrSectionHtml = (subject.systemType === 'homeroom' && !isAttendanceEntryLocked(subject.term, subject.year) && effSched(subject).some(sc => parseInt(sc.day) === getEffectiveDayOfWeek(today))) ? buildHomeroomSectionHtml() : '';
-            if (hrSectionHtml) setTimeout(() => hrInitSection(subject, today), 0);
+            const recKind = subject.systemType === 'homeroom' ? 'homeroom' : (subject.systemType === 'zone' ? 'zone' : null);
+            const hrSectionHtml = (recKind && recFeatureOn(recKind) && !isAttendanceEntryLocked(subject.term, subject.year) && effSched(subject).some(sc => parseInt(sc.day) === getEffectiveDayOfWeek(today))) ? buildRecordSectionHtml(recKind) : '';
+            if (hrSectionHtml) setTimeout(() => hrInitSection(subject, today, recKind), 0);
             html += `</tbody></table></div><div class="p-4 sm:p-8 bg-slate-50 border-t border-slate-200 flex flex-col justify-end items-center shadow-inner">${hrSectionHtml}<div id="attSaveBanner" class="hidden w-full mb-3"></div>${isAttendanceEntryLocked(subject.term, subject.year) ? `<button id="saveAttBtn" disabled class="w-full bg-slate-300 text-slate-500 px-8 py-3.5 sm:py-4 rounded-xl sm:rounded-2xl font-extrabold text-base sm:text-lg flex items-center justify-center gap-2 cursor-not-allowed"><i class="fas fa-lock text-xl"></i> ไม่สามารถบันทึกการเช็คชื่อได้ในขณะนี้</button>` : `<button id="saveAttBtn" onclick="window.saveAttendance(${fromTeacherDash})" class="w-full mx-auto bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3.5 sm:py-4 rounded-full font-extrabold text-base sm:text-lg transition-all duration-300 shadow-xl shadow-indigo-200 flex items-center justify-center gap-2"><i class="fas fa-cloud-upload-alt text-xl"></i> บันทึกข้อมูลเช็คชื่อ</button>`}</div></div>`;
             document.getElementById('mainContent').innerHTML = html;
             
@@ -1669,15 +1681,17 @@
 
 
         // ======================================================================
-        // ===== [v1.71] บันทึกกิจกรรมโฮมรูม + รูปกิจกรรม (เก็บใน Google Drive ของโรงเรียน) =====
-        // ส่งรูป 2 ทาง: (1) Relay = ส่งผ่าน Cloudflare Worker ต่อไปยัง Apps Script ของโรงเรียน
-        //              (2) ส่งตรง = ส่งเข้า Apps Script ของโรงเรียนโดยตรง (ใช้เมื่อทาง Relay ไม่ผ่าน)
+        // ===== [v1.71.3] บันทึกกิจกรรมพร้อมรูป: คาบโฮมรูม และคาบ A (เขตพื้นที่รับผิดชอบ) =====
+        // รูปเก็บใน Google Drive ของโรงเรียน ส่ง 2 ทาง: (1) ส่งตรงเข้า Apps Script ของโรงเรียน (ทางหลัก)
+        //                                         (2) Relay ผ่าน Cloudflare Worker (ใช้เมื่อส่งตรงไม่ผ่าน)
+        // เปิด/ปิดได้ที่หน้าตั้งค่าทั่วไป (Super Admin): settings.recordHomeroom (ค่าเริ่มต้นเปิด), settings.recordZone (ค่าเริ่มต้นปิด)
         // ======================================================================
-        const HOMEROOM_DRIVE_URL = 'https://script.google.com/macros/s/AKfycbzlwK5VgNNA53zaNyKeiZ950DrX-soKYMOyTn_zebU_Ga8_h1y_z-CxJ1pl8Eqp7UOlSg/exec'; // [ต้องตั้งค่า] ลิงก์ Web App ของ Apps Script "HomeroomPhotoRelay" (ลงท้ายด้วย /exec)
+        const HOMEROOM_DRIVE_URL = 'https://script.google.com/macros/s/AKfycbzlwK5VgNNA53zaNyKeiZ950DrX-soKYMOyTn_zebU_Ga8_h1y_z-CxJ1pl8Eqp7UOlSg/exec';
         const HOMEROOM_DRIVE_TOKEN = 'bnksa-hr-2569'; // ต้องตรงกับ TOKEN ใน Apps Script และ RELAY_TOKEN ใน Worker
-        const HR_MAX_PHOTOS = 3;
         window.__hrLogsCache = window.__hrLogsCache || {};
 
+        function recFeatureOn(kind) { return kind === 'zone' ? settings.recordZone === true : settings.recordHomeroom !== false; }
+        function recStoreRoomId(kind, roomId) { return kind === 'zone' ? `${roomId}#zone` : roomId; } // คาบ A เก็บแยกด้วยรหัสห้อง + #zone (ใช้ตารางเดียวกับโฮมรูม)
         async function hrFetchJson(url, body, timeoutMs) {
             const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), timeoutMs || 30000);
             try {
@@ -1685,39 +1699,65 @@
                 const r = await fetch(url, opt); if (!r.ok) return null; return await r.json();
             } catch (e) { return null; } finally { clearTimeout(t); }
         }
-        function hrRoomKey(term, year, roomId) { return `${term}|${year}|${roomId}`; }
-        async function hrLoadLogs(term, year, roomId, force) {
-            const key = hrRoomKey(term, year, roomId);
+        // ส่งแบบ XHR เพื่อให้รู้ % การอัปโหลด
+        function hrXhrJson(url, body, timeoutMs, onPct) {
+            return new Promise((resolve) => {
+                try {
+                    const x = new XMLHttpRequest(); x.open('POST', url, true); x.timeout = timeoutMs || 60000;
+                    x.setRequestHeader('Content-Type', 'text/plain;charset=utf-8');
+                    if (onPct && x.upload) x.upload.onprogress = (ev) => { if (ev.lengthComputable) onPct(Math.min(95, Math.round(ev.loaded / ev.total * 95))); };
+                    x.onload = () => { try { resolve(x.status >= 200 && x.status < 300 ? JSON.parse(x.responseText) : null); } catch (e) { resolve(null); } };
+                    x.onerror = () => resolve(null); x.ontimeout = () => resolve(null);
+                    x.send(JSON.stringify(body));
+                } catch (e) { resolve(null); }
+            });
+        }
+        function hrRoomKey(term, year, storeRoomId) { return `${term}|${year}|${storeRoomId}`; }
+        async function hrLoadLogs(term, year, storeRoomId, force) {
+            const key = hrRoomKey(term, year, storeRoomId);
             if (!force && window.__hrLogsCache[key]) return window.__hrLogsCache[key];
-            const j = await hrFetchJson(`${GOOGLE_APP_SCRIPT_URL}?action=get_homeroom_logs&term=${encodeURIComponent(term)}&year=${encodeURIComponent(year)}&room=${encodeURIComponent(roomId)}`, null, 20000);
+            const j = await hrFetchJson(`${GOOGLE_APP_SCRIPT_URL}?action=get_homeroom_logs&term=${encodeURIComponent(term)}&year=${encodeURIComponent(year)}&room=${encodeURIComponent(storeRoomId)}`, null, 20000);
             if (j && j.status === 'success' && Array.isArray(j.logs)) { window.__hrLogsCache[key] = j.logs; return j.logs; }
             return window.__hrLogsCache[key] || null; // null = โหลดไม่สำเร็จ
         }
-        function hrFolderPath(term, year, roomId) { return `ปีการศึกษา ${year} ภาคเรียน ${term}/ห้อง ${formatRoomName(roomId).replace(/\//g, '-')}`; }
-        // ส่งรูป 1 รูป: ลอง Relay ก่อน ไม่ผ่านค่อยส่งตรง คืนค่า file id หรือ null
-        async function hrUploadPhoto(dataUrl, fileName, folderPath) {
+        // [v1.71.4] โครงสร้างโฟลเดอร์: โฮมรูม|เขตพื้นที่ / ปีการศึกษา 2569 / ภาคเรียน 2 / ห้อง ม.2-3
+        function hrTermFolderPath(term, year, kind) { return `${kind === 'zone' ? 'เขตพื้นที่' : 'โฮมรูม'}/ปีการศึกษา ${year}/ภาคเรียน ${term}`; }
+        function hrFolderPath(term, year, roomId, kind) { return `${hrTermFolderPath(term, year, kind)}/ห้อง ${formatRoomName(roomId).replace(/\//g, '-')}`; }
+        // ย้ายโฟลเดอร์รูปของเทอมนั้นลงถังขยะของ Drive (กู้คืนได้ภายใน 30 วัน) - ส่งตรงก่อน ไม่ผ่านค่อยใช้ Relay
+        async function hrTrashTermFolders(term, year) {
+            for (const kind of ['homeroom', 'zone']) {
+                const path = hrTermFolderPath(term, year, kind);
+                const r = HOMEROOM_DRIVE_URL ? await hrFetchJson(HOMEROOM_DRIVE_URL, { action: 'trashPath', token: HOMEROOM_DRIVE_TOKEN, path }, 30000) : null;
+                if (!r || r.status !== 'success') await hrFetchJson(GOOGLE_APP_SCRIPT_URL, { __mode: 'relay_folder_trash', path }, 30000);
+            }
+            window.__hrLogsCache = {};
+        }
+        // ส่งรูป 1 รูป: ส่งตรงก่อน ไม่ผ่านค่อยใช้ Relay คืนค่า { id, route } หรือ null
+        async function hrUploadPhoto(dataUrl, fileName, folderPath, onProgress) {
             const body = { fileName, mime: 'image/jpeg', base64: String(dataUrl).split(',')[1], folderPath };
-            const viaRelay = await hrFetchJson(GOOGLE_APP_SCRIPT_URL, Object.assign({ __mode: 'relay_photo' }, body), 60000);
-            if (viaRelay && viaRelay.status === 'success' && viaRelay.id) return { id: viaRelay.id, route: 'relay' };
             if (HOMEROOM_DRIVE_URL) {
-                const direct = await hrFetchJson(HOMEROOM_DRIVE_URL, Object.assign({ action: 'upload', token: HOMEROOM_DRIVE_TOKEN }, body), 90000);
+                if (onProgress) onProgress(5, 'direct');
+                const direct = await hrXhrJson(HOMEROOM_DRIVE_URL, Object.assign({ action: 'upload', token: HOMEROOM_DRIVE_TOKEN }, body), 90000, p => onProgress && onProgress(p, 'direct'));
                 if (direct && direct.status === 'success' && direct.id) return { id: direct.id, route: 'direct' };
             }
+            if (onProgress) onProgress(5, 'relay');
+            const viaRelay = await hrXhrJson(GOOGLE_APP_SCRIPT_URL, Object.assign({ __mode: 'relay_photo' }, body), 90000, p => onProgress && onProgress(p, 'relay'));
+            if (viaRelay && viaRelay.status === 'success' && viaRelay.id) return { id: viaRelay.id, route: 'relay' };
             return null;
         }
         async function hrGetPhoto(id) {
-            const viaRelay = await hrFetchJson(GOOGLE_APP_SCRIPT_URL, { __mode: 'relay_photo_get', id }, 45000);
-            if (viaRelay && viaRelay.status === 'success' && viaRelay.base64) return `data:${viaRelay.mime || 'image/jpeg'};base64,${viaRelay.base64}`;
             if (HOMEROOM_DRIVE_URL) {
                 const direct = await hrFetchJson(HOMEROOM_DRIVE_URL, { action: 'get', token: HOMEROOM_DRIVE_TOKEN, id }, 60000);
                 if (direct && direct.status === 'success' && direct.base64) return `data:${direct.mime || 'image/jpeg'};base64,${direct.base64}`;
             }
+            const viaRelay = await hrFetchJson(GOOGLE_APP_SCRIPT_URL, { __mode: 'relay_photo_get', id }, 45000);
+            if (viaRelay && viaRelay.status === 'success' && viaRelay.base64) return `data:${viaRelay.mime || 'image/jpeg'};base64,${viaRelay.base64}`;
             return null;
         }
         function hrTrashPhotos(ids) {
             (ids || []).forEach(async (id) => {
-                const r = await hrFetchJson(GOOGLE_APP_SCRIPT_URL, { __mode: 'relay_photo_trash', id }, 30000);
-                if ((!r || r.status !== 'success') && HOMEROOM_DRIVE_URL) hrFetchJson(HOMEROOM_DRIVE_URL, { action: 'trash', token: HOMEROOM_DRIVE_TOKEN, id }, 30000);
+                const r = HOMEROOM_DRIVE_URL ? await hrFetchJson(HOMEROOM_DRIVE_URL, { action: 'trash', token: HOMEROOM_DRIVE_TOKEN, id }, 30000) : null;
+                if (!r || r.status !== 'success') hrFetchJson(GOOGLE_APP_SCRIPT_URL, { __mode: 'relay_photo_trash', id }, 30000);
             });
         }
         // ย่อรูปก่อนส่ง (ด้านยาวสุด 1280px, JPEG คุณภาพ 0.8 ≈ 100-250 KB)
@@ -1742,12 +1782,21 @@
         }
         function hrEsc(t) { return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
-        function buildHomeroomSectionHtml() {
+        function buildRecordSectionHtml(kind) {
             const inp = 'mt-1 w-full h-11 px-3 rounded-xl border-2 border-slate-200 focus:border-indigo-400 outline-none text-sm sm:text-base font-semibold text-slate-700 bg-white';
             const lab = 'block text-xs sm:text-sm font-extrabold text-slate-600';
-            return `<div id="hrSection" class="w-full mb-4 bg-white border-2 border-indigo-200 rounded-2xl p-4 sm:p-5 text-left transition-shadow">
-                <div class="flex items-center gap-2 mb-3"><i class="fas fa-clipboard-list text-indigo-500"></i><h3 class="font-extrabold text-slate-800 text-base sm:text-lg">บันทึกกิจกรรมโฮมรูม</h3><span class="ml-auto text-[10px] sm:text-xs font-extrabold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">ต้องกรอก</span></div>
-                <div id="hrExistingNote" class="mb-3 text-xs sm:text-sm text-slate-500 font-semibold"><i class="fas fa-circle-notch fa-spin"></i> กำลังโหลดบันทึกเดิม…</div>
+            const photoBlock = (n) => `<div><p class="${lab}">${n}. ${kind === 'zone' ? 'รูปรายงาน' : 'รูปกิจกรรม'} <span class="text-rose-500">* 1 รูป</span> <span class="font-semibold text-slate-500">(ระบบย่อรูปให้อัตโนมัติ)</span></p>
+                    <input type="file" id="hrCamInput" accept="image/*" capture="environment" class="hidden" onchange="window.hrPickPhoto(event)">
+                    <input type="file" id="hrGalInput" accept="image/*" class="hidden" onchange="window.hrPickPhoto(event)">
+                    <div id="hrPhotoBox" class="mt-1.5"></div></div>`;
+            const head = `<div class="flex items-center gap-2 mb-3"><i class="fas ${kind === 'zone' ? 'fa-broom' : 'fa-clipboard-list'} text-indigo-500"></i><h3 class="font-extrabold text-slate-800 text-base sm:text-lg">${kind === 'zone' ? 'บันทึกเขตพื้นที่รับผิดชอบ' : 'บันทึกกิจกรรมโฮมรูม'}</h3><span class="ml-auto text-[10px] sm:text-xs font-extrabold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">ต้องกรอก</span></div>
+                <div id="hrExistingNote" class="mb-3 text-xs sm:text-sm text-slate-500 font-semibold"><i class="fas fa-circle-notch fa-spin"></i> กำลังโหลดบันทึกเดิม…</div>`;
+            if (kind === 'zone') {
+                const chip = (t) => `<button type="button" onclick="document.getElementById('hrZoneCond').value='${t}'" class="h-9 px-3.5 rounded-full border-2 border-slate-200 bg-white text-slate-600 text-xs sm:text-sm font-extrabold hover:border-indigo-300 hover:text-indigo-600">${t}</button>`;
+                return `<div id="hrSection" data-kind="zone" class="w-full mb-4 bg-white border-2 border-indigo-200 rounded-2xl p-4 sm:p-5 text-left transition-shadow">${head}
+                    <div class="space-y-3"><div><label class="${lab}">1. สภาพเขตพื้นที่ <span class="text-rose-500">*</span><input id="hrZoneCond" type="text" maxlength="200" placeholder="เช่น สะอาด เก็บขยะเรียบร้อย" class="${inp}"></label><div class="flex flex-wrap gap-1.5 mt-2">${chip('สะอาด')}${chip('พอใช้')}${chip('สกปรก')}</div></div>${photoBlock(2)}</div></div>`;
+            }
+            return `<div id="hrSection" data-kind="homeroom" class="w-full mb-4 bg-white border-2 border-indigo-200 rounded-2xl p-4 sm:p-5 text-left transition-shadow">${head}
                 <p class="${lab} mb-1.5">1. วันนี้ได้จัดกิจกรรมไหม <span class="text-rose-500">*</span></p>
                 <div class="grid grid-cols-2 gap-2 mb-3">
                     <button type="button" id="hrHeldYes" onclick="window.hrSetHeld(true)" class="h-11 rounded-xl border-2 border-slate-200 bg-white text-slate-700 font-extrabold text-sm sm:text-base transition-colors">จัดกิจกรรม</button>
@@ -1756,11 +1805,7 @@
                 <div id="hrYesBox" class="hidden space-y-3">
                     <label class="${lab}">2. กิจกรรมที่จัด <span class="text-rose-500">*</span><input id="hrActivity" type="text" maxlength="150" placeholder="พิมพ์ชื่อกิจกรรม" class="${inp}"></label>
                     <label class="${lab}">3. บันทึกเพิ่มเติม (สั้นๆ)<textarea id="hrNote" rows="2" maxlength="500" placeholder="เช่น พูดคุยเรื่องการเตรียมสอบ นักเรียนสนใจดี" class="mt-1 w-full px-3 py-2 rounded-xl border-2 border-slate-200 focus:border-indigo-400 outline-none text-sm sm:text-base font-semibold text-slate-700 resize-none bg-white"></textarea></label>
-                    ${!HOMEROOM_DRIVE_URL ? `<p class="text-[11px] sm:text-xs text-slate-500 font-semibold">การแนบรูปกิจกรรมยังไม่เปิดใช้ (รอผู้ดูแลตั้งค่าที่เก็บรูป)</p>` : ''}<div class="${!HOMEROOM_DRIVE_URL ? 'hidden' : ''}"><p class="${lab}">4. รูปกิจกรรม <span class="font-semibold text-slate-500">(ไม่เกิน ${HR_MAX_PHOTOS} รูป · ระบบย่อรูปให้อัตโนมัติ)</span></p>
-                        <input type="file" id="hrPhotoInput" accept="image/*" multiple class="hidden" onchange="window.hrPickPhotos(event)">
-                        <div id="hrPhotoGrid" class="grid grid-cols-3 gap-2 mt-1.5"></div>
-                        <p id="hrPhotoHint" class="text-[11px] sm:text-xs text-slate-500 font-semibold mt-1.5"></p>
-                    </div>
+                    ${photoBlock(4)}
                 </div>
                 <div id="hrNoBox" class="hidden"><label class="${lab}">2. เหตุผลที่ไม่ได้จัด <span class="text-rose-500">*</span><input id="hrReason" type="text" maxlength="150" placeholder="เช่น ติดกิจกรรมของโรงเรียน" class="${inp}"></label></div>
             </div>`;
@@ -1774,102 +1819,124 @@
             document.getElementById('hrYesBox').classList.toggle('hidden', v !== true);
             document.getElementById('hrNoBox').classList.toggle('hidden', v !== false);
         };
-        function hrRenderPhotoGrid() {
-            const grid = document.getElementById('hrPhotoGrid'); const hint = document.getElementById('hrPhotoHint'); if (!grid) return;
-            const news = window.__hrNewPhotos || []; const prev = window.__hrExisting; const oldCount = prev && Array.isArray(prev.photos) ? prev.photos.length : 0;
-            let html = news.map((p, i) => `<div class="relative aspect-square rounded-xl overflow-hidden bg-slate-100"><img src="${p.dataUrl}" alt="รูปกิจกรรม ${i + 1}" class="w-full h-full object-cover"><button type="button" onclick="window.hrRemovePhoto(${i})" aria-label="ลบรูปนี้" class="absolute top-1 right-1 w-7 h-7 rounded-full bg-slate-900/75 text-white text-sm font-bold">×</button></div>`).join('');
-            if (news.length === 0 && oldCount > 0) {
-                html += `<div class="aspect-square rounded-xl bg-indigo-50 border-2 border-indigo-200 flex flex-col items-center justify-center text-indigo-700 text-xs font-extrabold text-center p-1"><i class="fas fa-images text-xl mb-1"></i>รูปเดิม ${oldCount} รูป${isAdmin ? `<button type="button" onclick="window.hrViewOldPhotos()" class="mt-1 underline">ดูรูป</button>` : ''}</div>`;
-            }
-            if (news.length < HR_MAX_PHOTOS) html += `<button type="button" onclick="document.getElementById('hrPhotoInput').click()" class="aspect-square rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 text-slate-500 text-xs font-extrabold flex flex-col items-center justify-center gap-1 hover:border-indigo-300 hover:text-indigo-600"><i class="fas fa-camera text-xl"></i>${news.length === 0 && oldCount > 0 ? 'เปลี่ยนรูป' : 'เพิ่มรูป'}</button>`;
-            grid.innerHTML = html;
-            if (hint) hint.textContent = (oldCount > 0 && news.length > 0) ? `รูปใหม่ ${news.length} รูปจะแทนที่รูปเดิมทั้งหมดเมื่อกดบันทึก` : '';
-            const vb = document.getElementById('hrOldPhotoView'); if (vb && news.length > 0) vb.remove();
+        function hrRenderPhoto() {
+            const box = document.getElementById('hrPhotoBox'); if (!box) return;
+            const p = window.__hrNewPhoto; const prev = window.__hrExisting; const oldCount = prev && Array.isArray(prev.photos) ? prev.photos.length : 0;
+            const btn2 = (cls) => `<div class="grid grid-cols-2 gap-2 ${cls || ''}"><button type="button" onclick="document.getElementById('hrCamInput').click()" class="min-h-[64px] rounded-xl border-2 border-indigo-500 bg-indigo-50 text-indigo-700 font-extrabold text-sm flex flex-col items-center justify-center gap-1"><i class="fas fa-camera text-lg"></i>${oldCount ? 'ถ่ายรูปใหม่' : 'ถ่ายรูปเลย'}</button><button type="button" onclick="document.getElementById('hrGalInput').click()" class="min-h-[64px] rounded-xl border-2 border-slate-200 bg-white text-slate-700 font-extrabold text-sm flex flex-col items-center justify-center gap-1"><i class="fas fa-images text-lg"></i>เลือกจากคลังรูป</button></div>`;
+            if (p) {
+                const kb = Math.round(String(p.dataUrl).length * 0.75 / 1024);
+                box.innerHTML = `<div class="relative rounded-xl overflow-hidden bg-slate-100"><img src="${p.dataUrl}" alt="รูปที่เลือก" class="w-full max-h-64 object-cover"><span class="absolute left-2 bottom-2 bg-slate-900/75 text-white text-[11px] font-bold px-2 py-0.5 rounded-full">ย่อแล้ว ${kb} KB</span></div>
+                    <div class="grid grid-cols-3 gap-2 mt-2"><button type="button" onclick="document.getElementById('hrCamInput').click()" class="h-10 rounded-xl border-2 border-slate-200 bg-white text-slate-700 font-extrabold text-xs sm:text-sm">ถ่ายใหม่</button><button type="button" onclick="document.getElementById('hrGalInput').click()" class="h-10 rounded-xl border-2 border-slate-200 bg-white text-slate-700 font-extrabold text-xs sm:text-sm">เลือกรูปอื่น</button><button type="button" onclick="window.hrRemovePhoto()" class="h-10 rounded-xl border-2 border-rose-200 bg-rose-50 text-rose-600 font-extrabold text-xs sm:text-sm">ลบรูป</button></div>${oldCount ? '<p class="text-[11px] sm:text-xs text-amber-700 font-semibold mt-1.5">รูปใหม่จะแทนที่รูปเดิมเมื่อกดบันทึก</p>' : ''}`;
+            } else if (oldCount) {
+                box.innerHTML = `<div class="flex items-center gap-3 bg-emerald-50 border-2 border-emerald-200 rounded-xl px-3 py-2.5 mb-2"><i class="fas fa-check-circle text-emerald-600 text-xl"></i><div class="flex-1 text-xs sm:text-sm font-bold text-emerald-800">ส่งรูปไว้แล้ว${isAdmin ? ` · <button type="button" onclick="window.hrViewOldPhotos()" class="underline">ดูรูป</button>` : ''}<br><span class="font-semibold text-emerald-700">ไม่ต้องส่งใหม่ ถ้าไม่ต้องการเปลี่ยนรูป</span></div></div>${btn2()}`;
+            } else box.innerHTML = btn2();
         }
-        window.hrPickPhotos = async function(e) {
-            const files = Array.from((e.target && e.target.files) || []).filter(f => f.type && f.type.startsWith('image/'));
-            e.target.value = '';
-            window.__hrNewPhotos = window.__hrNewPhotos || [];
-            const room = HR_MAX_PHOTOS - window.__hrNewPhotos.length;
-            if (files.length > room) showToast(`เลือกได้อีก ${room} รูป (สูงสุด ${HR_MAX_PHOTOS} รูป)`, 'error');
-            for (const f of files.slice(0, room)) {
-                try { const dataUrl = await hrResizeImage(f); window.__hrNewPhotos.push({ dataUrl, name: f.name || 'photo.jpg', uploaded: null }); }
-                catch (err) { showToast('ไม่สามารถอ่านไฟล์รูปนี้ได้', 'error'); }
-            }
-            hrRenderPhotoGrid();
+        window.hrPickPhoto = async function(e) {
+            const f = (e.target && e.target.files && e.target.files[0]) || null; e.target.value = '';
+            if (!f || !(f.type || '').startsWith('image/')) { if (f) showToast('กรุณาเลือกไฟล์รูปภาพ', 'error'); return; }
+            try { window.__hrNewPhoto = { dataUrl: await hrResizeImage(f), uploaded: null }; hrRenderPhoto(); }
+            catch (err) { showToast('ไม่สามารถอ่านไฟล์รูปนี้ได้', 'error'); }
         };
-        window.hrRemovePhoto = function(i) { (window.__hrNewPhotos || []).splice(i, 1); hrRenderPhotoGrid(); };
+        window.hrRemovePhoto = function() { window.__hrNewPhoto = null; hrRenderPhoto(); };
         window.hrViewOldPhotos = async function() {
             const prev = window.__hrExisting; if (!isAdmin || !prev || !Array.isArray(prev.photos)) return;
-            const grid = document.getElementById('hrPhotoGrid'); if (!grid) return;
-            let box = document.getElementById('hrOldPhotoView');
-            if (!box) { box = document.createElement('div'); box.id = 'hrOldPhotoView'; box.className = 'grid grid-cols-3 gap-2 mt-2'; grid.parentNode.insertBefore(box, grid.nextSibling); }
-            box.innerHTML = prev.photos.map(() => `<div class="aspect-square rounded-xl bg-slate-100 flex items-center justify-center text-slate-400"><i class="fas fa-circle-notch fa-spin"></i></div>`).join('');
+            const box = document.getElementById('hrPhotoBox'); if (!box) return;
+            let v = document.getElementById('hrOldPhotoView');
+            if (!v) { v = document.createElement('div'); v.id = 'hrOldPhotoView'; v.className = 'grid grid-cols-3 gap-2 mt-2'; box.appendChild(v); }
+            v.innerHTML = prev.photos.map(() => `<div class="aspect-square rounded-xl bg-slate-100 flex items-center justify-center text-slate-400"><i class="fas fa-circle-notch fa-spin"></i></div>`).join('');
             const urls = await Promise.all(prev.photos.map(p => hrGetPhoto(p.id)));
-            box.innerHTML = urls.map((u, i) => u ? `<a href="${u}" target="_blank" rel="noopener" class="block aspect-square rounded-xl overflow-hidden bg-slate-100"><img src="${u}" alt="รูปเดิม ${i + 1}" class="w-full h-full object-cover"></a>` : `<div class="aspect-square rounded-xl bg-rose-50 text-rose-500 text-[11px] font-bold flex items-center justify-center text-center p-1">โหลดรูปไม่สำเร็จ</div>`).join('');
+            v.innerHTML = urls.map((u, i) => u ? `<a href="${u}" target="_blank" rel="noopener" class="block aspect-square rounded-xl overflow-hidden bg-slate-100"><img src="${u}" alt="รูปเดิม ${i + 1}" class="w-full h-full object-cover"></a>` : `<div class="aspect-square rounded-xl bg-rose-50 text-rose-500 text-[11px] font-bold flex items-center justify-center text-center p-1">โหลดรูปไม่สำเร็จ</div>`).join('');
         };
-        async function hrInitSection(subject, date) {
-            window.__hrHeld = null; window.__hrNewPhotos = []; window.__hrExisting = null; window.__hrLoadFailed = false;
-            hrRenderPhotoGrid();
-            const logs = await hrLoadLogs(subject.term, subject.year, subject.roomId, true);
+        async function hrInitSection(subject, date, kind) {
+            window.__recKind = kind; window.__hrHeld = null; window.__hrNewPhoto = null; window.__hrExisting = null;
+            hrRenderPhoto();
+            const logs = await hrLoadLogs(subject.term, subject.year, recStoreRoomId(kind, subject.roomId), true);
             const note = document.getElementById('hrExistingNote'); if (!note || currentSubjectId !== subject.id) return;
-            if (logs === null) { window.__hrLoadFailed = true; note.innerHTML = '<i class="fas fa-exclamation-triangle text-amber-500"></i> โหลดบันทึกเดิมไม่สำเร็จ (ยังบันทึกใหม่ได้ตามปกติ)'; return; }
+            if (logs === null) { note.innerHTML = '<i class="fas fa-exclamation-triangle text-amber-500"></i> โหลดบันทึกเดิมไม่สำเร็จ (ยังบันทึกใหม่ได้ตามปกติ)'; return; }
             const rec = logs.find(l => l.date === date);
             if (!rec) { note.classList.add('hidden'); return; }
             window.__hrExisting = rec;
-            const t = rec.recordedAt ? new Date(rec.recordedAt) : null;
-            const tStr = t && !isNaN(t) ? `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')} น.` : '';
             note.className = 'mb-3 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-xs sm:text-sm font-semibold text-emerald-800';
-            note.innerHTML = `<i class="fas fa-check-circle"></i> บันทึกไว้แล้ว ${tStr}${rec.recordedBy ? ' โดย ' + hrEsc(rec.recordedBy) : ''}${rec.editCount ? ` · แก้ไขแล้ว ${rec.editCount} ครั้ง` : ''}<br><span class="text-emerald-700">แก้ไขได้ แล้วกดบันทึกเพื่อส่งใหม่แทนที่ของเดิม</span>`;
-            window.hrSetHeld(rec.held === true ? true : (rec.held === false ? false : null));
-            const a = document.getElementById('hrActivity'); if (a) a.value = rec.activity || '';
-            const n = document.getElementById('hrNote'); if (n) n.value = rec.note || '';
-            const r = document.getElementById('hrReason'); if (r) r.value = rec.reason || '';
-            hrRenderPhotoGrid();
+            note.innerHTML = `<i class="fas fa-check-circle"></i> บันทึกไว้แล้ว${rec.recordedBy ? ' โดย ' + hrEsc(rec.recordedBy) : ''}${rec.editCount ? ` · แก้ไขแล้ว ${rec.editCount} ครั้ง` : ''}<br><span class="text-emerald-700">แก้ไขได้ แล้วกดบันทึกเพื่อส่งใหม่แทนที่ของเดิม</span>`;
+            if (kind === 'zone') { const c = document.getElementById('hrZoneCond'); if (c) c.value = rec.condition || ''; }
+            else {
+                window.hrSetHeld(rec.held === true ? true : (rec.held === false ? false : null));
+                const a = document.getElementById('hrActivity'); if (a) a.value = rec.activity || '';
+                const n = document.getElementById('hrNote'); if (n) n.value = rec.note || '';
+                const r = document.getElementById('hrReason'); if (r) r.value = rec.reason || '';
+            }
+            hrRenderPhoto();
         }
+        function hrHasPhoto() { const prev = window.__hrExisting; return !!window.__hrNewPhoto || !!(prev && Array.isArray(prev.photos) && prev.photos.length); }
         function hrValidate() {
-            if (window.__hrHeld !== true && window.__hrHeld !== false) return 'กรุณาเลือกว่า "จัดกิจกรรม" หรือ "ไม่ได้จัด" ในบันทึกกิจกรรมโฮมรูม';
+            const kind = window.__recKind;
+            if (kind === 'zone') {
+                if (!(document.getElementById('hrZoneCond').value || '').trim()) return 'กรุณาระบุสภาพเขตพื้นที่';
+                if (!hrHasPhoto()) return 'กรุณาแนบรูปรายงานเขตพื้นที่ 1 รูปก่อนบันทึก';
+                return null;
+            }
+            if (window.__hrHeld !== true && window.__hrHeld !== false) return 'กรุณาเลือกว่า "จัดกิจกรรม" หรือ "ไม่ได้จัด"';
             if (window.__hrHeld === true && !(document.getElementById('hrActivity').value || '').trim()) return 'กรุณาพิมพ์ชื่อกิจกรรมโฮมรูมที่จัด';
+            if (window.__hrHeld === true && !hrHasPhoto()) return 'กรุณาแนบรูปกิจกรรม 1 รูปก่อนบันทึก';
             if (window.__hrHeld === false && !(document.getElementById('hrReason').value || '').trim()) return 'กรุณาพิมพ์เหตุผลที่ไม่ได้จัดกิจกรรมโฮมรูม';
             return null;
         }
-        // ส่งบันทึกโฮมรูม (และรูป) หลังบันทึกเช็คชื่อสำเร็จ คืนค่า true/false
+        // หลอดแสดงการส่งรูปใต้ปุ่มบันทึก (มีสายฟ้าเล็กเมื่อส่งตรงเข้า Drive)
+        function hrBar(pct, route, done) {
+            const btn = document.getElementById('saveAttBtn'); if (!btn) return;
+            let bar = document.getElementById('hrUploadBar');
+            if (!bar) { bar = document.createElement('div'); bar.id = 'hrUploadBar'; bar.className = 'w-full max-w-md mx-auto mt-2 px-2 __t-rise'; btn.insertAdjacentElement('afterend', bar); }
+            const bolt = route === 'direct' ? `<svg class="__bolt" width="14" height="14" viewBox="0 0 24 24" fill="#eab308" stroke="#a16207" stroke-width="1.2" stroke-linejoin="round" role="img" aria-label="ส่งตรงเข้า Drive"><path d="M13.5 2L4 13.5h6.5L9.5 22 20 9.5h-6.5L13.5 2z"></path></svg>` : '';
+            const label = done ? (route === 'direct' ? 'ส่งรูปแล้ว (ส่งตรงเข้า Drive)' : 'ส่งรูปแล้ว (ผ่าน Relay)') : (route === 'direct' ? 'กำลังส่งตรงเข้า Drive' : 'กำลังส่งผ่าน Relay');
+            bar.innerHTML = `<div class="flex items-center gap-1.5 text-[11px] sm:text-xs font-bold text-slate-500 mb-1"><span>${label}</span>${bolt}<span class="ml-auto">${pct}%</span></div><div class="h-1.5 bg-slate-200 rounded-full overflow-hidden"><div class="h-full rounded-full transition-all duration-500 ${done ? 'bg-emerald-500' : 'bg-indigo-500'}" style="width:${pct}%"></div></div>`;
+        }
+        // ส่งบันทึก (และรูป) หลังบันทึกเช็คชื่อสำเร็จ คืนค่า true/false
         async function hrSubmit(subject, date, onProgress) {
+            const kind = window.__recKind || 'homeroom';
             const prev = window.__hrExisting;
-            const held = window.__hrHeld === true;
-            const news = window.__hrNewPhotos || [];
-            let photos = held && prev && Array.isArray(prev.photos) ? prev.photos : [];
-            let toTrash = [];
-            if (!held && prev && Array.isArray(prev.photos)) toTrash = prev.photos.map(p => p.id);
-            if (held && news.length > 0) {
-                const folder = hrFolderPath(subject.term, subject.year, subject.roomId);
-                for (let i = 0; i < news.length; i++) {
-                    if (news[i].uploaded) continue; // ส่งสำเร็จไปแล้วในรอบก่อน ไม่ต้องส่งซ้ำ
-                    if (onProgress) onProgress(`กำลังส่งรูป ${i + 1}/${news.length}…`);
-                    const res = await hrUploadPhoto(news[i].dataUrl, `${date}_${formatRoomName(subject.roomId).replace(/\//g, '-')}_${i + 1}.jpg`, folder);
+            const needPhoto = kind === 'zone' || window.__hrHeld === true;
+            let photos = needPhoto && prev && Array.isArray(prev.photos) ? prev.photos : [];
+            let toTrash = (!needPhoto && prev && Array.isArray(prev.photos)) ? prev.photos.map(p => p.id) : [];
+            const np = window.__hrNewPhoto;
+            if (needPhoto && np) {
+                if (!np.uploaded) {
+                    if (onProgress) onProgress('กำลังส่งรูป…');
+                    const res = await hrUploadPhoto(np.dataUrl, `${date}_${formatRoomName(subject.roomId).replace(/\//g, '-')}${kind === 'zone' ? '_เขต' : ''}.jpg`, hrFolderPath(subject.term, subject.year, subject.roomId, kind), (pct, route) => hrBar(pct, route, false));
                     if (!res) return false;
-                    news[i].uploaded = res;
+                    np.uploaded = res; hrBar(100, res.route, true);
                 }
                 toTrash = prev && Array.isArray(prev.photos) ? prev.photos.map(p => p.id) : [];
-                photos = news.map((p, i) => ({ id: p.uploaded.id, name: `รูปที่ ${i + 1}` }));
+                photos = [{ id: np.uploaded.id, name: 'รูปที่ 1' }];
             }
-            if (onProgress) onProgress('กำลังบันทึกกิจกรรม…');
-            const rec = {
-                roomId: subject.roomId, date, term: String(subject.term), year: String(subject.year), subjectId: subject.id,
-                held, activity: held ? document.getElementById('hrActivity').value.trim() : '',
-                note: held ? document.getElementById('hrNote').value.trim() : '',
-                reason: held ? '' : document.getElementById('hrReason').value.trim(),
+            if (onProgress) onProgress(kind === 'zone' ? 'กำลังบันทึกเขตพื้นที่…' : 'กำลังบันทึกกิจกรรม…');
+            const base = { roomId: subject.roomId, date, term: String(subject.term), year: String(subject.year), subjectId: subject.id, kind,
                 photos, recordedBy: (currentUser && currentUser.name) || (getRoomAdvisors(subject.roomId)[0] || ''),
-                recordedAt: new Date().toISOString(), editCount: prev ? (prev.editCount || 0) + 1 : 0
-            };
-            const j = await hrFetchJson(GOOGLE_APP_SCRIPT_URL, { __mode: 'upsert_homeroom_log', record: rec, term: rec.term, year: rec.year, roomId: rec.roomId }, 30000);
+                recordedAt: new Date().toISOString(), editCount: prev ? (prev.editCount || 0) + 1 : 0 };
+            const rec = kind === 'zone' ? Object.assign(base, { condition: document.getElementById('hrZoneCond').value.trim() })
+                : Object.assign(base, { held: window.__hrHeld === true, activity: window.__hrHeld === true ? document.getElementById('hrActivity').value.trim() : '',
+                    note: window.__hrHeld === true ? document.getElementById('hrNote').value.trim() : '', reason: window.__hrHeld === true ? '' : document.getElementById('hrReason').value.trim() });
+            const storeId = recStoreRoomId(kind, subject.roomId);
+            const j = await hrFetchJson(GOOGLE_APP_SCRIPT_URL, { __mode: 'upsert_homeroom_log', record: rec, term: rec.term, year: rec.year, roomId: storeId }, 30000);
             if (!j || j.status !== 'success') return false;
-            const key = hrRoomKey(rec.term, rec.year, rec.roomId);
+            const key = hrRoomKey(rec.term, rec.year, storeId);
             const list = (window.__hrLogsCache[key] || []).filter(l => l.date !== date); list.push(rec); window.__hrLogsCache[key] = list;
-            window.__hrExisting = rec; window.__hrNewPhotos = [];
+            window.__hrExisting = rec; window.__hrNewPhoto = null;
             if (toTrash.length) hrTrashPhotos(toTrash.filter(id => !photos.some(p => p.id === id)));
             return true;
         }
+
+        // ===== สวิตช์เปิด/ปิดการบันทึกพร้อมรูป (Super Admin) =====
+        function buildRecordToggleSettingsHtml() {
+            const row = (key, on, title, desc) => `<div class="flex items-center gap-3 bg-white border border-slate-200 rounded-xl p-3"><div class="flex-1 min-w-0"><p class="font-extrabold text-slate-800 text-sm sm:text-base">${title}</p><p class="text-xs text-slate-500 font-semibold">${desc}</p></div><button type="button" role="switch" aria-checked="${on}" aria-label="${title}" onclick="window.toggleRecordFeature('${key}')" class="relative w-14 h-8 rounded-full transition-colors shrink-0 ${on ? 'bg-emerald-500' : 'bg-slate-300'}"><span class="absolute top-1 ${on ? 'left-7' : 'left-1'} w-6 h-6 rounded-full bg-white shadow transition-all"></span></button></div>`;
+            return `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-1 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-camera text-indigo-500"></i> บันทึกกิจกรรมพร้อมรูป</h3><p class="text-xs sm:text-sm text-slate-500 mb-3">เมื่อปิด หน้าเช็คชื่อคาบนั้นจะเหลือแค่เช็คชื่อตามปกติ ข้อมูลที่บันทึกไว้แล้วยังอยู่ครบ</p><div class="space-y-2 mb-6">${row('recordHomeroom', settings.recordHomeroom !== false, 'คาบโฮมรูม', 'จัดกิจกรรมหรือไม่ + กิจกรรม + รูป 1 รูป')}${row('recordZone', settings.recordZone === true, 'คาบ A เขตพื้นที่รับผิดชอบ', 'สภาพเขตพื้นที่ + รูปรายงาน 1 รูป')}</div>`;
+        }
+        window.toggleRecordFeature = function(key) {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast('เฉพาะ Super Admin เท่านั้นที่แก้ไขส่วนนี้ได้', 'error'); return; }
+            const cur = key === 'recordZone' ? settings.recordZone === true : settings.recordHomeroom !== false;
+            settings[key] = !cur;
+            logAction(`${!cur ? 'เปิด' : 'ปิด'}การบันทึกพร้อมรูป`, key === 'recordZone' ? 'คาบ A เขตพื้นที่รับผิดชอบ' : 'คาบโฮมรูม', 'settings');
+            saveData('full'); showToast(!cur ? 'เปิดใช้งานแล้ว' : 'ปิดใช้งานแล้ว'); renderAdminTab();
+        };
 
         // ===== เล่มสรุปโฮมรูม (รายสัปดาห์ / รายเดือน) - ทุกคนกดสร้างได้ =====
         window.openHomeroomBookletChooser = function(roomId, month) {
@@ -2008,8 +2075,8 @@
             __ensureToastStyle();
             const old = document.getElementById('__rtChip'); if (old) old.remove();
             const chip = document.createElement('div'); chip.id = '__rtChip'; chip.setAttribute('role', 'status');
-            chip.className = '__rt-chip fixed top-20 sm:top-24 left-1/2 z-[65] flex items-center gap-2 whitespace-nowrap bg-slate-900 text-white rounded-full px-4 py-2 text-xs sm:text-sm font-bold shadow-xl pointer-events-none';
-            chip.innerHTML = `<i class="fas fa-sync-alt text-emerald-400"></i> ${String(text).replace(/</g, '&lt;')}`;
+            chip.className = '__rt-chip fixed top-20 sm:top-24 left-1/2 z-[65] flex items-center gap-2 whitespace-nowrap bg-indigo-600 text-white rounded-full px-4 py-2 text-xs sm:text-sm font-bold shadow-lg pointer-events-none';
+            chip.innerHTML = `<i class="fas fa-sync-alt text-indigo-100"></i> ${String(text).replace(/</g, '&lt;')}`;
             document.body.appendChild(chip); setTimeout(() => chip.remove(), 3500);
         }
         window.saveAttendance = async function(fromTeacherDash = false, isAutoRetry = false) {
@@ -2024,7 +2091,7 @@
             roomStudents.forEach(st => { if (st.status !== 'resigned') { const selected = document.querySelector(`input[name="att_${st.id}"]:checked`) || document.querySelector(`input[name="att_mobile_${st.id}"]:checked`); if (selected) records[st.id] = selected.value; else allFilled = false; } });
             if (!allFilled) { showToast("กรุณาเช็คชื่อให้ครบทุกคน", "error"); return; }
             const hrActive = !!document.getElementById('hrSection');
-            if (hrActive) { const hrErr = hrValidate(); if (hrErr) { showToast(hrErr, 'error'); const sec = document.getElementById('hrSection'); sec.scrollIntoView({ behavior: 'smooth', block: 'center' }); sec.classList.add('ring-4', 'ring-rose-200'); setTimeout(() => sec.classList.remove('ring-4', 'ring-rose-200'), 1800); return; } }
+            if (hrActive) { const hrErr = hrValidate(); if (hrErr) { showToast(hrErr, 'error'); const sec = document.getElementById('hrSection'); sec.scrollIntoView({ behavior: 'smooth', block: 'center' }); __ensureToastStyle(); sec.classList.remove('__shake'); void sec.offsetWidth; sec.classList.add('ring-4', 'ring-rose-200', '__shake'); setTimeout(() => sec.classList.remove('ring-4', 'ring-rose-200', '__shake'), 1800); return; } }
             const existingRec = attendanceData.find(a => a.subjectId === currentSubjectId && a.date === date && String(a.period) === String(period));
             const payloadData = { id: (existingRec && existingRec.id) || generateId(), subjectId: currentSubjectId, date: date, period: period, records: records, createdAt: (existingRec && existingRec.createdAt) || new Date().toISOString(), checkedAt: new Date().toISOString(), checkedBy: currentUser ? currentUser.name : '' };
             if(isSub) payloadData.substituteTeacher = subTeacher;
@@ -2050,15 +2117,19 @@
             await ensureAttendanceLoadedForRoom(subject.term, subject.year, subject.roomId, true);
             if (hrActive) {
                 const hrOk = await hrSubmit(subject, date, (txt) => { const b = document.getElementById('saveAttBtn'); if (b) b.innerHTML = `<i class="fas fa-circle-notch fa-spin text-xl"></i> ${txt}`; });
-                if (!hrOk) { failAndRetry('เช็คชื่อบันทึกแล้ว แต่ส่งบันทึกกิจกรรม/รูปโฮมรูมไม่สำเร็จ'); return; }
+                if (!hrOk) { failAndRetry('เช็คชื่อบันทึกแล้ว แต่ส่งบันทึก/รูปไม่สำเร็จ'); return; }
             }
             window.__attRetryCount = 0;
             setAttSaveBtnState('saved');
             const nowD = new Date(); const hhmm = String(nowD.getHours()).padStart(2, '0') + ':' + String(nowD.getMinutes()).padStart(2, '0');
             const doneMsg = `บันทึกคาบ ${periodLabel(period)} แล้ว · ${hhmm} น.`;
             const flashKey = `${currentSubjectId}|${period}|${date}`;
+            const retState = window.__attReturnState;
             setTimeout(() => {
-                history.back();
+                // [v1.71.3] กลับไปหน้าห้องเรียนของวิชานั้นเสมอ (ถ้ามาจากหน้าห้องเดียวกันก็ย้อนกลับ ถ้ามาจากที่อื่นให้เปิดหน้าห้องแทนหน้าเช็คชื่อ)
+                const dowSaved = getEffectiveDayOfWeek(date);
+                if (retState && retState.view === 'classroom' && retState.roomId === subject.roomId) history.back();
+                else navigate('classroom', { roomId: subject.roomId, dayIndex: (dowSaved >= 1 && dowSaved <= 5) ? dowSaved : null }, true);
                 setTimeout(() => { showToast(doneMsg, 'success'); flashAttRow(flashKey); }, 350);
             }, 850);
         };
@@ -2145,7 +2216,10 @@
             const backAction = 'history.back()';
             const isSummaryLocked = getTermStatus(subject.term, subject.year) === 'locked';
             const isSummaryAttendanceLocked = isAttendanceEntryLocked(subject.term, subject.year);
-            let html = `<div class="mb-4 sm:mb-8 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-1/3 h-full ${isDarkNow ? '' : 'bg-gradient-to-l from-emerald-50 to-transparent opacity-60'}"></div><div class="relative z-10 flex gap-3 items-center"><div class="w-12 h-12 sm:w-20 sm:h-20 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-full flex items-center justify-center text-white text-xl sm:text-3xl shadow-lg border-2 sm:border-4 ${isDarkNow ? 'border-[#141e33]' : 'border-white'} shrink-0"><i class="fas fa-book"></i></div><div><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800 tracking-tight leading-tight">${subject.name}</h2><p class="text-slate-600 font-bold mt-1 sm:mt-2 flex flex-wrap items-center gap-1 sm:gap-3"><span class="bg-emerald-100 text-emerald-900 px-2 sm:px-4 py-0.5 sm:py-1.5 rounded-md sm:rounded-xl text-[10px] sm:text-sm shadow-sm">ห้อง ${formatRoomName(subject.roomId)}</span><span class="bg-slate-100 text-slate-700 px-2 sm:px-4 py-0.5 sm:py-1.5 rounded-md sm:rounded-xl text-[10px] sm:text-sm shadow-sm"><i class="fas fa-chalkboard-teacher mr-1"></i> ${subject.teacher || '-'}${subject.teacher2 ? ' / ' + subject.teacher2 : ''}</span></p></div></div><div class="relative z-10 flex flex-wrap gap-1.5 sm:gap-3 w-full lg:w-auto mt-2 lg:mt-0">${(isAdmin && currentUser && currentUser.role === 'super_admin') ? (isSummaryLocked ? `<button disabled title="เทอมนี้ถูกล็อคข้อมูลไว้" class="flex-1 sm:flex-none bg-slate-100 text-slate-400 border border-slate-200 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold cursor-not-allowed"><i class="fas fa-lock"></i> ล้าง</button>` : `<button onclick="window.resetSubjectAttendance('${subjectId}')" class="flex-1 sm:flex-none bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors" title="เฉพาะ Super Admin"><i class="fas fa-redo"></i> ล้าง</button><button onclick="window.openResetByDateModal('${subjectId}')" class="flex-1 sm:flex-none bg-orange-50 hover:bg-orange-100 text-orange-600 border border-orange-200 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors" title="ล้างเฉพาะวันที่ต้องการ - ไม่กระทบวันอื่น"><i class="fas fa-calendar-times"></i> ล้างเฉพาะวัน</button>`) : ''}${isSummaryAttendanceLocked ? `<button disabled title="ไม่สามารถเช็คชื่อได้ในขณะนี้" class="flex-1 sm:flex-none bg-slate-100 text-slate-400 border border-slate-200 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold cursor-not-allowed"><i class="fas fa-lock"></i> ล็อคแล้ว</button>` : `<button onclick="window.navigate('attendance', {subjectId: '${subjectId}', fromTeacherDash: ${fromTeacherDash}})" class="flex-1 sm:flex-none bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors"><i class="fas fa-edit"></i> แก้ไข</button>`}<button onclick="window.downloadInfographicPDF('${subjectId}')" class="flex-1 sm:flex-none bg-purple-600 hover:bg-purple-700 text-white border border-purple-700 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors"><i class="fas fa-file-pdf"></i> PDF</button><button onclick="window.exportSubjectExcel('${subjectId}')" class="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors"><i class="fas fa-file-excel"></i> Excel</button><button onclick="${backAction}" class="flex-1 sm:flex-none bg-white border border-slate-200 text-slate-700 px-2 sm:px-5 py-2 sm:py-3 rounded-xl text-[10px] sm:text-sm font-bold shadow-sm transition-colors">กลับ</button></div></div>`;
+            const __sumActs = []; if (isAdmin && currentUser && currentUser.role === 'super_admin') { if (isSummaryLocked) __sumActs.push({ label: 'ล้าง', icon: 'fa-lock', tone: 'locked', disabled: true }); else { __sumActs.push({ label: 'ล้างทั้งวิชา', icon: 'fa-redo', tone: 'rose', onclick: `window.resetSubjectAttendance('${subjectId}')` }); __sumActs.push({ label: 'ล้างเฉพาะวัน', icon: 'fa-calendar-times', tone: 'orange', onclick: `window.openResetByDateModal('${subjectId}')` }); } }
+            __sumActs.push(isSummaryAttendanceLocked ? { label: 'ล็อคแล้ว', icon: 'fa-lock', tone: 'locked', disabled: true } : { label: 'แก้ไขเช็คชื่อ', icon: 'fa-edit', tone: 'blue', onclick: `window.navigate('attendance', {subjectId: '${subjectId}', fromTeacherDash: ${fromTeacherDash}})` });
+            __sumActs.push({ label: 'PDF', icon: 'fa-file-pdf', tone: 'purple', onclick: `window.downloadInfographicPDF('${subjectId}')` }, { label: 'Excel', icon: 'fa-file-excel', tone: 'emerald', onclick: `window.exportSubjectExcel('${subjectId}')` });
+            let html = summaryHeaderHtml({ iconHtml: `<div class="w-12 h-12 sm:w-20 sm:h-20 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-full flex items-center justify-center text-white text-xl sm:text-3xl shadow-lg border-2 sm:border-4 ${isDarkNow ? 'border-[#141e33]' : 'border-white'} shrink-0"><i class="fas fa-book"></i></div>`, title: `${subject.name}`, subHtml: `<p class="text-slate-600 font-bold mt-1 sm:mt-2 flex flex-wrap items-center gap-1 sm:gap-3"><span class="bg-emerald-100 text-emerald-900 px-2 sm:px-4 py-0.5 sm:py-1.5 rounded-md sm:rounded-xl text-[10px] sm:text-sm shadow-sm">ห้อง ${formatRoomName(subject.roomId)}</span><span class="bg-slate-100 text-slate-700 px-2 sm:px-4 py-0.5 sm:py-1.5 rounded-md sm:rounded-xl text-[10px] sm:text-sm shadow-sm"><i class="fas fa-chalkboard-teacher mr-1"></i> ${subject.teacher || '-'}${subject.teacher2 ? ' / ' + subject.teacher2 : ''}</span></p>`, backAction: backAction, actions: __sumActs });
             
             html += `<div class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 overflow-hidden p-3 sm:p-8"><div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 sm:mb-6 gap-2"><h3 class="text-lg sm:text-3xl font-extrabold text-slate-800 flex items-center gap-2"><i class="fas fa-table text-indigo-500"></i> บันทึกเวลาเรียน</h3><div class="bg-slate-100 px-3 py-1.5 sm:px-5 sm:py-3 rounded-xl text-slate-600 font-bold border border-slate-200 shadow-inner text-xs sm:text-base w-full sm:w-auto text-center"><i class="fas fa-history text-slate-400"></i> สอนแล้ว: <span class="text-indigo-600 text-base sm:text-2xl font-black">${totalClasses}</span> ครั้ง</div></div><div class="overflow-x-auto rounded-xl border border-slate-200 shadow-sm relative max-h-[600px] w-full"><table class="w-full text-left border-collapse min-w-[500px] sm:min-w-[700px] text-[10px] sm:text-sm"><thead class="sticky top-0 z-30 shadow-sm bg-slate-100"><tr class="bg-slate-100 text-slate-700 border-b-2 border-slate-300 uppercase tracking-wider"><th class="p-2 sm:p-4 font-extrabold w-[40px] sm:w-[60px] min-w-[40px] sm:min-w-[60px] text-center border-r border-slate-300 sticky left-0 bg-slate-100 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">เลขที่</th><th class="p-2 sm:p-4 font-extrabold w-[120px] sm:w-[200px] min-w-[120px] sm:min-w-[200px] border-r border-slate-300 sticky left-[40px] sm:left-[60px] bg-slate-100 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">ชื่อ-นามสกุล</th>`;
             if (totalClasses === 0) { html += `<th class="p-4 font-bold text-center text-slate-400">ยังไม่มีข้อมูล</th>`;
@@ -2214,7 +2288,7 @@
             const statusBadge = student.status === 'resigned' ? `<span class="bg-rose-100 text-rose-800 px-2 py-0.5 rounded text-[10px] border border-rose-200 font-black">ออก/ย้าย</span>` : '';
             const backAction = 'history.back()';
             window.tempStudentReport = { student: student, room: roomName, month: selectedMonth, monthly: monthlyStats, weekly: weeklyStats, daily: dailyRecords, dates: filteredDates };
-            let html = `<div class="mb-4 sm:mb-8 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-1/3 h-full ${isDarkNow ? '' : 'bg-gradient-to-l from-blue-50 to-transparent opacity-60'}"></div><div class="relative z-10 flex gap-3 sm:gap-4 items-center"><div class="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-white text-2xl sm:text-3xl shadow-lg border-2 sm:border-4 ${isDarkNow ? 'border-[#141e33]' : 'border-white'} shrink-0"><i class="fas fa-user-graduate"></i></div><div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">${student.name}</h2><p class="text-slate-600 font-bold mt-1 flex flex-wrap gap-1.5"><span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-[10px] sm:text-xs">เลขที่ ${student.number}</span><span class="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded text-[10px] sm:text-xs">ห้อง ${roomName}</span>${statusBadge}</p></div></div><div class="relative z-10 flex flex-wrap gap-1.5 w-full lg:w-auto mt-2 lg:mt-0 items-center"><select id="studentPdfType" class="bg-slate-50 border border-slate-200 text-slate-700 px-2 py-1.5 sm:px-3 sm:py-2.5 rounded-xl font-bold text-xs sm:text-sm outline-none shadow-sm h-full"><option value="monthly">PDF สรุปรายเดือน</option><option value="weekly">PDF สรุปรายสัปดาห์</option><option value="daily">PDF บันทึกรายวัน</option></select><button onclick="window.downloadStudentPDF('${student.id}', '${selectedMonth}')" class="flex-1 lg:flex-none bg-purple-600 hover:bg-purple-700 text-white px-2 py-1.5 sm:px-4 sm:py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-1.5 transition-colors h-full"><i class="fas fa-file-pdf"></i> โหลด</button><button onclick="window.exportStudentExcel('${student.id}', '${selectedMonth}')" class="flex-1 lg:flex-none bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1.5 sm:px-4 sm:py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-1.5 transition-colors h-full"><i class="fas fa-file-excel"></i> Excel</button><button onclick="${backAction}" class="w-full sm:w-auto bg-white border border-slate-200 text-slate-700 px-3 py-1.5 sm:px-4 sm:py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-sm transition-colors mt-1 sm:mt-0 h-full">กลับ</button></div></div>`;
+            let html = summaryHeaderHtml({ iconHtml: `<div class="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-white text-2xl sm:text-3xl shadow-lg border-2 sm:border-4 ${isDarkNow ? 'border-[#141e33]' : 'border-white'} shrink-0"><i class="fas fa-user-graduate"></i></div>`, title: `${student.name}`, subHtml: `<p class="text-slate-600 font-bold mt-1 flex flex-wrap gap-1.5"><span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-[10px] sm:text-xs">เลขที่ ${student.number}</span><span class="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded text-[10px] sm:text-xs">ห้อง ${roomName}</span>${statusBadge}</p>`, backAction: backAction, controlsHtml: `<label class="block"><span class="text-[11px] sm:text-xs font-extrabold text-slate-500">ชนิดเอกสาร PDF</span><select id="studentPdfType" class="mt-1 w-full sm:w-auto h-10 bg-slate-50 border-2 border-slate-200 text-slate-700 rounded-xl px-3 font-bold text-sm outline-none"><option value="monthly">PDF สรุปรายเดือน</option><option value="weekly">PDF สรุปรายสัปดาห์</option><option value="daily">PDF บันทึกรายวัน</option></select></label>`, actions: [{ label: 'โหลด PDF', icon: 'fa-file-pdf', tone: 'purple', onclick: `window.downloadStudentPDF('${student.id}', '${selectedMonth}')` }, { label: 'Excel', icon: 'fa-file-excel', tone: 'emerald', onclick: `window.exportStudentExcel('${student.id}', '${selectedMonth}')` }] });
             html += `<div class="bg-slate-800 rounded-2xl sm:rounded-[2rem] shadow-xl p-4 sm:p-6 mb-4 sm:mb-8 flex flex-col sm:flex-row justify-between items-center gap-3 text-white relative overflow-hidden"><div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div><h3 class="text-base sm:text-xl font-extrabold flex items-center gap-2 relative z-10"><i class="far fa-calendar-check text-blue-400"></i> สถิติประจำเดือน: <span class="text-blue-300">${displayMonthYear}</span></h3><input type="month" value="${selectedMonth}" class="w-full sm:w-auto relative z-10 bg-slate-700/50 border border-slate-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-400 font-bold text-sm outline-none" onchange="window.navigate('student_summary', {studentId: '${student.id}', month: this.value})"></div><div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2 sm:gap-4 mb-6 sm:mb-10">${Object.entries(monthlyStats).map(([name, count]) => { const style = statuses[name];
                 return `<div class="bg-white border border-slate-200 rounded-xl sm:rounded-2xl p-3 sm:p-4 text-center flex flex-col items-center justify-center gap-1.5 relative overflow-hidden"><div class="absolute inset-0 bg-gradient-to-t from-${style.bg.replace('bg-','')} to-transparent opacity-50"></div><div class="w-8 h-8 sm:w-10 sm:h-10 ${style.bg} ${style.color} rounded-full flex items-center justify-center text-sm sm:text-lg mb-1 relative z-10 border ${style.border}"><i class="fas ${style.icon}"></i></div><div class="${style.color} text-[10px] sm:text-xs font-extrabold relative z-10">${name}</div><div class="text-2xl sm:text-4xl font-black text-slate-800 relative z-10">${count}</div></div>`;
             }).join('')}</div><div class="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6"><div class="bg-white rounded-2xl border border-slate-200 overflow-hidden flex flex-col shadow-sm"><div class="p-3 sm:p-5 border-b border-slate-200 bg-slate-50 flex items-center gap-2"><div class="w-8 h-8 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center text-sm"><i class="fas fa-calendar-week"></i></div><h4 class="font-extrabold text-base sm:text-xl text-slate-800">สรุปรายสัปดาห์</h4></div><div class="overflow-x-auto w-full"><table class="w-full text-center text-[10px] sm:text-xs min-w-[400px]"><thead class="bg-white text-slate-500 border-b-2 border-slate-100"><tr><th class="p-2 sm:p-3">สัปดาห์</th><th class="p-2 text-emerald-600">มา</th><th class="p-2 text-cyan-600">กิจกรรม</th><th class="p-2 text-amber-500">สาย</th><th class="p-2 text-blue-500">ป่วย</th><th class="p-2 text-indigo-500">ลากิจ</th><th class="p-2 text-rose-500">ขาด</th><th class="p-2 text-purple-600">โดด</th></tr></thead><tbody class="divide-y divide-slate-100 font-bold">${[1,2,3,4,5].map(w => `<tr><td class="p-2 bg-slate-50/50">สัปดาห์ ${w}</td><td class="p-2 bg-emerald-50/30">${weeklyStats[w]['มา']||'-'}</td><td class="p-2 bg-cyan-50/30">${weeklyStats[w]['ร่วมกิจกรรม']||'-'}</td><td class="p-2 bg-amber-50/30">${weeklyStats[w]['สาย']||'-'}</td><td class="p-2 bg-blue-50/30">${weeklyStats[w]['ลาป่วย']||'-'}</td><td class="p-2 bg-indigo-50/30">${weeklyStats[w]['ลากิจ']||'-'}</td><td class="p-2 bg-rose-50/30">${weeklyStats[w]['ขาด']||'-'}</td><td class="p-2 bg-purple-50/30">${weeklyStats[w]['โดดเรียน']||'-'}</td></tr>`).join('')}</tbody></table></div></div><div class="bg-white rounded-2xl border border-slate-200 overflow-hidden flex flex-col shadow-sm"><div class="p-3 sm:p-5 border-b border-slate-200 bg-slate-50 flex items-center gap-2"><div class="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center text-sm"><i class="fas fa-history"></i></div><h4 class="font-extrabold text-base sm:text-xl text-slate-800">ประวัติรายวัน</h4></div><div class="overflow-y-auto max-h-[300px] p-2 sm:p-4 bg-slate-50/30">${filteredDates.length > 0 ? `<ul class="space-y-1.5 sm:space-y-2">${filteredDates.map(d => { const stat = dailyRecords[d].status; const style = statuses[stat]; return `<li class="p-2.5 sm:p-3 rounded-xl border border-slate-200 bg-white shadow-sm flex justify-between items-center"><div class="flex items-center gap-2"><div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 text-xs"><i class="far fa-calendar-alt"></i></div><span class="font-extrabold text-slate-800 text-xs sm:text-sm">${d.split('-').reverse().join('/')}</span></div><span class="px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg border-2 ${style.border} ${style.bg} ${style.color} text-[9px] sm:text-xs font-extrabold flex items-center gap-1"><i class="fas ${style.icon}"></i> ${stat}</span></li>`; }).join('')}</ul>` : `<div class="p-8 text-center text-slate-400 font-medium text-xs"><i class="fas fa-box-open text-2xl mb-2 opacity-50"></i> ไม่มีข้อมูลในเดือนนี้</div>`}</div></div></div>`;
@@ -2249,7 +2323,7 @@
             const displayMonthYear = `${monthNames[parseInt(selectedMonth.split('-')[1])-1]} ${parseInt(selectedMonth.split('-')[0])+543}`;
             const backAction = 'history.back()';
             let roomTotals = null;
-            let html = `<div class="mb-4 sm:mb-8 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-1/3 h-full ${isDarkNow ? '' : 'bg-gradient-to-l from-emerald-50 to-transparent opacity-60'}"></div><div class="relative z-10 flex gap-3 items-center"><div class="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center text-white text-xl sm:text-3xl shadow-lg shrink-0"><i class="fas fa-chart-bar"></i></div><div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">รายงานห้อง ${roomName}</h2></div></div><div class="relative z-10 flex gap-1.5 sm:gap-2 w-full lg:w-auto mt-2 lg:mt-0">${tab === 'monthly' ? `<button onclick="window.downloadRoomMonthlyRegisterPDF('${roomId}', '${selectedMonth}')" title="สมุดทะเบียนรวมทุกวันในเดือนนี้ (ปก + สรุปทั้งเดือน + ลงนามท้ายเล่ม + บันทึกรายวันเป็นภาคผนวก)" class="flex-1 lg:flex-none px-2 sm:px-3 py-2 rounded-xl font-bold text-[9px] sm:text-sm bg-indigo-700 hover:bg-indigo-800 text-white shadow-md flex items-center justify-center gap-1 sm:gap-1.5"><i class="fas fa-book"></i> <span class="whitespace-nowrap">สมุดทะเบียน</span></button><button onclick="window.downloadZoneSummaryPDF('${roomId}', '${selectedMonth}')" title="สรุปคาบ A เขตพื้นที่รับผิดชอบ (แยกจากสมุดทะเบียน)" class="flex-1 lg:flex-none px-2 sm:px-3 py-2 rounded-xl font-bold text-[9px] sm:text-sm bg-teal-600 hover:bg-teal-700 text-white shadow-md flex items-center justify-center gap-1 sm:gap-1.5"><i class="fas fa-map-marked-alt"></i> <span class="whitespace-nowrap">สรุปเขตรับผิดชอบ</span></button><button onclick="window.openHomeroomBookletChooser('${roomId}', '${selectedMonth}')" title="เล่มสรุปกิจกรรมโฮมรูม รายสัปดาห์/รายเดือน" class="flex-1 lg:flex-none px-2 sm:px-3 py-2 rounded-xl font-bold text-[9px] sm:text-sm bg-violet-600 hover:bg-violet-700 text-white shadow-md flex items-center justify-center gap-1 sm:gap-1.5"><i class="fas fa-users"></i> <span class="whitespace-nowrap">สรุปโฮมรูม</span></button>` : ''}<button onclick="window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'monthly'})" class="flex-1 lg:flex-none px-2 sm:px-3 py-2 rounded-xl font-bold text-[9px] sm:text-sm whitespace-nowrap ${tab === 'monthly' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 border border-slate-200'}">สรุปรายเดือน</button><button onclick="window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'daily'})" class="flex-1 lg:flex-none px-2 sm:px-3 py-2 rounded-xl font-bold text-[9px] sm:text-sm whitespace-nowrap ${tab === 'daily' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 border border-slate-200'}">สรุปรายวัน</button><button onclick="${backAction}" class="flex-1 lg:flex-none px-2 sm:px-3 py-2 rounded-xl font-bold text-[9px] sm:text-sm whitespace-nowrap bg-white border border-slate-200 lg:ml-auto">กลับ</button></div></div>`;
+            let html = summaryHeaderHtml({ iconHtml: `<div class="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center text-white text-xl sm:text-3xl shadow-lg shrink-0"><i class="fas fa-chart-bar"></i></div>`, title: `รายงานห้อง ${roomName}`, backAction: backAction, tabs: [{ label: 'สรุปรายเดือน', active: tab === 'monthly', onclick: `window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'monthly'})` }, { label: 'สรุปรายวัน', active: tab === 'daily', onclick: `window.navigate('room_summary', {roomId: '${roomId}', month: '${selectedMonth}', tab: 'daily'})` }], actionsLabel: 'ดาวน์โหลดเอกสาร PDF', actions: tab === 'monthly' ? [{ label: 'สมุดทะเบียน', icon: 'fa-book', tone: 'indigo', onclick: `window.downloadRoomMonthlyRegisterPDF('${roomId}', '${selectedMonth}')` }, { label: 'สรุปเขตรับผิดชอบ', icon: 'fa-map-marked-alt', tone: 'teal', onclick: `window.downloadZoneSummaryPDF('${roomId}', '${selectedMonth}')` }, { label: 'สรุปโฮมรูม', icon: 'fa-users', tone: 'violet', onclick: `window.openHomeroomBookletChooser('${roomId}', '${selectedMonth}')` }] : [] });
 
             if (tab === 'monthly') {
                 const { studentSummaries, incompleteAttendanceList, roomTotals: computedRoomTotals } = computeRoomIncompleteList(roomId, selectedMonth);
@@ -2459,7 +2533,7 @@
                 for(let i=1; i<=6; i++) { html += `<div class="bg-slate-50 p-2 sm:p-3 rounded-lg border border-slate-100 text-center"><label class="block font-black text-[10px] sm:text-xs text-slate-700 mb-1 sm:mb-2">ม.${i}</label><input type="number" id="setCountM${i}" value="${settings.roomCounts[`m${i}`]}" min="0" max="15" ${!isSuperAdminSettings ? 'disabled' : ''} class="w-full text-center py-1.5 sm:py-2 rounded border border-slate-200 font-bold ${!isSuperAdminSettings ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'text-indigo-600'} outline-none text-base sm:text-sm"></div>`;
                 }
                 html += `</div>${isSuperAdminSettings ? `<div class="flex justify-end mb-6"><button onclick="window.saveRoomCountsSettings()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> บันทึกจำนวนห้อง</button></div>` : '<div class="mb-6"></div>'}<h3 class="text-lg sm:text-xl font-extrabold text-rose-600 mb-3 border-t pt-4 sm:pt-6 flex items-center gap-2"><i class="fas fa-exclamation-triangle"></i> ล้างข้อมูลทั้งระบบ</h3><div class="bg-rose-50 p-4 rounded-xl border border-rose-200 shadow-sm flex flex-col sm:flex-row justify-between items-center gap-4"><div><h4 class="font-bold text-rose-800 text-sm sm:text-base">ล้างข้อมูลการเช็คชื่อทั้งหมด</h4><p class="text-[10px] sm:text-xs text-rose-600 font-medium">ลบประวัติการเช็คชื่อของทุกวิชา ทุกห้อง ทุกวัน (ไม่สามารถกู้คืนได้)</p>${!isSuperAdminSettings ? `<p class="text-[10px] sm:text-xs text-slate-400 font-bold mt-1"><i class="fas fa-lock"></i> เฉพาะ Super Admin เท่านั้นที่ใช้งานส่วนนี้ได้</p>` : ''}</div>${isSuperAdminSettings ? `<button onclick="window.resetAllAttendanceData()" class="w-full sm:w-auto bg-rose-600 hover:bg-rose-700 text-white px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-bold shadow-sm transition-colors text-sm whitespace-nowrap"><i class="fas fa-trash-alt"></i> ล้างข้อมูลทั้งหมด</button>` : `<button disabled title="เฉพาะ Super Admin เท่านั้น" class="w-full sm:w-auto bg-slate-200 text-slate-400 px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-bold text-sm whitespace-nowrap cursor-not-allowed"><i class="fas fa-lock"></i> ล้างข้อมูลทั้งหมด</button>`}</div>`;
-                if (isSuperAdminSettings) html += buildExternalLinksSettingsHtml();
+                if (isSuperAdminSettings) html += buildRecordToggleSettingsHtml() + buildExternalLinksSettingsHtml();
                 content.innerHTML = html;
             } 
             else if (currentAdminTab === 'term_settings') {
@@ -3566,7 +3640,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '1.71.2.261026';
+        const APP_VERSION = '1.71.4.261026';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         function renderSiteFooter() {
             const y = document.getElementById('footerYear'); if (y) y.textContent = new Date().getFullYear() + 543;
@@ -3654,7 +3728,7 @@ content.innerHTML = html;
         function buildExternalLinksHtml() {
             const list = (Array.isArray(settings.externalLinks) ? settings.externalLinks : []).filter(x => x && x.img && __extSafeUrl(x.url));
             if (list.length === 0) return '';
-            return `<div class="mb-6 sm:mb-8 mx-auto max-w-[1200px] flex flex-wrap justify-center gap-2">${list.map(x => `<a href="${__extEsc(__extSafeUrl(x.url))}" target="_blank" rel="noopener noreferrer" title="${__extEsc(x.title || '')}" aria-label="${__extEsc(x.title || 'ลิงก์เว็บภายนอก')}" class="block w-[calc(25%-6px)] sm:w-[calc(12.5%-7px)] hover:-translate-y-0.5 active:scale-95 transition-transform" style="aspect-ratio:320/120;"><img src="${x.img}" alt="${__extEsc(x.title || '')}" style="width:100%; height:100%; object-fit:contain; display:block; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.18));"></a>`).join('')}</div>`;
+            return `<div class="mb-6 sm:mb-8 mx-auto max-w-[1200px] flex flex-wrap justify-center gap-2">${list.map(x => `<a href="${__extEsc(__extSafeUrl(x.url))}" target="_blank" rel="noopener noreferrer" title="${__extEsc(x.title || '')}" aria-label="${__extEsc(x.title || 'ลิงก์เว็บภายนอก')}" class="block w-[calc(25%-6px)] sm:w-[calc(12.5%-7px)] rounded-xl sm:rounded-2xl overflow-hidden shadow-sm hover:shadow-md hover:-translate-y-0.5 active:scale-95 transition-all" style="aspect-ratio:320/120;"><img src="${x.img}" alt="${__extEsc(x.title || '')}" style="width:100%; height:100%; object-fit:cover; display:block;"></a>`).join('')}</div>`;
         }
         function buildExternalLinksSettingsHtml() {
             const list = Array.isArray(settings.externalLinks) ? settings.externalLinks : [];
@@ -3800,7 +3874,7 @@ content.innerHTML = html;
         } const t = teachers.find(x => x.id === id); showConfirm("ลบ", "แน่ใจหรือไม่ที่จะลบครูท่านนี้?", () => { teachers = teachers.filter(x => x.id !== id); logAction('ลบข้อมูลครู', t ? t.name : id); saveData('full'); showToast("ลบเรียบร้อย"); renderAdminTab(); });
         }
         
-        window.resetAllAttendanceData = function() { showConfirm("ยืนยันล้างข้อมูลทั้งหมด", "คำเตือน: ข้อมูลการเช็คชื่อของนักเรียนทุกคนและวิชาทั้งหมดจะถูกลบอย่างถาวรและไม่สามารถกู้คืนได้ คุณแน่ใจหรือไม่?", async () => { showToast("กำลังล้างข้อมูล... (อัปเดตแบบเรียลไทม์)", "info"); document.body.style.pointerEvents = 'none'; logAction('ล้างข้อมูลการเช็คชื่อทั้งหมด', 'รีเซ็ตข้อมูลการเช็คชื่อ/ติดตามทั้งระบบ'); await saveData('reset_all'); document.body.style.pointerEvents = 'auto'; showToast("ล้างข้อมูลทั้งหมดเรียบร้อยแล้ว", "success"); renderAdminTab(); });
+        window.resetAllAttendanceData = function() { showConfirm("ยืนยันล้างข้อมูลทั้งหมด", "คำเตือน: ข้อมูลการเช็คชื่อของนักเรียนทุกคนและวิชาทั้งหมดของเทอมนี้จะถูกลบอย่างถาวรและไม่สามารถกู้คืนได้ รวมถึงบันทึกโฮมรูม/เขตพื้นที่ ส่วนโฟลเดอร์รูปของเทอมนี้จะถูกย้ายลงถังขยะของ Google Drive (กู้คืนได้ภายใน 30 วัน) คุณแน่ใจหรือไม่?", async () => { const __rTerm = adminTerm(), __rYear = adminYear(); showToast("กำลังล้างข้อมูล... (อัปเดตแบบเรียลไทม์)", "info"); document.body.style.pointerEvents = 'none'; logAction('ล้างข้อมูลการเช็คชื่อทั้งหมด', 'รีเซ็ตข้อมูลการเช็คชื่อ/ติดตามทั้งระบบ'); await saveData('reset_all'); await hrTrashTermFolders(__rTerm, __rYear); document.body.style.pointerEvents = 'auto'; showToast("ล้างข้อมูลทั้งหมดเรียบร้อยแล้ว", "success"); renderAdminTab(); });
         };
 
         // ===== เก็บถาวรข้อมูลเช็คชื่อเก่า: ส่งออก Excel แล้วลบออกจากข้อมูลที่ใช้งานจริง (ลดขนาดไฟล์ระยะยาว) =====
@@ -4916,6 +4990,26 @@ content.innerHTML = html;
                 t += `</tbody></table><p class="text-[10px] text-slate-500 mt-2 font-semibold">สัญลักษณ์: / = มา · ส = สาย · ป = ลาป่วย · ก = ลากิจ · ข = ขาด · ด = โดดเรียน · - = ยังไม่เช็ค · จำนวนวันที่มีคาบ A ในเดือนนี้ ${activeCols.length} วัน</p>`;
                 html += `<div class="a4-page flex flex-col justify-between bg-white">${pdfPageBadge(pages > 1 ? `หน้า ${p+1}/${pages}` : '')}<div><div class="text-center mb-5 border-b-2 border-slate-700 pb-4">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-2xl font-black" style="margin-bottom:14px; line-height:1.6;">สรุปเขตพื้นที่รับผิดชอบ (คาบ A)</h1><h2 class="text-lg font-bold bg-teal-100 px-4 py-1.5 rounded-full inline-block border border-teal-300" style="line-height:1.6;">ห้อง ${roomName} · ${monthNames[mNum-1]} ${year+543}</h2><p class="text-xs text-slate-500 mt-2 font-semibold">กิจกรรม/วิชา: ${zoneNames}</p></div>${t}</div>${p === pages - 1 ? buildPdfSignatureBlock(signers) : ''}</div>`;
             }
+            // ===== [v1.71.3] บันทึกสภาพเขตพื้นที่ + รูปรายงาน (ถ้ามีบันทึกในเดือนนี้) =====
+            try {
+                const zs = zoneSubs[0];
+                const zLogs = ((await hrLoadLogs(zs.term, zs.year, recStoreRoomId('zone', roomId), true)) || []).filter(l => String(l.date || '').startsWith(month)).sort((p, q) => p.date.localeCompare(q.date));
+                if (zLogs.length) {
+                    const thMs = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+                    const fmt = (d) => { const x = new Date(d); return `${x.getDate()} ${thMs[x.getMonth()]} ${x.getFullYear() + 543}`; };
+                    const head2 = `<div class="text-center mb-5 border-b-2 border-slate-700 pb-4">${pdfLogoHtml()}${pdfDocMeta()}<h1 class="text-2xl font-black" style="margin-bottom:14px; line-height:1.6;">บันทึกสภาพเขตพื้นที่รับผิดชอบ</h1><h2 class="text-lg font-bold bg-teal-100 px-4 py-1.5 rounded-full inline-block border border-teal-300" style="line-height:1.6;">ห้อง ${roomName} · ${monthNames[mNum-1]} ${year+543}</h2></div>`;
+                    const urls = [];
+                    for (let i = 0; i < zLogs.length; i++) {
+                        updateProgressModal((i / zLogs.length) * 30, `กำลังโหลดรูปรายงาน ${i + 1}/${zLogs.length}...`);
+                        const ph = (zLogs[i].photos || [])[0]; urls.push(ph ? await hrGetPhoto(ph.id) : null);
+                    }
+                    const PERP = 4;
+                    for (let p = 0; p < Math.ceil(zLogs.length / PERP); p++) {
+                        const cells = zLogs.slice(p * PERP, (p + 1) * PERP).map((l, k) => { const u = urls[p * PERP + k]; return `<div style="border:1px solid #cbd5e1; border-radius:12px; padding:10px; display:flex; flex-direction:column; gap:6px;"><div style="display:flex; justify-content:space-between; font-size:13px; font-weight:800;"><span>${fmt(l.date)}</span><span style="color:#0f766e;">${hrEsc(l.condition || '-')}</span></div>${u ? `<div style="aspect-ratio:4/3; border-radius:8px; overflow:hidden; background:#e2e8f0;"><img src="${u}" style="width:100%; height:100%; object-fit:cover; display:block;"></div>` : `<div style="aspect-ratio:4/3; border-radius:8px; background:#f1f5f9; color:#64748b; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700;">ไม่มีรูป / โหลดรูปไม่สำเร็จ</div>`}<div style="font-size:11px; color:#64748b; font-weight:600;">บันทึกโดย ${hrEsc(l.recordedBy || '-')}</div></div>`; }).join('');
+                        html += `<div class="a4-page flex flex-col bg-white">${pdfPageBadge('บันทึกเขตพื้นที่')}${head2}<div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px;">${cells}</div></div>`;
+                    }
+                }
+            } catch (e) { /* โหลดบันทึกเขตพื้นที่ไม่สำเร็จ - ยังออกรายงานการเช็คชื่อได้ตามปกติ */ }
             html += `</div>`; document.body.insertAdjacentHTML('beforeend', html);
             await document.fonts.ready; await new Promise(r => setTimeout(r, 500));
             try {
