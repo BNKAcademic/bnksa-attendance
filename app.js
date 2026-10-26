@@ -14,6 +14,7 @@
         let settings = { title: "ระบบเช็คชื่อนักเรียนอัจฉริยะ", faviconDataUrl: "", logoDataUrl: "", announcement: "", announcementStart: "", announcementEnd: "", announcements: [], term: "1", year: "2567", academicYears: [{ year: "2567", status: "active" }], roomCounts: { m1: 4, m2: 4, m3: 4, m4: 3, m5: 3, m6: 3 }, advisors: {}, staffs: {}, thresholds: { late: 4, absent: 4 }, storageLimitChars: 8000000, holidays: [], serverOnline: true, termLocks: {}, termCount: 2, users: [{ id: 'super_admin_root', username: 'BNKAdmin', password: '042499078', name: 'ผู้ดูแลระบบหลัก', role: 'super_admin', createdAt: new Date().toISOString() }] };
         let teachers = [], subjects = [], students = [], attendanceData = [], followUps = [], logs = [];
         let currentUser = null;
+        let hubHolidays = []; // [v1.72.1] วันหยุดเรียนจากปฏิทิน AcademicHub (Worker เก็บไว้ให้ · แก้ที่ AcademicHub เท่านั้น)
         // ===== [v1.71.5] บัตรผ่านผู้ดูแล (token) — Worker ตรวจสิทธิ์งานของผู้ดูแลทุกครั้ง ส่วนครูเช็คชื่อ/บันทึกโฮมรูมไม่ต้องเข้าสู่ระบบเหมือนเดิม =====
         // แนบบัตรผ่านไปกับทุกคำขอที่ส่งไป Worker อัตโนมัติ (GET = ?token= · POST = __token ใน body) — ไม่ต้องแก้ทุกจุดที่เรียก fetch
         let adminToken = '';
@@ -587,8 +588,9 @@
                                     settings.announcements = data.settings.announcements || [];
                                     updateAnnouncementBar();
                                 }
-                                if (JSON.stringify(data.settings.holidays || []) !== JSON.stringify(settings.holidays || [])) {
+                                if (JSON.stringify(data.settings.holidays || []) !== JSON.stringify(settings.holidays || []) || (Array.isArray(data.hubHolidays) && JSON.stringify(data.hubHolidays) !== JSON.stringify(hubHolidays))) {
                                     settings.holidays = data.settings.holidays || [];
+                                    if (Array.isArray(data.hubHolidays)) hubHolidays = data.hubHolidays;
                                     updateHolidayBar();
                                 }
                                 if (data.settings.serverOnline !== undefined && data.settings.serverOnline !== settings.serverOnline) {
@@ -645,6 +647,7 @@
             }
             try {
                 const data = await fetchInitialDataWithRetry();
+                if (Array.isArray(data.hubHolidays)) hubHolidays = data.hubHolidays; // [v1.72.1]
                 if (data.settings && Object.keys(data.settings).length > 0) {
                     settings = data.settings;
                     settings.thresholds = settings.thresholds || { late: 4, absent: 4 };
@@ -920,7 +923,7 @@
                             if (data.settings.faviconDataUrl !== undefined) { settings.faviconDataUrl = data.settings.faviconDataUrl; applyFavicon(); }
                             if (data.settings.logoDataUrl !== undefined) { settings.logoDataUrl = data.settings.logoDataUrl; applyHeaderLogo(); }
                             settings.announcements = data.settings.announcements || []; updateAnnouncementBar();
-                            settings.holidays = data.settings.holidays || []; updateHolidayBar();
+                            settings.holidays = data.settings.holidays || []; if (Array.isArray(data.hubHolidays)) hubHolidays = data.hubHolidays; updateHolidayBar();
                             settings.externalLinks = Array.isArray(data.settings.externalLinks) ? data.settings.externalLinks : [];
                             if (data.settings.serverOnline !== undefined) { settings.serverOnline = data.settings.serverOnline; applyServerStatusBadge(); }
                         }
@@ -994,7 +997,8 @@
 
         // ===== ระบบวันหยุด =====
         function getHolidayForDate(dateStr) {
-            return (settings.holidays || []).find(h => h.date === dateStr) || null;
+            // [v1.72.1] วันหยุดที่ตั้งในเว็บเช็คชื่อมาก่อน (ตั้งทับได้ เช่น เปลี่ยนเป็นวันชดเชย) แล้วจึงดูวันหยุดเรียนจาก AcademicHub
+            return (settings.holidays || []).find(h => h.date === dateStr) || (hubHolidays || []).find(h => h.date === dateStr) || null;
         }
         // ===== [ใหม่] หา "วันในสัปดาห์ที่ควรใช้หาตารางสอน" ของวันที่ที่ให้มา - ปกติคือวันจริงตามปฏิทิน แต่ถ้าวันนั้นตั้งเป็น "สอนชดเชย" (type: makeup) จะใช้ตารางของวันที่ระบุไว้แทนทั้งวัน =====
         function getEffectiveDayOfWeek(dateStr) {
@@ -1968,6 +1972,18 @@
             for (let guard = 0; guard < 3; guard++) { const pre = NAME_PREFIXES.find(pf => x.indexOf(pf) === 0); if (!pre) break; x = x.slice(pre.length); }
             return x;
         }
+        // [v1.72.1] ขั้น 2: ดึงวันหยุดเรียนจาก AcademicHub ทันที (ปกติ Worker ดึงให้เองทุกประมาณ 6 ชั่วโมง)
+        window.syncHubHolidays = async function() {
+            if (!isAdmin) return;
+            showLoadingSpinnerModal('กำลังดึงวันหยุดเรียนจาก AcademicHub', 'กรุณารอสักครู่...');
+            let j = null;
+            try { const res = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=hub_holidays_sync`); j = await res.json(); } catch (e) { j = null; }
+            window.closeProgressModal();
+            if (!j || j.status !== 'success') { showConfirm('ดึงวันหยุดไม่สำเร็จ', (j && j.message) || 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองใหม่', () => {}); return; }
+            hubHolidays = j.holidays || []; updateHolidayBar();
+            logAction('ดึงวันหยุดเรียนจาก AcademicHub', `${hubHolidays.length} วัน`, 'settings');
+            showToast(`ดึงแล้ว: วันหยุดเรียนจาก AcademicHub ${hubHolidays.length} วัน`, 'success'); renderAdminTab();
+        };
         window.openHubTeacherSync = async function() {
             if (!isAdmin) return;
             showLoadingSpinnerModal('กำลังดึงรายชื่อจาก AcademicHub', 'กรุณารอสักครู่...');
@@ -3285,6 +3301,14 @@ content.innerHTML = html;
                 } else {
                     html += `<div class="space-y-1.5 max-h-80 overflow-y-auto pr-1">${allHolidays.map(h => `<div class="flex items-center justify-between gap-2 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2"><div class="min-w-0"><span class="font-black text-rose-700 text-xs sm:text-sm">${h.date.split('-').reverse().join('/')}</span><span class="text-rose-600 text-xs sm:text-sm font-bold ml-2">${h.label}</span></div><button onclick="window.deleteHoliday('${h.date}')" class="shrink-0 text-rose-500 hover:text-rose-700 p-1.5"><i class="fas fa-trash"></i></button></div>`).join('')}</div>`;
                 }
+                // [v1.72.1] วันหยุดเรียนจาก AcademicHub (ดูอย่างเดียว · แก้ที่ปฏิทิน AcademicHub)
+                {
+                    const hubList = (hubHolidays || []).slice().sort((x, y) => x.date.localeCompare(y.date));
+                    const own = new Set((settings.holidays || []).map(h => h.date));
+                    html += `<div class="mt-5 mb-6"><div class="flex flex-wrap items-center justify-between gap-2 mb-2"><h4 class="font-extrabold text-sm sm:text-lg text-slate-800 flex items-center gap-2"><i class="fas fa-link text-violet-500"></i> วันหยุดเรียนจาก AcademicHub (${hubList.length})</h4><button onclick="window.syncHubHolidays()" class="bg-violet-600 hover:bg-violet-700 text-white px-3 py-1.5 rounded-lg font-bold text-xs sm:text-sm shadow-sm"><i class="fas fa-sync-alt"></i> ดึงจาก AcademicHub ตอนนี้</button></div><p class="text-[11px] sm:text-xs text-slate-500 font-semibold mb-2">มาจากกิจกรรมในปฏิทิน AcademicHub ที่ติ๊ก "หยุดเรียน ไม่ต้องเช็คชื่อ" · ระบบดึงให้เองทุกประมาณ 6 ชั่วโมง · แก้/ลบได้ที่ AcademicHub · วันที่ตั้งวันหยุดไว้ในเว็บนี้แล้วจะใช้ของเว็บนี้แทน</p>`;
+                    html += hubList.length ? `<div class="space-y-1.5 max-h-64 overflow-y-auto pr-1">${hubList.map(h => `<div class="flex items-center gap-2 bg-violet-50 border border-violet-200 rounded-lg px-3 py-2"><span class="font-black text-violet-700 text-xs sm:text-sm">${h.date.split('-').reverse().join('/')}</span><span class="text-violet-700 text-xs sm:text-sm font-bold flex-1 min-w-0 truncate">${hrEsc(h.label)}</span>${own.has(h.date) ? '<span class="text-[10px] font-bold text-slate-500 bg-white border border-slate-200 rounded px-1.5 py-0.5">ใช้วันหยุดของเว็บนี้แทน</span>' : ''}</div>`).join('')}</div>` : `<div class="text-center text-slate-400 py-5 text-xs sm:text-sm font-medium bg-slate-50 rounded-xl border border-slate-100">ยังไม่มีวันหยุดเรียนจาก AcademicHub</div>`;
+                    html += `</div>`;
+                }
                 ensureAnnouncementsArray();
                 const annPriorityMeta = { high: { label: 'ด่วนมาก', badge: 'bg-rose-100 text-rose-700 border-rose-300' }, normal: { label: 'ทั่วไป', badge: 'bg-amber-100 text-amber-700 border-amber-300' }, low: { label: 'แจ้งเพื่อทราบ', badge: 'bg-blue-100 text-blue-700 border-blue-300' } };
                 html += `<h3 class="text-lg sm:text-xl font-extrabold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-bullhorn text-amber-500"></i> ประกาศแจ้งเตือน (แสดงบนสุดของเว็บ)</h3><div class="mb-6 bg-amber-50/70 p-3 sm:p-4 rounded-xl border border-amber-200 space-y-3">`;
@@ -3879,7 +3903,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '1.72.0.261026';
+        const APP_VERSION = '1.72.1.271026';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
