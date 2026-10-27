@@ -801,6 +801,43 @@
             } catch (e) { /* เครือข่ายมีปัญหา ใช้ข้อมูลปัจจุบันในเครื่องแทนไปก่อน */ return null; }
         }
 
+        // ===== [v1.74.5] บันทึกวิชาแบบส่งเฉพาะวิชาที่เปลี่ยน (เดิมดึงข้อมูลหลักทั้งชุดลงมา แล้วส่งทั้งชุดกลับขึ้นไป = ช้ามากเมื่อข้อมูลโต) =====
+        // Worker รุ่นเก่ายังไม่รู้จักคำสั่งนี้ → ใช้วิธีเดิม (ดึงทั้งชุด + บันทึกทั้งชุด) ให้อัตโนมัติ
+        // คืนค่า true = สำเร็จ · false = ไม่สำเร็จ (แจ้งผู้ใช้แล้ว) · ผู้เรียกส่ง fallback = ฟังก์ชันแก้ข้อมูลในเครื่อง ใช้กรณีต้องย้อนไปวิธีเดิม
+        function normalizeSubject_(s) {
+            if (s.day !== undefined && s.period !== undefined && !s.schedules) { s.credits = 0.5; s.schedules = [{ day: s.day, period: s.period }]; delete s.day; delete s.period; }
+            if (s.term === undefined) s.term = settings.term; if (s.year === undefined) s.year = settings.year; if (s.locked === undefined) s.locked = false;
+            return s;
+        }
+        async function saveSubjectsDelta(upsert, remove, opts = {}) {
+            const t0 = Date.now();
+            let res, j = null;
+            try {
+                res = await fetchWithRetry(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'subject_save', upsert: upsert || [], remove: remove || [], mustExist: !!opts.mustExist }) });
+                try { j = await res.clone().json(); } catch (e) {}
+            } catch (e) { res = null; }
+            if (j && j.status === 'error' && /ไม่รู้จักคำสั่ง/.test(j.message || '')) { // Worker ยังเป็นรุ่นเก่า
+                await refreshBeforeEdit(['subjects']);
+                if (opts.applyLocal && opts.applyLocal() === false) return false;
+                return await saveData('full');
+            }
+            if (j && j.status === 'error' && j.code === 'gone') { showToast(j.message, "error"); return false; }
+            if (!res || !res.ok || !j || j.status !== 'success') {
+                const msg = (j && j.message) || 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้';
+                showToast("บันทึกข้อมูลไม่สำเร็จ: " + msg, "error");
+                showConfirm("บันทึกข้อมูลไม่สำเร็จ", `${msg}\n\nกด "บันทึกอีกครั้ง" เพื่อลองส่งใหม่ (ถ้ายังไม่สำเร็จ ลองรีเฟรชหน้าเว็บ)`, () => saveSubjectsDelta(upsert, remove, opts), "บันทึกอีกครั้ง");
+                return false;
+            }
+            if (Array.isArray(j.subjects)) subjects = j.subjects.map(normalizeSubject_); // ได้รายการวิชาล่าสุด (รวมที่ผู้ดูแลคนอื่นเพิ่งแก้) กลับมาด้วย
+            window.__lastSaveMs = Date.now() - t0;
+            return true;
+        }
+        // ข้อความบันทึกสำเร็จ — ถ้าใช้เวลานาน บอกเวลาและจำนวนครั้งที่ต้องส่งซ้ำ (ช่วยหาสาเหตุ)
+        function savedMsg_(text) {
+            const ms = window.__lastSaveMs || 0, n = window.__lastFetchAttempts || 1;
+            return ms > 3000 ? `${text} (ใช้เวลา ${(ms / 1000).toFixed(1)} วินาที${n > 1 ? ` · ส่งซ้ำ ${n - 1} ครั้ง` : ''})` : text;
+        }
+
         // ===== บันทึกข้อมูลแบบ Real-time รองรับการบันทึกพร้อมกันจากหลายอุปกรณ์ =====
         // การเช็คชื่อ/ติดตามนักเรียน/ล้างข้อมูล จะส่งเฉพาะ "รายการที่เปลี่ยนแปลง" ไปให้ฝั่งเซิร์ฟเวอร์ผสานเข้ากับข้อมูลล่าสุดเองแบบอะตอมมิก
         // (ล็อกการเขียนไว้ฝั่ง Apps Script ด้วย LockService กันข้อมูลชนกันเวลาเช็คชื่อพร้อมกันหลายห้อง/หลายวิชา)
@@ -810,6 +847,7 @@
         async function fetchWithRetry(url, options, maxAttempts = 3) {
             let lastError = null;
             for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                window.__lastFetchAttempts = attempt; // [v1.74.5] ใช้แจ้งผู้ใช้เมื่อบันทึกช้า (ต้องส่งซ้ำกี่ครั้ง)
                 try {
                     const res = await fetch(url, options);
                     if (!res.ok) { lastError = new Error('HTTP ' + res.status); if (attempt < maxAttempts) { await new Promise(r => setTimeout(r, 1200 * attempt)); continue; } return res; }
@@ -3270,8 +3308,13 @@ content.innerHTML = html;
                 } else { tcOptions = `<option value="" disabled selected>-- ไม่มีข้อมูล --</option>`; }
                 const subjRoomList = getRoomList();
                 let __sysSubjectsChanged = false;
+                const __sysBefore = new Map(subjects.filter(s => s.systemType).map(s => [s.id, JSON.stringify(s)]));
                 subjRoomList.forEach(r => { if (ensureSystemSubjectsForRoom(r, adminTerm(), adminYear())) __sysSubjectsChanged = true; });
-                if (__sysSubjectsChanged) { logAction('สร้าง/ปรับคาบระบบอัตโนมัติ', 'เขตพื้นที่รับผิดชอบ / เข้าแถวเช้า (คาบ 0) / โฮมรูม (คาบ 8)'); saveData('full'); }
+                if (__sysSubjectsChanged) { // [v1.74.5] ส่งเฉพาะคาบระบบที่สร้าง/ปรับ ไม่ส่งข้อมูลทั้งชุด
+                    const __sysUp = subjects.filter(s => s.systemType && __sysBefore.get(s.id) !== JSON.stringify(s));
+                    logAction('สร้าง/ปรับคาบระบบอัตโนมัติ', 'เขตพื้นที่รับผิดชอบ / เข้าแถวเช้า (คาบ 0) / โฮมรูม (คาบ 8)');
+                    if (__sysUp.length) saveSubjectsDelta(__sysUp, [], { applyLocal: () => { const ids = new Set(__sysUp.map(x => x.id)); subjects = subjects.filter(s => !ids.has(s.id)).concat(__sysUp); } });
+                }
                 if (!window.adminSelectedSubjectRoom) window.adminSelectedSubjectRoom = 'all';
                 if (window.adminSelectedSubjectRoom !== 'all' && !subjRoomList.includes(window.adminSelectedSubjectRoom)) window.adminSelectedSubjectRoom = 'all';
                 const isAllRooms = window.adminSelectedSubjectRoom === 'all';
@@ -4011,7 +4054,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '1.74.4.271026';
+        const APP_VERSION = '1.74.5.271026';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
@@ -4522,20 +4565,22 @@ content.innerHTML = html;
             const doActualSave = async () => {
                 showToast("กำลังบันทึกข้อมูลวิชา...", "info");
                 document.body.style.pointerEvents = 'none';
-                const __prefetch1 = await refreshBeforeEdit(['subjects']); // ดึงข้อมูลล่าสุดก่อนบันทึก กันชนกับแอดมินคนอื่นที่แก้ไขพร้อมกัน
+                // [v1.74.5] ส่งเฉพาะวิชานี้ — Worker ผสานกับข้อมูลล่าสุดเอง (กันชนกับผู้ดูแลคนอื่นเหมือนเดิม)
+                let rec, gone = false;
                 if (editingSubjectId) {
                     const sub = subjects.find(s => s.id === editingSubjectId);
-                    if (sub) {
-                        sub.roomId = roomId; sub.code = code; sub.name = name; sub.teacher = teacher; sub.teacher2 = teacher2; sub.credits = credit; sub.schedules = schedules;
-                        logAction('แก้ไขข้อมูลวิชา', `${name} (${formatRoomName(roomId)})`);
-                    } else {
-                        document.body.style.pointerEvents = 'auto'; showToast("ไม่พบวิชานี้แล้ว (อาจถูกลบไปโดยผู้ใช้อื่น) กรุณาลองใหม่", "error"); renderAdminTab(); return;
-                    }
+                    if (!sub) gone = true;
+                    else rec = Object.assign({}, sub, { roomId, code, name, teacher, teacher2, credits: credit, schedules });
                 } else {
-                    subjects.push({ id: generateId(), roomId, name, code, teacher, teacher2, credits: credit, schedules, term: adminTerm(), year: adminYear(), locked: false });
-                    logAction('เพิ่มวิชาใหม่', `${name} (${formatRoomName(roomId)})`);
+                    rec = { id: generateId(), roomId, name, code, teacher, teacher2, credits: credit, schedules, term: adminTerm(), year: adminYear(), locked: false };
                 }
-                await saveData('full', null, __prefetch1); document.body.style.pointerEvents = 'auto'; showToast("บันทึกสำเร็จ"); renderAdminTab(); closeSubjectModal();
+                if (gone) { document.body.style.pointerEvents = 'auto'; showToast("ไม่พบวิชานี้แล้ว (อาจถูกลบไปโดยผู้ใช้อื่น) กรุณาลองใหม่", "error"); renderAdminTab(); return; }
+                const applyLocal = () => { const i = subjects.findIndex(s => s.id === rec.id); if (i >= 0) subjects[i] = rec; else if (editingSubjectId) return false; else subjects.push(rec); };
+                const ok = await saveSubjectsDelta([rec], [], { mustExist: !!editingSubjectId, applyLocal });
+                document.body.style.pointerEvents = 'auto';
+                if (!ok) { renderAdminTab(); return; }
+                logAction(editingSubjectId ? 'แก้ไขข้อมูลวิชา' : 'เพิ่มวิชาใหม่', `${name} (${formatRoomName(roomId)})`);
+                showToast(savedMsg_("บันทึกสำเร็จ")); renderAdminTab(); closeSubjectModal();
             };
 
             if (conflicts.length > 0) {
@@ -4548,12 +4593,14 @@ content.innerHTML = html;
         window.toggleSubjectLock = async function(id) {
             showToast("กำลังบันทึก...", "info");
             document.body.style.pointerEvents = 'none';
-            const __prefetch2 = await refreshBeforeEdit(['subjects']);
             const sub = subjects.find(s => s.id === id);
             if (!sub) { document.body.style.pointerEvents = 'auto'; showToast("ไม่พบวิชานี้แล้ว", "error"); renderAdminTab(); return; }
-            sub.locked = !sub.locked;
-            logAction(sub.locked ? 'ล็อควิชา (ป้องกันการลบ)' : 'ปลดล็อควิชา', `${sub.name} (${formatRoomName(sub.roomId)})`);
-            await saveData('full', null, __prefetch2); document.body.style.pointerEvents = 'auto'; showToast(sub.locked ? "ล็อควิชานี้แล้ว" : "ปลดล็อควิชานี้แล้ว"); renderAdminTab();
+            const rec = Object.assign({}, sub, { locked: !sub.locked }); // [v1.74.5] ส่งเฉพาะวิชานี้
+            const ok = await saveSubjectsDelta([rec], [], { mustExist: true, applyLocal: () => { const s2 = subjects.find(s => s.id === id); if (!s2) return false; s2.locked = rec.locked; } });
+            document.body.style.pointerEvents = 'auto';
+            if (!ok) { renderAdminTab(); return; }
+            logAction(rec.locked ? 'ล็อควิชา (ป้องกันการลบ)' : 'ปลดล็อควิชา', `${rec.name} (${formatRoomName(rec.roomId)})`);
+            showToast(savedMsg_(rec.locked ? "ล็อควิชานี้แล้ว" : "ปลดล็อควิชานี้แล้ว")); renderAdminTab();
         };
         window.clearRoomSubjects = function(roomId) {
             if (!roomId || roomId === 'all') { showToast("กรุณาเลือกห้องก่อน", "error"); return; }
@@ -4563,13 +4610,14 @@ content.innerHTML = html;
             showConfirm("ลบวิชาทั้งหมดในห้องนี้", `จะลบวิชาที่ไม่ได้ล็อคไว้ ${targets.length} รายการ พร้อมข้อมูลการเช็คชื่อที่เกี่ยวข้อง ของห้อง ${formatRoomName(roomId)} เทอม ${adminTerm()}/${adminYear()}${lockedCount > 0 ? ` (วิชาที่ล็อคไว้ ${lockedCount} รายการจะไม่ถูกลบ)` : ''} แน่ใจหรือไม่?`, async () => {
                 showToast("กำลังลบวิชา...", "info");
                 document.body.style.pointerEvents = 'none';
-                const __prefetch3 = await refreshBeforeEdit(['subjects']);
-                const freshTargets = getRoomSubjects(roomId, adminTerm(), adminYear()).filter(s => !s.locked);
-                const ids = new Set(freshTargets.map(s => s.id));
-                subjects = subjects.filter(s => !ids.has(s.id));
-                attendanceData = attendanceData.filter(a => !ids.has(a.subjectId));
+                const freshTargets = getRoomSubjects(roomId, adminTerm(), adminYear()).filter(s => !s.locked && !s.systemType);
+                const ids = freshTargets.map(s => s.id), idSet = new Set(ids);
+                const ok = await saveSubjectsDelta([], ids, { applyLocal: () => { subjects = subjects.filter(s => !idSet.has(s.id) || s.locked || s.systemType); } }); // [v1.74.5]
+                document.body.style.pointerEvents = 'auto';
+                if (!ok) { renderAdminTab(); return; }
+                attendanceData = attendanceData.filter(a => !idSet.has(a.subjectId));
                 logAction('ลบวิชาทั้งหมดในห้อง', `${formatRoomName(roomId)} เทอม ${adminTerm()}/${adminYear()} (${freshTargets.length} วิชา)`);
-                await saveData('full', null, __prefetch3); document.body.style.pointerEvents = 'auto'; showToast("ลบวิชาทั้งหมดในห้องเรียบร้อย"); renderAdminTab();
+                showToast(savedMsg_("ลบวิชาทั้งหมดในห้องเรียบร้อย")); renderAdminTab();
             });
         };
 
@@ -4779,12 +4827,13 @@ content.innerHTML = html;
             showConfirm("ลบวิชา", "ข้อมูลการเช็คชื่อทั้งหมดในวิชานี้จะถูกลบไปด้วย แน่ใจหรือไม่?", async () => {
                 showToast("กำลังลบวิชา...", "info");
                 document.body.style.pointerEvents = 'none';
-                const __prefetch6 = await refreshBeforeEdit(['subjects']);
                 const sub = subjects.find(s => s.id === id);
-                subjects = subjects.filter(s => s.id !== id);
+                const ok = await saveSubjectsDelta([], [id], { applyLocal: () => { subjects = subjects.filter(s => s.id !== id); } }); // [v1.74.5]
+                document.body.style.pointerEvents = 'auto';
+                if (!ok) { renderAdminTab(); return; }
                 attendanceData = attendanceData.filter(a => a.subjectId !== id);
                 logAction('ลบวิชา', sub ? sub.name : id);
-                await saveData('full', null, __prefetch6); document.body.style.pointerEvents = 'auto'; renderAdminTab();
+                showToast(savedMsg_("ลบวิชาเรียบร้อย")); renderAdminTab();
             });
         }
         function deleteStudent(id) {
