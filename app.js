@@ -474,7 +474,21 @@
         }
 
 
+        // [v1.74.3] ห้องที่หน้านี้แสดงอยู่ (ใช้ตัดสินว่าห้องไหนต้องอัปเดตทันที) — ล้างทุกครั้งที่เปลี่ยนหน้า แล้วเติมจากหน้าใหม่
+        function resetViewRooms(state) {
+            const set = window.__viewRoomKeys = new Set(), list = [];
+            try {
+                const st = state || {}, add = (t, y, r) => { if (r) { set.add(roomAttKey_(t, y, r)); list.push({ t, y, r }); } };
+                if (st.subjectId) { const sb = subjects.find(x => x.id === st.subjectId); if (sb) add(sb.term, sb.year, sb.roomId); }
+                if (st.roomId) add(adminTerm(), adminYear(), st.roomId);
+                if (st.studentId) { const sd = students.find(x => x.id === st.studentId); if (sd) add(adminTerm(), adminYear(), sd.roomId); }
+            } catch (e) { /* ข้าม */ }
+            // ห้องที่เคยโหลดไว้แต่มีการเปลี่ยนตอนไม่ได้แสดงอยู่ (ถูกทำเครื่องหมายว่าเก่า) — โหลดใหม่แล้ววาดหน้าซ้ำ
+            const stale = list.filter(x => (window.__loadedRoomsList || []).some(l => roomAttKey_(l.term, l.year, l.roomId) === roomAttKey_(x.t, x.y, x.r)) && !(roomAttKey_(x.t, x.y, x.r) in (window.__loadedRoomLastModified || {})));
+            if (stale.length) setTimeout(() => { Promise.all(stale.map(x => ensureAttendanceLoadedForRoom(x.t, x.y, x.r))).then(() => { const cur = history.state || {}; if (JSON.stringify(cur) === JSON.stringify(state)) { try { safeRenderState(cur); } catch (e) { /* ข้าม */ } } }); }, 0);
+        }
         function navigate(view, params = {}, forceReplace = false) {
+            resetViewRooms({ view, ...params });
             if (view === 'attendance') window.__attReturnState = history.state; // จำว่าเข้าหน้าเช็คชื่อมาจากหน้าไหน
             closeAllModals();
             window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -513,6 +527,7 @@
         window.addEventListener('popstate', (event) => {
             closeAllModals();
             const state = event.state || { view: 'dashboard' };
+            resetViewRooms(state); // [v1.74.3]
             safeRenderState(state);
         });
 
@@ -559,25 +574,53 @@
             if (pollingInterval) clearInterval(pollingInterval);
             // [v1.73] ประหยัดโควต้า: หน้าเว็บถูกย่อ/อยู่แท็บอื่น = ไม่ตรวจ (กลับมาที่หน้า = ตรวจทันที 1 ครั้ง)
             //        ข้อมูลเช็คชื่อของห้องที่เปิดอยู่ตรวจทุก 20 วินาทีเหมือนเดิม · ข้อมูลหลัก (ตั้งค่า/ครู/วิชา/นักเรียน) ตรวจทุก 60 วินาที
-            let tick = 0;
-            // ห้องที่เปิดดูภายใน 5 นาที = ตรวจทุก 20 วินาที · ห้องอื่นที่เคยโหลดไว้ = ทุก 60 วินาที
-            const roomsTick = (all) => { const now = Date.now(), use = window.__roomLastUse || {};
-                (window.__loadedRoomsList || []).forEach(r => { if (all || now - (use[roomAttKey_(r.term, r.year, r.roomId)] || 0) < 300000) ensureAttendanceLoadedForRoom(r.term, r.year, r.roomId, true); }); };
-            window.__syncNow = async (withMain) => { roomsTick(true); if (withMain) await mainTick(); };
+            // [v1.74.3] ประหยัดโควต้า: ถาม 1 คำขอ (?action=sync_meta) ได้ครบทั้งข้อมูลหลักและทุกห้อง แล้วโหลดเฉพาะส่วนที่เปลี่ยน
+            //   หน้าที่แสดงข้อมูลเช็คชื่อ = ทุก 30 วินาที · หน้าอื่น (เช่น หน้าแรก) = ทุก 2 นาที
+            //   ไม่มีการขยับเมาส์/แตะจอ/พิมพ์เกิน 5 นาที หรือย่อจอ/สลับแท็บ = หยุดถาม · กลับมาใช้ = ดึงทันที
+            //   ห้องที่ไม่ได้แสดงอยู่ไม่โหลดซ้ำ แค่จำว่าเปลี่ยน (เปิดห้องนั้นครั้งหน้าจะโหลดใหม่)
+            const SYNC_VIEW_MS = 30000, SYNC_IDLE_MS = 120000, IDLE_STOP_MS = 5 * 60000;
+            window.__syncSeen = window.__syncSeen || { main: undefined, all: undefined, rooms: {} };
+            window.__viewRoomKeys = window.__viewRoomKeys || new Set();
+            window.__lastAct = Date.now();
+            let lastSync = Date.now(), syncBusy = false;
+            const roomsTick = (all) => { (window.__loadedRoomsList || []).forEach(r => { const k = roomAttKey_(r.term, r.year, r.roomId); if (all || window.__viewRoomKeys.has(k)) ensureAttendanceLoadedForRoom(r.term, r.year, r.roomId, true); }); };
+            async function syncTick() {
+                if (syncBusy) return; syncBusy = true; lastSync = Date.now();
+                try {
+                    let j = null;
+                    try { const r = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=sync_meta`); j = await r.json(); } catch (e) { j = null; }
+                    if (!j || !j.syncMeta) { roomsTick(false); await mainTick(); return; } // Worker รุ่นเก่า — วิธีเดิม (เฉพาะห้องที่แสดงอยู่)
+                    const seen = window.__syncSeen;
+                    if (seen.main === undefined) seen.main = j.main;
+                    else if (j.main !== seen.main) { await mainTick(); seen.main = j.main; }
+                    const allChanged = seen.all !== undefined && j.all !== seen.all; seen.all = j.all;
+                    for (const r of (window.__loadedRoomsList || []).slice()) {
+                        const k = roomAttKey_(r.term, r.year, r.roomId), sk = `${r.term}|${r.year}|${r.roomId}`;
+                        const v = j.rooms[sk] || 0;
+                        if (!allChanged && v === (seen.rooms[k] || 0)) continue;
+                        if (window.__viewRoomKeys.has(k)) await ensureAttendanceLoadedForRoom(r.term, r.year, r.roomId, true, true);
+                        else { delete window.__loadedRoomLastModified[k]; delete seen.rooms[k]; } // ไม่ได้แสดงอยู่ = โหลดใหม่ตอนเปิดครั้งหน้า
+                    }
+                } finally { syncBusy = false; }
+            }
+            window.__syncNow = async () => { await syncTick(); };
             if (!window.__visSyncBound) {
                 window.__visSyncBound = true;
-                document.addEventListener('visibilitychange', () => { if (!document.hidden && isDbInitialized && window.__syncHidden) { window.__syncHidden = false; window.__syncNow(true); } });
+                const wake = () => { const was = window.__syncIdle; window.__lastAct = Date.now(); if (was && isDbInitialized && !document.hidden) { window.__syncIdle = false; window.__syncNow(); } };
+                ['click', 'keydown', 'touchstart', 'mousemove', 'scroll', 'wheel'].forEach(ev => window.addEventListener(ev, wake, { passive: true }));
+                document.addEventListener('visibilitychange', () => { if (!document.hidden && isDbInitialized && window.__syncHidden) { window.__syncHidden = false; window.__lastAct = Date.now(); window.__syncIdle = false; window.__syncNow(); } });
             }
             pollingInterval = setInterval(() => {
                 if (!isDbInitialized || GOOGLE_APP_SCRIPT_URL === "YOUR_WEB_APP_URL_HERE") return;
                 if (document.hidden) { window.__syncHidden = true; return; }
-                tick++;
-                roomsTick(tick % 3 === 0);
-                if (tick % 3 === 0) mainTick();
-            }, 20000);
+                if (Date.now() - window.__lastAct > IDLE_STOP_MS) { window.__syncIdle = true; return; }
+                const every = window.__viewRoomKeys.size ? SYNC_VIEW_MS : SYNC_IDLE_MS;
+                if (Date.now() - lastSync >= every) syncTick();
+            }, 10000);
             async function mainTick() {
                 try {
                     const response = await fetch(GOOGLE_APP_SCRIPT_URL); const data = await response.json();
+                    if (data && data.syncMain !== undefined && window.__syncSeen) { window.__syncSeen.main = data.syncMain; window.__syncSeen.all = data.syncAll; } // [v1.74.3]
                     if (data) {
                         // [v1.73] ห้องที่เปิดอยู่ตรวจแยกใน roomsTick แล้ว
                         followUps = data.followUps || [];
@@ -665,6 +708,7 @@
             }
             try {
                 const data = await fetchInitialDataWithRetry();
+                if (data && data.syncMain !== undefined) window.__syncSeen = { main: data.syncMain, all: data.syncAll, rooms: {} }; // [v1.74.3]
                 if (Array.isArray(data.hubHolidays)) hubHolidays = data.hubHolidays; // [v1.72.1]
                 if (Array.isArray(data.hubPeriods)) hubPeriods = data.hubPeriods; // [v1.74]
                 if (data.settings && Object.keys(data.settings).length > 0) {
@@ -2766,13 +2810,13 @@
             if (shown.length === 1) { const c = shown[0]; showRealtimeChip(`${c.checkedBy ? c.checkedBy + ' ' : ''}เช็คชื่อคาบ ${periodLabel(c.period)} แล้ว`); }
             else if (shown.length > 1) showRealtimeChip(`มีการเช็คชื่อใหม่ ${shown.length} คาบ`);
         }
-        async function ensureAttendanceLoadedForRoom(term, year, roomId, forceCheck = false) {
+        async function ensureAttendanceLoadedForRoom(term, year, roomId, forceCheck = false, skipMeta = false) {
             const key = roomAttKey_(term, year, roomId);
-            if (!forceCheck) (window.__roomLastUse = window.__roomLastUse || {})[key] = Date.now(); // [v1.73] ห้องที่เพิ่งเปิดดู = ตรวจถี่
+            if (!forceCheck) { (window.__roomLastUse = window.__roomLastUse || {})[key] = Date.now(); (window.__viewRoomKeys = window.__viewRoomKeys || new Set()).add(key); } // [v1.74.3] ห้องที่แสดงอยู่ในหน้านี้
             const alreadyLoaded = key in window.__loadedRoomLastModified;
             if (alreadyLoaded && !forceCheck) return; // เคยโหลดแล้ว และไม่ได้บังคับให้เช็คซ้ำ - ข้ามเลย
             try {
-                if (alreadyLoaded) {
+                if (alreadyLoaded && !skipMeta) {
                     // เคยโหลดแล้ว แค่เช็คว่ามีการแก้ไขใหม่ไหม (payload เล็กมาก) ก่อนตัดสินใจโหลดเต็ม
                     const metaRes = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=get_attendance_meta&term=${encodeURIComponent(term)}&year=${encodeURIComponent(year)}&room=${encodeURIComponent(roomId)}`);
                     const meta = await metaRes.json();
@@ -2786,7 +2830,8 @@
                     const __before = {}; attendanceData.forEach(a => { if (roomSubjectIds.has(a.subjectId)) __before[a.subjectId + '|' + a.period + '|' + a.date] = a.checkedAt || a.createdAt || ''; });
                     attendanceData = attendanceData.filter(a => !roomSubjectIds.has(a.subjectId));
                     attendanceData.push(...data.attendanceData);
-                    if (!alreadyLoaded) window.__loadedRoomsList.push({ term, year, roomId });
+                    if (!window.__loadedRoomsList.some(x => roomAttKey_(x.term, x.year, x.roomId) === key)) window.__loadedRoomsList.push({ term, year, roomId });
+                    if (window.__syncSeen && data.syncV !== undefined) window.__syncSeen.rooms[key] = data.syncV; // [v1.74.3]
                     window.__loadedRoomLastModified[key] = data.lastModified || Date.now();
                     if (alreadyLoaded) {
                         const changes = data.attendanceData.filter(a => { const k = a.subjectId + '|' + a.period + '|' + a.date; return !(k in __before) || __before[k] !== (a.checkedAt || a.createdAt || ''); });
@@ -2798,6 +2843,7 @@
         // ใช้เฉพาะ 2 แท็บที่ต้องดูภาพรวม "ทุกห้อง" ของเทอมนั้นจริงๆ (ติดตามครู, สถิติในแท็บสำรองข้อมูล) - โหลดทีละห้องแต่ยิงพร้อมกันได้ (Promise.all) พร้อมรายงานความคืบหน้าจริงผ่าน onProgress
         async function ensureAttendanceLoadedForAllRoomsInTerm(term, year, onProgress = null) {
             const roomIds = [...new Set(subjects.filter(s => String(s.term) === String(term) && String(s.year) === String(year)).map(s => s.roomId))];
+            roomIds.forEach(r => (window.__viewRoomKeys = window.__viewRoomKeys || new Set()).add(roomAttKey_(term, year, r))); // [v1.74.3] หน้าภาพรวมทุกห้อง
             let doneCount = 0;
             await Promise.all(roomIds.map(r => ensureAttendanceLoadedForRoom(term, year, r).then(() => { doneCount++; if (onProgress) onProgress(doneCount, roomIds.length); })));
         }
@@ -3965,7 +4011,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '1.74.1.271026';
+        const APP_VERSION = '1.74.3.271026';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
