@@ -14,6 +14,7 @@
         let settings = { title: "ระบบเช็คชื่อนักเรียนอัจฉริยะ", faviconDataUrl: "", logoDataUrl: "", announcement: "", announcementStart: "", announcementEnd: "", announcements: [], term: "1", year: "2567", academicYears: [{ year: "2567", status: "active" }], roomCounts: { m1: 4, m2: 4, m3: 4, m4: 3, m5: 3, m6: 3 }, advisors: {}, staffs: {}, thresholds: { late: 4, absent: 4 }, storageLimitChars: 8000000, holidays: [], serverOnline: true, termLocks: {}, termCount: 2, users: [{ id: 'super_admin_root', username: 'BNKAdmin', password: '042499078', name: 'ผู้ดูแลระบบหลัก', role: 'super_admin', createdAt: new Date().toISOString() }] };
         let teachers = [], subjects = [], students = [], attendanceData = [], followUps = [], logs = [];
         let currentUser = null;
+        let hubPeriods = []; // [v1.74] กิจกรรม/หยุดเรียนรายคาบจาก AcademicHub { date, mode: noclass|activity, title, grades, rooms, periods }
         let hubHolidays = []; // [v1.72.1] วันหยุดเรียนจากปฏิทิน AcademicHub (Worker เก็บไว้ให้ · แก้ที่ AcademicHub เท่านั้น)
         // ===== [v1.71.5] บัตรผ่านผู้ดูแล (token) — Worker ตรวจสิทธิ์งานของผู้ดูแลทุกครั้ง ส่วนครูเช็คชื่อ/บันทึกโฮมรูมไม่ต้องเข้าสู่ระบบเหมือนเดิม =====
         // แนบบัตรผ่านไปกับทุกคำขอที่ส่งไป Worker อัตโนมัติ (GET = ?token= · POST = __token ใน body) — ไม่ต้องแก้ทุกจุดที่เรียก fetch
@@ -609,6 +610,7 @@
                                     if (Array.isArray(data.hubHolidays)) hubHolidays = data.hubHolidays;
                                     updateHolidayBar();
                                 }
+                                if (Array.isArray(data.hubPeriods)) hubPeriods = data.hubPeriods; // [v1.74]
                                 if (data.settings.serverOnline !== undefined && data.settings.serverOnline !== settings.serverOnline) {
                                     settings.serverOnline = data.settings.serverOnline;
                                     applyServerStatusBadge();
@@ -664,6 +666,7 @@
             try {
                 const data = await fetchInitialDataWithRetry();
                 if (Array.isArray(data.hubHolidays)) hubHolidays = data.hubHolidays; // [v1.72.1]
+                if (Array.isArray(data.hubPeriods)) hubPeriods = data.hubPeriods; // [v1.74]
                 if (data.settings && Object.keys(data.settings).length > 0) {
                     settings = data.settings;
                     settings.thresholds = settings.thresholds || { late: 4, absent: 4 };
@@ -830,6 +833,7 @@
                     if (!opts.silent) showConfirm("บันทึกข้อมูลไม่สำเร็จ", `เซิร์ฟเวอร์ตอบกลับว่า: ${resultJson.message || 'เกิดข้อผิดพลาด'}\n\nกด "บันทึกอีกครั้ง" เพื่อลองส่งข้อมูลชุดนี้ใหม่ (ถ้ายังไม่สำเร็จอีก แนะนำให้ลองรีเฟรชหน้าเว็บ)`, () => saveData(action, payload, prefetchedLatest), "บันทึกอีกครั้ง");
                     return false;
                 }
+                window.__lastSaveResult = resultJson; // [v1.74] ผลการล้างรูป (photosFailed) ของการล้างข้อมูลรายวิชา
                 return true;
             } catch (e) {
                 console.error("Save Error", e);
@@ -939,7 +943,7 @@
                             if (data.settings.faviconDataUrl !== undefined) { settings.faviconDataUrl = data.settings.faviconDataUrl; applyFavicon(); }
                             if (data.settings.logoDataUrl !== undefined) { settings.logoDataUrl = data.settings.logoDataUrl; applyHeaderLogo(); }
                             settings.announcements = data.settings.announcements || []; updateAnnouncementBar();
-                            settings.holidays = data.settings.holidays || []; if (Array.isArray(data.hubHolidays)) hubHolidays = data.hubHolidays; updateHolidayBar();
+                            settings.holidays = data.settings.holidays || []; if (Array.isArray(data.hubHolidays)) hubHolidays = data.hubHolidays; if (Array.isArray(data.hubPeriods)) hubPeriods = data.hubPeriods; updateHolidayBar();
                             settings.externalLinks = Array.isArray(data.settings.externalLinks) ? data.settings.externalLinks : [];
                             if (data.settings.serverOnline !== undefined) { settings.serverOnline = data.settings.serverOnline; applyServerStatusBadge(); }
                         }
@@ -1596,6 +1600,7 @@
             let html = `<div class="mb-4 sm:mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4 sm:gap-6 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="relative z-10 w-full"><div class="flex flex-wrap items-center gap-2 mb-2 sm:mb-3"><span class="bg-indigo-100 text-indigo-700 font-bold px-2 py-1 rounded text-[10px] sm:text-sm">ห้อง ${formatRoomName(subject.roomId)}</span></div><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2"><i class="fas fa-clipboard-check text-indigo-500"></i> ${subject.name}</h2><p class="text-slate-500 mt-1 text-[11px] sm:text-base font-medium flex items-center gap-1.5"><i class="fas fa-chalkboard-teacher"></i> ครู: <span class="text-slate-700">${subject.teacher || '-'}${subject.teacher2 ? ' / ' + subject.teacher2 : ''}</span></p>${scheduleBadgesHtml}</div><div class="flex flex-col gap-3 relative z-10 w-full md:w-auto mt-2 md:mt-0"><div class="flex flex-row gap-2 w-full"><input type="date" id="attDate" value="${today}" onchange="window.navigate('attendance', {subjectId: '${subjectId}', fromTeacherDash: ${fromTeacherDash}, date: this.value}, true)" class="flex-1 bg-slate-50 border border-slate-200 text-slate-800 px-3 py-2 sm:py-3 rounded-xl shadow-inner focus:ring-2 focus:ring-indigo-500 text-base sm:text-sm font-bold outline-none"><select id="attPeriod" class="w-24 sm:w-32 bg-slate-50 border border-slate-200 text-slate-800 px-2 py-2 sm:py-3 rounded-xl shadow-inner focus:ring-2 focus:ring-indigo-500 text-base sm:text-sm font-bold outline-none"></select></div><label class="flex items-center gap-2 cursor-pointer bg-amber-50 p-2 sm:p-3 rounded-xl border border-amber-200 w-full"><input type="checkbox" id="isSubstitute" onchange="window.subOnToggle(this.checked)" class="w-4 h-4 text-amber-600 rounded"><span class="font-bold text-amber-800 text-[10px] sm:text-sm">มีการสอนแทน (ระบุชื่อผู้เช็คแทน)</span></label><select id="substituteTeacher" class="hidden w-full bg-white border border-amber-300 text-slate-800 px-3 py-2 rounded-xl shadow-inner focus:ring-2 focus:ring-amber-500 text-base sm:text-sm font-bold outline-none">${tcOptions}</select>${recFeatureOn('substitute') ? subPhotoSectionHtml() : ''}<button onclick="${backAction}" class="w-full bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2 sm:py-3 rounded-xl shadow-sm transition-all font-bold text-sm">ย้อนกลับ</button></div></div>`;
             
             html += `<div id="attHolidayNote" class="hidden mb-4 sm:mb-6 bg-rose-50 border-2 border-rose-300 rounded-2xl p-3 sm:p-4 flex items-center gap-3"><div class="w-9 h-9 sm:w-11 sm:h-11 bg-rose-500 text-white rounded-full flex items-center justify-center text-sm sm:text-lg shrink-0"><i class="fas fa-calendar-times"></i></div><span id="attHolidayNoteText" class="text-rose-700 font-bold text-xs sm:text-sm"></span></div>`;
+            html += `<div id="attActNote" class="hidden mb-4 sm:mb-6 rounded-2xl p-3 sm:p-4 flex items-center gap-3 border-2"></div>`; // [v1.74] กิจกรรม/หยุดเรียนรายคาบจาก AcademicHub
             html += `<div id="attNoPeriodBanner" class="hidden mb-4 sm:mb-6 bg-orange-50 border-2 border-orange-400 rounded-2xl p-4 sm:p-5 flex items-center gap-3"><div class="w-10 h-10 sm:w-12 sm:h-12 bg-orange-500 text-white rounded-full flex items-center justify-center text-lg sm:text-xl shrink-0"><i class="fas fa-exclamation-triangle"></i></div><div><p class="text-orange-800 font-extrabold text-sm sm:text-lg">ไม่มีคาบสอนในวันที่นี้</p><p class="text-orange-600 font-medium text-[10px] sm:text-sm">วิชานี้ไม่มีตารางสอนตรงกับวันที่เลือก จึงไม่สามารถเช็คชื่อหรือบันทึกข้อมูลได้ กรุณาเลือกวันที่อื่น</p></div></div>`;
             if (getTermStatus(subject.term, subject.year) !== 'open') {
                 const st = getTermStatus(subject.term, subject.year);
@@ -1667,7 +1672,7 @@
                     selectEl.disabled = true; saveBtn.disabled = true;
                     saveBtn.innerHTML = '<i class="fas fa-times-circle text-xl"></i> ไม่มีคาบสอนในวันที่เลือก';
                     saveBtn.classList.replace('bg-indigo-600', 'bg-slate-400'); saveBtn.classList.replace('hover:bg-indigo-700', 'hover:bg-slate-500');
-                    if (noPeriodBanner) noPeriodBanner.classList.remove('hidden');
+                    if (noPeriodBanner) noPeriodBanner.classList.remove('hidden'); applyActivityPeriodUi(null);
                     document.querySelectorAll('input[type="radio"]').forEach(r => r.checked = false);
                     document.querySelectorAll('input[name^="att_"]').forEach(r => { r.disabled = true; }); // ===== [ใหม่] ปิดปุ่มเช็คสถานะนักเรียนทุกคนด้วย ไม่ใช่แค่ปุ่มบันทึกสุดท้าย เมื่อไม่มีคาบสอนวันนี้ =====
                 }
@@ -1702,16 +1707,42 @@
             const d = document.querySelector(`input[name="att_${stId}"][value="${val}"]`);
             if(m && !m.disabled) m.checked = true; if(d && !d.disabled) d.checked = true;
         };
+        // ===== [v1.74] กิจกรรม/หยุดเรียนรายคาบ (ตั้งในปฏิทินกิจกรรมของ AcademicHub) — หยุดเรียนมาก่อนกิจกรรม =====
+        function hubPeriodFor(roomId, date, period) {
+            const label = periodLabel(period), g = (/^m(\d)_/.exec(roomId || '') || [])[1] || '';
+            const hit = (hubPeriods || []).filter(e => e.date === date && (e.periods === 'all' || (e.periods || []).includes(String(label))) && ((!(e.grades || []).length && !(e.rooms || []).length) || (e.grades || []).includes(g) || (e.rooms || []).includes(roomId)));
+            return hit.find(e => e.mode === 'noclass') || hit[0] || null;
+        }
+        function applyActivityPeriodUi(entry) {
+            const box = document.getElementById('attActNote');
+            const isAct = !!(entry && entry.mode === 'activity');
+            // คาบกิจกรรม: ซ่อนปุ่ม "มา" ใช้ "ร่วมกิจกรรม" แทน (นับเป็นมาเรียนเหมือนกันทุกรายงาน)
+            document.querySelectorAll('input[type="radio"][value="มา"]').forEach(r => { const l = r.closest('label'); if (l) l.style.display = isAct ? 'none' : ''; });
+            if (!box) return;
+            if (!entry) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+            const t = escapeHtmlText(entry.title || '');
+            box.className = `mb-4 sm:mb-6 rounded-2xl p-3 sm:p-4 flex flex-wrap items-center gap-3 border-2 ${isAct ? 'bg-cyan-50 border-cyan-300' : 'bg-orange-50 border-orange-300'}`;
+            box.innerHTML = isAct
+                ? `<div class="w-9 h-9 sm:w-11 sm:h-11 bg-cyan-500 text-white rounded-full flex items-center justify-center text-sm sm:text-lg shrink-0"><i class="fas fa-running"></i></div><div class="flex-1 min-w-[200px]"><p class="text-cyan-800 font-extrabold text-xs sm:text-sm">คาบนี้มีกิจกรรม: ${t}</p><p class="text-cyan-700 font-semibold text-[11px] sm:text-xs">เช็คชื่อหรือไม่ก็ได้ (ไม่บังคับ) · ถ้าเช็ค ใช้ปุ่ม "ร่วมกิจกรรม" แทน "มา"</p></div><button type="button" onclick="window.markAllActivity()" class="bg-cyan-600 hover:bg-cyan-700 text-white px-3 py-2 rounded-lg font-bold text-xs sm:text-sm shrink-0"><i class="fas fa-users"></i> ทุกคนร่วมกิจกรรม</button>`
+                : `<div class="w-9 h-9 sm:w-11 sm:h-11 bg-orange-500 text-white rounded-full flex items-center justify-center text-sm sm:text-lg shrink-0"><i class="fas fa-school-circle-xmark"></i></div><div class="flex-1 min-w-[200px]"><p class="text-orange-800 font-extrabold text-xs sm:text-sm">คาบนี้${entry.holiday ? 'เป็นวันหยุด' : 'หยุดเรียน'}: ${t}</p><p class="text-orange-700 font-semibold text-[11px] sm:text-xs">ไม่ต้องเช็คชื่อ (ถ้ามีการเรียนการสอนก็เช็คได้ตามปกติ)</p></div>`;
+        }
+        function escapeHtmlText(v) { return String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+        window.markAllActivity = function() {
+            document.querySelectorAll('input[type="radio"][value="ร่วมกิจกรรม"]').forEach(r => { if (!r.disabled) r.checked = true; });
+        };
         function loadExistingAttendance(subjectId, date, period) {
             if (!period) return;
             document.querySelectorAll('input[type="radio"]').forEach(r => r.checked = false);
+            const subForAct = subjects.find(s => s.id === subjectId);
+            const actEntry = subForAct ? hubPeriodFor(subForAct.roomId, date, period) : null; applyActivityPeriodUi(actEntry); // [v1.74]
+            const isActPeriod = !!(actEntry && actEntry.mode === 'activity');
             document.getElementById('isSubstitute').checked = false; document.getElementById('substituteTeacher').classList.add('hidden'); document.getElementById('substituteTeacher').value = "";
             let record = attendanceData.find(a => a.subjectId === subjectId && a.date === date && String(a.period) === String(period));
             subResetState(record); // [v1.71.6] รูปการสอนแทนของคาบนี้ (ถ้ามี)
             if (record) {
                 if(record.substituteTeacher) { document.getElementById('isSubstitute').checked = true;
                     document.getElementById('substituteTeacher').classList.remove('hidden'); document.getElementById('substituteTeacher').value = record.substituteTeacher; window.subOnToggle(true); }
-                Object.keys(record.records).forEach(stId => { syncRadio(stId, record.records[stId]); });
+                Object.keys(record.records).forEach(stId => { const v0 = record.records[stId]; syncRadio(stId, isActPeriod && v0 === 'มา' ? 'ร่วมกิจกรรม' : v0); });
                 showToast(`โหลดข้อมูลเก่าแล้ว`, "success");
             } else {
                 let copiedFromPrev = false;
@@ -1723,13 +1754,13 @@
                     if (hasPrevSchedule) {
                         const prevRecord = attendanceData.find(a => a.subjectId === subjectId && a.date === date && String(a.period) === String(prevPeriod));
                         if (prevRecord) {
-                            Object.keys(prevRecord.records).forEach(stId => { syncRadio(stId, prevRecord.records[stId]); });
+                            Object.keys(prevRecord.records).forEach(stId => { const v1 = prevRecord.records[stId]; syncRadio(stId, isActPeriod && v1 === 'มา' ? 'ร่วมกิจกรรม' : v1); });
                             showToast(`คัดลอกข้อมูลจากคาบ ${periodLabel(prevPeriod)} ของวิชานี้ให้แล้ว - กรุณาตรวจสอบก่อนกดบันทึก`, "info");
                             copiedFromPrev = true;
                         }
                     }
                 }
-                if (!copiedFromPrev) { document.querySelectorAll('input[type="radio"][value="มา"]').forEach(r => { if(!r.disabled) r.checked = true; }); }
+                if (!copiedFromPrev && !(actEntry && actEntry.mode === 'noclass')) { document.querySelectorAll(`input[type="radio"][value="${isActPeriod ? 'ร่วมกิจกรรม' : 'มา'}"]`).forEach(r => { if(!r.disabled) r.checked = true; }); } // [v1.74] คาบกิจกรรม = ร่วมกิจกรรม · คาบหยุดเรียน = ไม่ติ๊กให้
             }
         }
 
@@ -1779,12 +1810,15 @@
         function hrFolderPath(term, year, roomId, kind) { return `${hrTermFolderPath(term, year, kind)}/ห้อง ${formatRoomName(roomId).replace(/\//g, '-')}`; }
         // ย้ายโฟลเดอร์รูปของเทอมนั้นลงถังขยะของ Drive (กู้คืนได้ภายใน 30 วัน) - ส่งตรงก่อน ไม่ผ่านค่อยใช้ Relay
         async function hrTrashTermFolders(term, year) {
+            let failed = 0; // [v1.74] นับโฟลเดอร์ที่ย้ายไม่สำเร็จ แจ้งผู้ใช้ (เดิมเงียบ)
             for (const kind of ['homeroom', 'zone', 'substitute']) {
                 const path = hrTermFolderPath(term, year, kind);
-                const r = HOMEROOM_DRIVE_URL ? await hrFetchJson(HOMEROOM_DRIVE_URL, { action: 'trashPath', token: HOMEROOM_DRIVE_TOKEN, path }, 30000) : null;
-                if (!r || r.status !== 'success') await hrFetchJson(GOOGLE_APP_SCRIPT_URL, { __mode: 'relay_folder_trash', path }, 30000);
+                let r = HOMEROOM_DRIVE_URL ? await hrFetchJson(HOMEROOM_DRIVE_URL, { action: 'trashPath', token: HOMEROOM_DRIVE_TOKEN, path }, 30000) : null;
+                if (!r || r.status !== 'success') r = await hrFetchJson(GOOGLE_APP_SCRIPT_URL, { __mode: 'relay_folder_trash', path }, 30000);
+                if (!r || r.status !== 'success') failed++;
             }
             window.__hrLogsCache = {};
+            return failed;
         }
         // ส่งรูป 1 รูป: ส่งตรงก่อน ไม่ผ่านค่อยใช้ Relay คืนค่า { id, route } หรือ null
         async function hrUploadPhoto(dataUrl, fileName, folderPath, onProgress) {
@@ -1996,9 +2030,9 @@
             try { const res = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=hub_holidays_sync`); j = await res.json(); } catch (e) { j = null; }
             window.closeProgressModal();
             if (!j || j.status !== 'success') { showConfirm('ดึงวันหยุดไม่สำเร็จ', (j && j.message) || 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองใหม่', () => {}); return; }
-            hubHolidays = j.holidays || []; updateHolidayBar();
+            hubHolidays = j.holidays || []; if (Array.isArray(j.periods)) hubPeriods = j.periods; updateHolidayBar();
             logAction('ดึงวันหยุดเรียนจาก AcademicHub', `${hubHolidays.length} วัน`, 'settings');
-            showToast(`ดึงแล้ว: วันหยุดเรียนจาก AcademicHub ${hubHolidays.length} วัน`, 'success'); renderAdminTab();
+            showToast(`ดึงแล้ว: วันหยุดเรียนจาก AcademicHub ${hubHolidays.length} วัน · กิจกรรม/หยุดเรียนรายคาบ ${hubPeriods.length} รายการ`, 'success'); renderAdminTab();
         };
         window.openHubTeacherSync = async function() {
             if (!isAdmin) return;
@@ -2414,14 +2448,18 @@
             if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่ล้างข้อมูลเช็คชื่อได้", "error"); return; }
             const subChk = subjects.find(s => s.id === subjectId);
             if (subChk && guardAttendanceLock(subChk.term, subChk.year)) return;
-            showConfirm("ยืนยันการล้างข้อมูล", "ข้อมูลการเช็คชื่อทั้งหมดในวิชานี้จะถูกลบอย่างถาวรและไม่สามารถกู้คืนได้ คุณแน่ใจหรือไม่?", async () => {
+            showConfirm("ยืนยันการล้างข้อมูล", "ข้อมูลการเช็คชื่อทั้งหมดในวิชานี้จะถูกลบอย่างถาวรและไม่สามารถกู้คืนได้" + (subChk && (subChk.systemType === 'homeroom' || subChk.systemType === 'zone') ? " รวมถึงบันทึกกิจกรรมของคาบนี้" : "") + " ส่วนรูปที่แนบไว้ (กิจกรรม/สอนแทน) จะถูกย้ายลงถังขยะของ Google Drive (กู้คืนได้ภายใน 30 วัน) คุณแน่ใจหรือไม่?", async () => {
                 showToast("กำลังล้างข้อมูล... (อัปเดตแบบเรียลไทม์)", "info"); 
                 document.body.style.pointerEvents = 'none';
                 const sub = subjects.find(s => s.id === subjectId);
                 logAction('ล้างข้อมูลเช็คชื่อของวิชา', sub ? sub.name : subjectId);
+                window.__lastSaveResult = null;
                 await saveData('reset_subject', subjectId); 
                 document.body.style.pointerEvents = 'auto'; 
-                showToast("ล้างข้อมูลวิชาเรียบร้อยแล้ว", "success"); 
+                window.__hrLogsCache = {};
+                const phr = window.__lastSaveResult || {};
+                if (phr.photosFailed) showConfirm("ล้างข้อมูลแล้ว แต่ย้ายรูปไม่สำเร็จ", `ล้างข้อมูลเช็คชื่อเรียบร้อยแล้ว แต่ย้ายรูปลงถังขยะไม่สำเร็จ ${phr.photosFailed} รายการ — ตรวจสอบว่า Apps Script รูปโฮมรูม (HomeroomPhotoRelay) ยังใช้งานได้ หรือลบรูปในโฟลเดอร์ Google Drive เอง`, () => {}, 'ตกลง', true);
+                else showToast("ล้างข้อมูลวิชาเรียบร้อยแล้ว", "success"); 
                 openSubjectSummary(subjectId);
             });
         };
@@ -2453,7 +2491,7 @@
         };
         window.confirmResetSubjectDate = function(subjectId, dateStr, thaiDateLabel) {
             const m = document.getElementById('resetByDateModal'); if (m) m.remove();
-            showConfirm("ยืนยันการล้างข้อมูล", `ต้องการล้างข้อมูลเช็คชื่อของวันที่ ${thaiDateLabel} ทั้งหมดใช่หรือไม่? การลบนี้ไม่สามารถกู้คืนได้ (วันอื่นจะไม่ถูกกระทบ)`, async () => {
+            showConfirm("ยืนยันการล้างข้อมูล", `ต้องการล้างข้อมูลเช็คชื่อของวันที่ ${thaiDateLabel} ทั้งหมดใช่หรือไม่? การลบนี้ไม่สามารถกู้คืนได้ (วันอื่นจะไม่ถูกกระทบ) — บันทึกกิจกรรมของวันนั้นจะถูกลบด้วย และรูปที่แนบไว้จะถูกย้ายลงถังขยะของ Google Drive (กู้คืนได้ภายใน 30 วัน)`, async () => {
                 showLoadingSpinnerModal("กำลังล้างข้อมูล", "กรุณารอสักครู่...");
                 const sub = subjects.find(s => s.id === subjectId);
                 try {
@@ -2463,7 +2501,9 @@
                     if (data && data.status === 'success') {
                         attendanceData = attendanceData.filter(a => !(a.subjectId === subjectId && a.date === dateStr));
                         logAction('ล้างข้อมูลเช็คชื่อเฉพาะวัน', `${sub ? sub.name : subjectId} - วันที่ ${dateStr}`);
-                        showToast("ล้างข้อมูลวันที่เลือกเรียบร้อยแล้ว", "success");
+                        window.__hrLogsCache = {};
+                        if (data.photosFailed) showToast(`ล้างข้อมูลแล้ว แต่ย้ายรูปลงถังขยะไม่สำเร็จ ${data.photosFailed} รายการ`, "error");
+                        else showToast("ล้างข้อมูลวันที่เลือกเรียบร้อยแล้ว", "success");
                         openSubjectSummary(subjectId);
                     } else {
                         showToast((data && data.message) || "ล้างข้อมูลไม่สำเร็จ", "error");
@@ -3925,7 +3965,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '1.73.1.271026';
+        const APP_VERSION = '1.74.0.271026';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
@@ -4182,7 +4222,7 @@ content.innerHTML = html;
         } const t = teachers.find(x => x.id === id); showConfirm("ลบ", "แน่ใจหรือไม่ที่จะลบครูท่านนี้?", () => { teachers = teachers.filter(x => x.id !== id); logAction('ลบข้อมูลครู', t ? t.name : id); saveData('full'); showToast("ลบเรียบร้อย"); renderAdminTab(); });
         }
         
-        window.resetAllAttendanceData = function() { showConfirm("ยืนยันล้างข้อมูลทั้งหมด", "คำเตือน: ข้อมูลการเช็คชื่อของนักเรียนทุกคนและวิชาทั้งหมดของเทอมนี้จะถูกลบอย่างถาวรและไม่สามารถกู้คืนได้ รวมถึงบันทึกโฮมรูม/เขตพื้นที่ ส่วนโฟลเดอร์รูปของเทอมนี้จะถูกย้ายลงถังขยะของ Google Drive (กู้คืนได้ภายใน 30 วัน) คุณแน่ใจหรือไม่?", async () => { const __rTerm = adminTerm(), __rYear = adminYear(); showToast("กำลังล้างข้อมูล... (อัปเดตแบบเรียลไทม์)", "info"); document.body.style.pointerEvents = 'none'; logAction('ล้างข้อมูลการเช็คชื่อทั้งหมด', 'รีเซ็ตข้อมูลการเช็คชื่อ/ติดตามทั้งระบบ'); await saveData('reset_all'); await hrTrashTermFolders(__rTerm, __rYear); document.body.style.pointerEvents = 'auto'; showToast("ล้างข้อมูลทั้งหมดเรียบร้อยแล้ว", "success"); renderAdminTab(); });
+        window.resetAllAttendanceData = function() { showConfirm("ยืนยันล้างข้อมูลทั้งหมด", "คำเตือน: ข้อมูลการเช็คชื่อของนักเรียนทุกคนและวิชาทั้งหมดของเทอมนี้จะถูกลบอย่างถาวรและไม่สามารถกู้คืนได้ รวมถึงบันทึกโฮมรูม/เขตพื้นที่ ส่วนโฟลเดอร์รูปของเทอมนี้จะถูกย้ายลงถังขยะของ Google Drive (กู้คืนได้ภายใน 30 วัน) คุณแน่ใจหรือไม่?", async () => { const __rTerm = adminTerm(), __rYear = adminYear(); showToast("กำลังล้างข้อมูล... (อัปเดตแบบเรียลไทม์)", "info"); document.body.style.pointerEvents = 'none'; logAction('ล้างข้อมูลการเช็คชื่อทั้งหมด', 'รีเซ็ตข้อมูลการเช็คชื่อ/ติดตามทั้งระบบ'); await saveData('reset_all'); const __trFail = await hrTrashTermFolders(__rTerm, __rYear); document.body.style.pointerEvents = 'auto'; if (__trFail) showConfirm("ล้างข้อมูลแล้ว แต่ย้ายรูปไม่สำเร็จ", `ล้างข้อมูลเช็คชื่อเรียบร้อยแล้ว แต่ย้ายโฟลเดอร์รูปลงถังขยะไม่สำเร็จ ${__trFail} โฟลเดอร์ — ตรวจสอบว่า Apps Script รูปโฮมรูม (HomeroomPhotoRelay) ยังใช้งานได้ หรือลบโฟลเดอร์ใน Google Drive เอง`, () => {}, 'ตกลง', true); else showToast("ล้างข้อมูลทั้งหมดเรียบร้อยแล้ว", "success"); renderAdminTab(); });
         };
 
         // ===== เก็บถาวรข้อมูลเช็คชื่อเก่า: ส่งออก Excel แล้วลบออกจากข้อมูลที่ใช้งานจริง (ลดขนาดไฟล์ระยะยาว) =====
