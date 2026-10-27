@@ -556,13 +556,29 @@
         let pollingInterval = null;
         function startRealtimeSync() {
             if (pollingInterval) clearInterval(pollingInterval);
-            pollingInterval = setInterval(async () => {
+            // [v1.73] ประหยัดโควต้า: หน้าเว็บถูกย่อ/อยู่แท็บอื่น = ไม่ตรวจ (กลับมาที่หน้า = ตรวจทันที 1 ครั้ง)
+            //        ข้อมูลเช็คชื่อของห้องที่เปิดอยู่ตรวจทุก 20 วินาทีเหมือนเดิม · ข้อมูลหลัก (ตั้งค่า/ครู/วิชา/นักเรียน) ตรวจทุก 60 วินาที
+            let tick = 0;
+            // ห้องที่เปิดดูภายใน 5 นาที = ตรวจทุก 20 วินาที · ห้องอื่นที่เคยโหลดไว้ = ทุก 60 วินาที
+            const roomsTick = (all) => { const now = Date.now(), use = window.__roomLastUse || {};
+                (window.__loadedRoomsList || []).forEach(r => { if (all || now - (use[roomAttKey_(r.term, r.year, r.roomId)] || 0) < 300000) ensureAttendanceLoadedForRoom(r.term, r.year, r.roomId, true); }); };
+            window.__syncNow = async (withMain) => { roomsTick(true); if (withMain) await mainTick(); };
+            if (!window.__visSyncBound) {
+                window.__visSyncBound = true;
+                document.addEventListener('visibilitychange', () => { if (!document.hidden && isDbInitialized && window.__syncHidden) { window.__syncHidden = false; window.__syncNow(true); } });
+            }
+            pollingInterval = setInterval(() => {
                 if (!isDbInitialized || GOOGLE_APP_SCRIPT_URL === "YOUR_WEB_APP_URL_HERE") return;
+                if (document.hidden) { window.__syncHidden = true; return; }
+                tick++;
+                roomsTick(tick % 3 === 0);
+                if (tick % 3 === 0) mainTick();
+            }, 20000);
+            async function mainTick() {
                 try {
                     const response = await fetch(GOOGLE_APP_SCRIPT_URL); const data = await response.json();
                     if (data) {
-                        // ===== [ใหม่] ไฟล์หลัก (doGet ค่าเริ่มต้น) ไม่มีข้อมูลเช็คชื่อติดมาด้วยแล้ว (แยกไฟล์ตามห้องแล้ว) - เช็คเฉพาะห้องที่เคยโหลดไว้แล้วเท่านั้นว่ามีอะไรเปลี่ยนไหม (ใช้ endpoint meta เบาๆ ก่อนเสมอ ไม่โหลดเต็มถ้าไม่มีอะไรเปลี่ยน) =====
-                        (window.__loadedRoomsList || []).forEach(r => ensureAttendanceLoadedForRoom(r.term, r.year, r.roomId, true));
+                        // [v1.73] ห้องที่เปิดอยู่ตรวจแยกใน roomsTick แล้ว
                         followUps = data.followUps || [];
                         if (!isAdmin) {
                             teachers = data.teachers || []; subjects = data.subjects || []; students = data.students || [];
@@ -619,7 +635,7 @@
                         }
                     }
                 } catch (e) {}
-            }, 20000);
+            }
         }
 
         window.onload = async () => {
@@ -2010,7 +2026,9 @@
             const matchRows = rows.filter(r => r.kind === 'match').map(r => `<label class="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-xs sm:text-sm"><input type="checkbox" data-hs-match="${esc(r.t.id)}" checked class="w-4 h-4"><span class="flex-1 min-w-0"><b>${esc(r.t.name)}</b>${r.t.name !== r.hub.name ? ` <span class="text-slate-500">↔ ${esc(r.hub.name)}</span>` : ''}</span>${grp(r.hub)}</label>`).join('');
             const noneRows = rows.filter(r => r.kind === 'none').map(r => `<div class="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs sm:text-sm"><span class="flex-1 min-w-0 font-bold">${esc(r.t.name)}${r.t.inactive ? ' <span class="text-slate-400 font-semibold">(ย้ายออก)</span>' : ''}${r.wasLinked ? ' <span class="text-rose-600 font-semibold">(บัญชีที่เคยผูกไม่มีใน AcademicHub แล้ว)</span>' : ''}</span><select data-hs-pick="${esc(r.t.id)}" class="sm:w-64 bg-white border border-amber-300 rounded px-2 py-1.5 text-base sm:text-xs font-bold">${optList('')}</select></div>`).join('');
             const freshRows = fresh.map(h => `<label class="flex items-center gap-2 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 text-xs sm:text-sm"><input type="checkbox" data-hs-new="${esc(h.id)}" ${h.executive || h.staff ? '' : 'checked'} class="w-4 h-4"><span class="flex-1 min-w-0 font-bold">${esc(h.name)}${h.executive ? ' <span class="text-slate-500 font-semibold">(ผู้บริหาร)</span>' : (h.staff ? ' <span class="text-slate-500 font-semibold">(เจ้าหน้าที่)</span>' : '')}</span>${grp(h)}</label>`).join('');
-            const linkedRows = rows.filter(r => r.kind === 'linked').map(r => `<div class="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs sm:text-sm"><i class="fas fa-link text-violet-500"></i><span class="flex-1 min-w-0 font-bold">${esc(r.t.name)}${r.t.name !== r.hub.name ? ` <span class="text-slate-500 font-semibold">↔ ${esc(r.hub.name)}</span>` : ''}</span>${grp(r.hub)}</div>`).join('');
+            // [v1.73] แก้คู่ / ยกเลิกการผูกทีละคน
+            const linkedOpts = (cur) => `<option value="${esc(cur.id)}" selected>${esc(cur.name)}${cur.subjectGroup ? ' · ' + esc(cur.subjectGroup) : ''}</option><option value="__unlink">— ยกเลิกการผูก —</option>` + fresh.slice().sort((a, b) => a.name.localeCompare(b.name)).map(h => `<option value="${esc(h.id)}">เปลี่ยนเป็น: ${esc(h.name)}${h.subjectGroup ? ' · ' + esc(h.subjectGroup) : ''}</option>`).join('');
+            const linkedRows = rows.filter(r => r.kind === 'linked').map(r => `<div class="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs sm:text-sm"><span class="flex-1 min-w-0 font-bold"><i class="fas fa-link text-violet-500"></i> ${esc(r.t.name)}</span><select data-hs-linked="${esc(r.t.id)}" class="sm:w-64 bg-white border border-slate-300 rounded px-2 py-1.5 text-base sm:text-xs font-bold">${linkedOpts(r.hub)}</select></div>`).join('');
             const ov = document.createElement('div'); ov.id = 'hubSyncModal';
             ov.className = 'fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-3';
             ov.innerHTML = `<div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col"><div class="flex items-center justify-between gap-2 p-4 sm:p-5 border-b"><div><h4 class="font-extrabold text-lg text-slate-800"><i class="fas fa-link text-violet-600"></i> ผูกรายชื่อครูกับ AcademicHub</h4><p class="text-xs text-slate-500 font-semibold">AcademicHub ${hub.length} คน · เว็บเช็คชื่อ ${teachers.length} คน · ชื่อในเว็บเช็คชื่อไม่เปลี่ยน</p></div><button type="button" onclick="document.getElementById('hubSyncModal').remove()" class="w-9 h-9 rounded-full bg-rose-50 text-rose-600 hover:bg-rose-100 text-lg shrink-0" aria-label="ปิด"><i class="fas fa-times"></i></button></div>
@@ -2018,7 +2036,7 @@
                 ${sec('fa-check-circle', 'text-emerald-700', 'ชื่อตรงกัน — ผูกให้ (ไม่สนคำนำหน้าและช่องว่าง)', nMatch, `<div class="space-y-1.5">${matchRows}</div>`)}
                 ${sec('fa-question-circle', 'text-amber-700', 'หาชื่อไม่เจอ — เลือกเองได้', nNone, `<div class="space-y-1.5">${noneRows}</div>`)}
                 ${sec('fa-user-plus', 'text-sky-700', 'มีใน AcademicHub แต่ยังไม่มีในเว็บเช็คชื่อ — เพิ่มเข้ามา', fresh.length, `<div class="space-y-1.5">${freshRows}</div>`)}
-                ${sec('fa-link', 'text-violet-700', 'ผูกไว้แล้ว', nLinked, `<details><summary class="text-xs font-bold text-slate-500 cursor-pointer mb-1.5">ดูรายชื่อ</summary><div class="space-y-1">${linkedRows}</div></details>`)}
+                ${sec('fa-link', 'text-violet-700', 'ผูกไว้แล้ว', nLinked, `<details><summary class="text-xs font-bold text-slate-500 cursor-pointer mb-1.5">ดูรายชื่อ / แก้คู่ / ยกเลิกการผูก</summary><div class="space-y-1">${linkedRows}</div></details>`)}
                 <label class="flex items-start gap-2 bg-violet-50 border border-violet-200 rounded-lg px-3 py-2 text-xs sm:text-sm font-semibold text-violet-800"><input type="checkbox" id="hsDept" checked class="w-4 h-4 mt-0.5"> ปรับกลุ่มสาระฯ ของครูที่ผูกแล้วให้ตรงกับ AcademicHub (เฉพาะคนที่ AcademicHub ระบุกลุ่มสาระไว้)</label>
                 </div>
                 <div class="flex justify-end gap-2 p-4 border-t"><button type="button" onclick="document.getElementById('hubSyncModal').remove()" class="bg-slate-100 hover:bg-slate-200 px-4 py-2 rounded-lg font-bold text-sm">ยกเลิก</button><button type="button" onclick="window.applyHubTeacherSync()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-bold text-sm shadow-sm"><i class="fas fa-check"></i> บันทึกการผูก</button></div></div>`;
@@ -2029,6 +2047,8 @@
             const q = (sel) => Array.prototype.slice.call(document.querySelectorAll(sel));
             const link = {}; // teacherId -> hubId
             q('[data-hs-match]').forEach(cb => { const r = st.rows.find(x => x.t.id === cb.getAttribute('data-hs-match')); if (cb.checked && r) link[r.t.id] = r.hub.id; });
+            const unlink = {};
+            q('[data-hs-linked]').forEach(sel => { const tid = sel.getAttribute('data-hs-linked'); if (sel.value === '__unlink') unlink[tid] = true; else if (sel.value) link[tid] = sel.value; });
             const picked = {};
             q('[data-hs-pick]').forEach(sel => { if (sel.value) { if (picked[sel.value]) { picked.__dup = true; } picked[sel.value] = true; link[sel.getAttribute('data-hs-pick')] = sel.value; } });
             const used = {}; let dup = !!picked.__dup;
@@ -2038,6 +2058,7 @@
             const fixDept = document.getElementById('hsDept').checked;
             let nLink = 0, nAdd = 0, nDept = 0, nUnlink = 0;
             teachers.forEach(t => {
+                if (unlink[t.id]) { if (t.hubId) { delete t.hubId; nUnlink++; } return; }
                 if (link[t.id]) { if (t.hubId !== link[t.id]) nLink++; t.hubId = link[t.id]; }
                 else if (t.hubId && !st.hubById[t.hubId]) { delete t.hubId; nUnlink++; } // บัญชีปลายทางไม่มีแล้ว
                 const h = t.hubId && st.hubById[t.hubId];
@@ -2707,6 +2728,7 @@
         }
         async function ensureAttendanceLoadedForRoom(term, year, roomId, forceCheck = false) {
             const key = roomAttKey_(term, year, roomId);
+            if (!forceCheck) (window.__roomLastUse = window.__roomLastUse || {})[key] = Date.now(); // [v1.73] ห้องที่เพิ่งเปิดดู = ตรวจถี่
             const alreadyLoaded = key in window.__loadedRoomLastModified;
             if (alreadyLoaded && !forceCheck) return; // เคยโหลดแล้ว และไม่ได้บังคับให้เช็คซ้ำ - ข้ามเลย
             try {
@@ -3903,7 +3925,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '1.72.1.271026';
+        const APP_VERSION = '1.73.0.271026';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
