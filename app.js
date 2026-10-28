@@ -332,6 +332,11 @@
                 subjects.push({ id: generateId(), roomId, name: 'เขตพื้นที่รับผิดชอบ', code: '', teacher: advisorName, teacher2: advisors[1] || '', credits: 0, schedules: [1,2,3,4,5].map(d => ({ day: d, period: -2 })), term, year, locked: true, systemType: 'zone' });
                 changed = true;
             }
+            // [v1.74.6] คาบระบบ (เข้าแถว/เขตพื้นที่/โฮมรูม) ใช้ครูที่ปรึกษาปัจจุบันของห้องเสมอ — เปลี่ยนครูที่ปรึกษาแล้วคาบระบบเปลี่ยนตาม
+            if (advisorName) existing.filter(s => s.systemType === 'morning' || s.systemType === 'zone' || s.systemType === 'homeroom').forEach(s => {
+                const t2 = advisors[1] || '';
+                if (s.teacher !== advisorName || (s.teacher2 || '') !== t2) { s.teacher = advisorName; s.teacher2 = t2; changed = true; }
+            });
             if (!existing.some(s => s.systemType === 'homeroom')) {
                 subjects.push({ id: generateId(), roomId, name: 'โฮมรูม', code: '', teacher: advisorName, teacher2: advisors[1] || '', credits: 0.5, schedules: [1,2,3,4,5].map(d => ({ day: d, period: 8 })), term, year, locked: true, systemType: 'homeroom', sched171: true });
                 changed = true;
@@ -829,13 +834,16 @@
                 return false;
             }
             if (Array.isArray(j.subjects)) subjects = j.subjects.map(normalizeSubject_); // ได้รายการวิชาล่าสุด (รวมที่ผู้ดูแลคนอื่นเพิ่งแก้) กลับมาด้วย
-            window.__lastSaveMs = Date.now() - t0;
+            window.__lastSaveMs = Date.now() - t0; window.__lastSaveTiming = j.timing || null;
             return true;
         }
         // ข้อความบันทึกสำเร็จ — ถ้าใช้เวลานาน บอกเวลาและจำนวนครั้งที่ต้องส่งซ้ำ (ช่วยหาสาเหตุ)
         function savedMsg_(text) {
-            const ms = window.__lastSaveMs || 0, n = window.__lastFetchAttempts || 1;
-            return ms > 3000 ? `${text} (ใช้เวลา ${(ms / 1000).toFixed(1)} วินาที${n > 1 ? ` · ส่งซ้ำ ${n - 1} ครั้ง` : ''})` : text;
+            const ms = window.__lastSaveMs || 0, n = window.__lastFetchAttempts || 1, t = window.__lastSaveTiming;
+            const sec = (x) => (x / 1000).toFixed(1);
+            // [v1.74.6] แยกเวลา: อ่านข้อมูล / เขียน KV (ใน Worker) / ระหว่างทาง (เน็ต + คิว Cloudflare)
+            const part = t ? ` · อ่าน ${sec(t.read)} · เขียน ${sec(t.write)} · ระหว่างทาง ${sec(Math.max(0, ms - t.read - t.write))}` : '';
+            return ms > 3000 ? `${text} (ใช้เวลา ${sec(ms)} วินาที${part}${n > 1 ? ` · ส่งซ้ำ ${n - 1} ครั้ง` : ''})` : text;
         }
 
         // ===== บันทึกข้อมูลแบบ Real-time รองรับการบันทึกพร้อมกันจากหลายอุปกรณ์ =====
@@ -4054,7 +4062,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '1.74.5.271026';
+        const APP_VERSION = '1.74.6.281026';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
@@ -4245,6 +4253,7 @@ content.innerHTML = html;
                 settings.staffs[key][roomId] = document.getElementById(`staff_${roomId}`).value;
             });
             logAction('แก้ไขครูที่ปรึกษา/เจ้าหน้าที่ประจำห้อง', `เทอม ${adminTerm()}/${adminYear()}`, 'settings');
+            getRoomList().forEach(r => ensureSystemSubjectsForRoom(r, adminTerm(), adminYear())); // [v1.74.6] ปรับครูในคาบระบบตามครูที่ปรึกษาใหม่ (บันทึกไปพร้อมกัน)
             saveData('full'); showToast("บันทึกบุคลากรประจำห้องเรียบร้อย"); renderAdminTab();
         }
 
