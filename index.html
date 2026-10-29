@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ระบบเช็คชื่อนักเรียนอัจฉริยะ</title>
     <link rel="icon" id="faviconLink" href="">
+    <!-- 1.75.0: ติดตั้งเป็นแอป (PWA) -->
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#4f46e5">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="เช็คชื่อ BNK">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -31,6 +38,7 @@
                 <div class="flex items-center gap-1.5 sm:gap-3">
                     <button id="btnRefreshData" onclick="window.refreshData()" title="รีเฟรชข้อมูล" class="bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 text-slate-600 hover:text-indigo-700 w-9 h-9 sm:w-11 sm:h-11 rounded-xl text-sm sm:text-base font-bold transition-all shadow-sm flex items-center justify-center shrink-0"><i class="fas fa-sync-alt" id="refreshIcon"></i></button>
                     <button id="btnDarkMode" onclick="window.toggleDarkMode()" title="สลับโหมดมืด/สว่าง" class="bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 text-slate-600 hover:text-indigo-700 w-9 h-9 sm:w-11 sm:h-11 rounded-xl text-sm sm:text-base font-bold transition-all shadow-sm flex items-center justify-center shrink-0"><i class="fas fa-moon" id="darkModeIcon"></i></button>
+                    <button id="btnInstallApp" onclick="window.installApp()" title="ติดตั้งเป็นแอปบนเครื่องนี้" aria-label="ติดตั้งเป็นแอป" class="hidden bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 text-slate-600 hover:text-indigo-700 w-9 h-9 sm:w-11 sm:h-11 rounded-xl text-sm sm:text-base font-bold transition-all shadow-sm flex items-center justify-center shrink-0"><i class="fas fa-download"></i></button>
                     <button id="btnAdminLogin" onclick="window.navigate('admin_login')" class="bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 text-slate-600 hover:text-indigo-700 px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-sm flex items-center gap-2"><i class="fas fa-user-shield"></i> <span class="hidden sm:inline">ผู้ดูแลระบบ</span></button>
                     <button id="currentUserBadge" onclick="window.showUserBadgeInfo()" type="button" class="hidden bg-slate-50 border border-slate-200 text-slate-700 w-9 h-9 sm:w-auto sm:h-auto sm:px-3 py-2 sm:py-2.5 rounded-full sm:rounded-xl text-[10px] sm:text-xs font-bold items-center justify-center sm:gap-1.5 hover:bg-slate-100 transition-colors"><i class="fas fa-user-circle text-indigo-500 text-sm sm:text-base"></i> <span id="currentUserBadgeName" class="hidden sm:inline"></span> <span id="currentUserBadgeRole" class="hidden sm:inline-block px-1.5 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black"></span></button>
                     <button id="btnAdminPanel" onclick="window.navigate('admin')" class="hidden bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white border border-indigo-200 px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-sm flex items-center gap-2"><i class="fas fa-cog"></i> <span class="hidden sm:inline">จัดการระบบ</span></button>
@@ -70,6 +78,17 @@
                 <h3 class="text-xl sm:text-2xl font-extrabold text-slate-800 mb-2" id="confirmTitle">ยืนยันการดำเนินการ</h3>
                 <p class="text-sm sm:text-base text-slate-500 mb-6 sm:mb-8 font-medium" id="confirmMessage">คุณแน่ใจหรือไม่?</p>
                 <div class="flex gap-3"><button onclick="window.closeConfirm()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-xl sm:rounded-2xl font-bold transition-colors text-sm sm:text-base">ยกเลิก</button><button id="confirmBtn" class="flex-1 bg-rose-600 hover:bg-rose-700 text-white py-3 rounded-xl sm:rounded-2xl font-bold transition-colors shadow-lg shadow-rose-200 text-sm sm:text-base">ยืนยัน</button></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 1.75.0: วิธีติดตั้งแอป (เบราว์เซอร์ที่ไม่มีปุ่มติดตั้งให้กดอัตโนมัติ เช่น Safari บน iPhone/iPad) -->
+    <div id="installModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-4 transition-opacity" onclick="if(event.target===this)window.closeInstallHelp()">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <div class="p-6 sm:p-8">
+                <div class="flex items-center gap-3 mb-4"><img src="icons/icon-192.png" alt="" width="48" height="48" style="width:48px;height:48px" class="w-12 h-12 rounded-xl shadow"><div><h3 class="text-lg sm:text-xl font-extrabold text-slate-800">ติดตั้งเป็นแอป</h3><p class="text-xs sm:text-sm text-slate-500">เปิดจากหน้าจอหลักได้เหมือนแอป ไม่ต้องพิมพ์ที่อยู่เว็บ</p></div></div>
+                <div id="installHelpBody" class="text-sm sm:text-base text-slate-700 space-y-2"></div>
+                <button onclick="window.closeInstallHelp()" class="mt-6 w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl sm:rounded-2xl font-bold transition-colors">เข้าใจแล้ว</button>
             </div>
         </div>
     </div>

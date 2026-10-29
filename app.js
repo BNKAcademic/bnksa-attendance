@@ -1014,6 +1014,48 @@
             try { safeRenderState(history.state || { view: 'dashboard' }); } catch (e) {}
         };
 
+        // ===== 1.75.0: ติดตั้งเป็นแอป (PWA) — ปุ่มข้างปุ่มโหมดมืด/สว่าง =====
+        // Chrome/Edge (คอม + Android) = กดแล้วขึ้นหน้าต่างติดตั้งของเบราว์เซอร์ทันที · Safari (iPhone/iPad/Mac) และเบราว์เซอร์อื่น = ป็อปอัปบอกวิธี
+        // เปิดจากแอปที่ติดตั้งแล้ว (standalone) = ซ่อนปุ่ม · ไม่เก็บแคชข้อมูล (sw.js ส่งต่อไปเซิร์ฟเวอร์ทุกครั้ง)
+        let deferredInstallPrompt = null;
+        function isStandaloneApp() {
+            try { return window.matchMedia('(display-mode: standalone)').matches || window.matchMedia('(display-mode: window-controls-overlay)').matches || window.navigator.standalone === true; } catch (e) { return false; }
+        }
+        function updateInstallButton() {
+            const b = document.getElementById('btnInstallApp');
+            if (!b) return;
+            b.classList.toggle('hidden', isStandaloneApp());
+        }
+        window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredInstallPrompt = e; updateInstallButton(); });
+        window.addEventListener('appinstalled', () => { deferredInstallPrompt = null; updateInstallButton(); try { showToast('ติดตั้งแอปเรียบร้อยแล้ว — เปิดได้จากหน้าจอหลัก/เมนูแอป', 'success'); } catch (e) {} });
+        function installHelpHtml() {
+            const ua = navigator.userAgent || '';
+            const ios = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+            const safariMac = !ios && /Macintosh/i.test(ua) && /Safari/i.test(ua) && !/Chrome|Chromium|Edg|Firefox/i.test(ua);
+            const android = /Android/i.test(ua);
+            const step = (n, t) => '<div class="flex gap-3 items-start"><span class="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-xs font-extrabold flex items-center justify-center shrink-0 mt-0.5">' + n + '</span><span>' + t + '</span></div>';
+            if (ios) return step(1, 'เปิดเว็บนี้ด้วย <b>Safari</b>') + step(2, 'กดปุ่ม <b>แชร์</b> <i class="fas fa-arrow-up-from-bracket text-indigo-600"></i> (ด้านล่างหรือด้านบนของจอ)') + step(3, 'เลื่อนหาแล้วกด <b>เพิ่มไปยังหน้าจอโฮม</b> <i class="far fa-square-plus text-indigo-600"></i>') + step(4, 'กด <b>เพิ่ม</b> — ไอคอนแอปจะอยู่บนหน้าจอโฮม');
+            if (safariMac) return step(1, 'ที่แถบเมนูด้านบน กด <b>ไฟล์ (File)</b>') + step(2, 'เลือก <b>เพิ่มไปยัง Dock (Add to Dock)</b>') + step(3, 'กด <b>เพิ่ม</b>');
+            if (android) return step(1, 'กดปุ่มเมนู <b>⋮</b> มุมขวาบนของ Chrome') + step(2, 'เลือก <b>ติดตั้งแอป</b> หรือ <b>เพิ่มลงในหน้าจอหลัก</b>') + step(3, 'กด <b>ติดตั้ง</b>') + '<p class="text-xs text-slate-500 pt-1">ถ้าไม่มีเมนูนี้ ให้เปิดเว็บด้วย Google Chrome</p>';
+            return step(1, 'ใช้ <b>Google Chrome</b> หรือ <b>Microsoft Edge</b>') + step(2, 'กดไอคอนติดตั้ง <i class="fas fa-download text-indigo-600"></i> ที่ท้ายช่องที่อยู่เว็บ (แถบ URL) หรือเมนู <b>⋮ / …</b> → <b>ติดตั้งแอป / แอป → ติดตั้งไซต์นี้เป็นแอป</b>') + step(3, 'กด <b>ติดตั้ง</b> — แอปจะเปิดเป็นหน้าต่างของตัวเอง และมีไอคอนบนเดสก์ท็อป/เมนู Start') + '<p class="text-xs text-slate-500 pt-1">Firefox ยังไม่รองรับการติดตั้งเว็บเป็นแอป</p>';
+        }
+        window.installApp = async function() {
+            if (deferredInstallPrompt) {
+                const ev = deferredInstallPrompt; deferredInstallPrompt = null;
+                try { ev.prompt(); const r = await ev.userChoice; if (r && r.outcome === 'accepted') return; } catch (e) {}
+                return;
+            }
+            const m = document.getElementById('installModal');
+            document.getElementById('installHelpBody').innerHTML = installHelpHtml();
+            m.classList.remove('hidden');
+        };
+        window.closeInstallHelp = function() { const m = document.getElementById('installModal'); if (m) m.classList.add('hidden'); };
+        if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+            window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {}); });
+        }
+        updateInstallButton();
+        try { window.matchMedia('(display-mode: standalone)').addEventListener('change', updateInstallButton); } catch (e) {}
+
         // ===== รีเฟรชข้อมูล (ใช้ได้ทุกหน้า) =====
         window.refreshData = async function() {
             const icon = document.getElementById('refreshIcon');
@@ -4062,7 +4104,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '1.74.6.281026';
+        const APP_VERSION = '1.75.0.291026';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
