@@ -1965,6 +1965,27 @@
             if (viaRelay && viaRelay.status === 'success' && viaRelay.id) return { id: viaRelay.id, route: 'relay' };
             return null;
         }
+        // [v1.75.2] รูปใน PDF: ตัดกลางภาพให้เป็นอัตราส่วน 4:3 ก่อนวาง (html2canvas ไม่รองรับ object-fit:cover จึงยืด/บีบรูป) — รูปต้นฉบับใน Drive ไม่ถูกแก้
+        function hrCropCover(url, ratio = 4 / 3, maxW = 1200) {
+            if (!url) return Promise.resolve(url);
+            return new Promise(resolve => {
+                const img = new Image();
+                img.onload = () => {
+                    const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+                    if (!iw || !ih) { resolve(url); return; }
+                    let sw = iw, sh = Math.round(iw / ratio);
+                    if (sh > ih) { sh = ih; sw = Math.round(ih * ratio); }
+                    const W = Math.min(maxW, sw), H = Math.round(W / ratio);
+                    const c = document.createElement('canvas'); c.width = W; c.height = H;
+                    const ctx = c.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+                    ctx.drawImage(img, Math.round((iw - sw) / 2), Math.round((ih - sh) / 2), sw, sh, 0, 0, W, H);
+                    try { resolve(c.toDataURL('image/jpeg', 0.88)); } catch (e) { resolve(url); }
+                };
+                img.onerror = () => resolve(url);
+                img.src = url;
+            });
+        }
+        async function hrGetPhotoPdf(id) { return hrCropCover(await hrGetPhoto(id)); }
         async function hrGetPhoto(id) {
             if (HOMEROOM_DRIVE_URL) {
                 const direct = await hrFetchJson(HOMEROOM_DRIVE_URL, { action: 'get', token: HOMEROOM_DRIVE_TOKEN, id }, 60000);
@@ -2306,7 +2327,7 @@
             const urls = [];
             for (let i = 0; i < rows.length; i++) {
                 updateProgressModal((i / rows.length) * 40, `กำลังโหลดรูปการสอนแทน ${i + 1}/${rows.length}...`);
-                urls.push(rows[i].a.subPhoto ? await hrGetPhoto(rows[i].a.subPhoto.id) : null);
+                urls.push(rows[i].a.subPhoto ? await hrGetPhotoPdf(rows[i].a.subPhoto.id) : null);
             }
             const adv = getRoomAdvisors(roomId).filter(Boolean); const staff = getRoomStaff(roomId);
             const signers = []; if (adv[0]) signers.push({ name: adv[0], role: adv[1] ? 'ครูที่ปรึกษาคนที่ 1' : 'ครูที่ปรึกษา' }); if (adv[1]) signers.push({ name: adv[1], role: 'ครูที่ปรึกษาคนที่ 2' }); signers.push({ name: staff, role: 'เจ้าหน้าที่' });
@@ -2414,7 +2435,7 @@
             rows.forEach(r => { if (r.log && r.log.held) (r.log.photos || []).forEach(p => photoJobs.push({ date: r.dateStr, id: p.id })); });
             for (let i = 0; i < photoJobs.length; i++) {
                 updateProgressModal((i / Math.max(1, photoJobs.length)) * 40, `กำลังโหลดรูปกิจกรรม ${i + 1}/${photoJobs.length}...`);
-                const u = await hrGetPhoto(photoJobs[i].id);
+                const u = await hrGetPhotoPdf(photoJobs[i].id);
                 (photoMap[photoJobs[i].date] = photoMap[photoJobs[i].date] || []).push(u);
             }
             const roomName = formatRoomName(roomId);
@@ -4104,7 +4125,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '1.75.1.291026';
+        const APP_VERSION = '1.75.2.311026';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
@@ -5495,7 +5516,7 @@ content.innerHTML = html;
                     const urls = [];
                     for (let i = 0; i < zLogs.length; i++) {
                         updateProgressModal((i / zLogs.length) * 30, `กำลังโหลดรูปรายงาน ${i + 1}/${zLogs.length}...`);
-                        const ph = (zLogs[i].photos || [])[0]; urls.push(ph ? await hrGetPhoto(ph.id) : null);
+                        const ph = (zLogs[i].photos || [])[0]; urls.push(ph ? await hrGetPhotoPdf(ph.id) : null);
                     }
                     const PERP = 4;
                     for (let p = 0; p < Math.ceil(zLogs.length / PERP); p++) {
