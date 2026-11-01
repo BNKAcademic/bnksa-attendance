@@ -4125,19 +4125,64 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '1.75.2.311026';
+        const APP_VERSION = '1.75.3.011126';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
             if (v.querySelector('#verBtn')) return; // วาดไว้แล้ว
             const prev = v.previousSibling; if (prev && prev.nodeType === 3) prev.textContent = prev.textContent.replace(/v$/, '');
-            v.innerHTML = `<span class="relative inline-block" id="verWrap"><button type="button" id="verBtn" aria-haspopup="true" aria-expanded="false" title="โหลดหน้าใหม่ / ล้างแคช" class="underline decoration-dotted underline-offset-2 hover:text-indigo-600 font-semibold">v${APP_VERSION} <i class="fas fa-caret-up"></i></button><span id="verMenu" class="hidden absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-[70] flex-col min-w-[200px] bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden text-left" style="transform:translateX(-50%);"><button type="button" data-ver="reload" class="flex items-center gap-2 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-700 hover:bg-slate-50 whitespace-nowrap"><i class="fas fa-redo-alt text-indigo-500 w-4 text-center"></i> โหลดหน้าใหม่</button><button type="button" data-ver="hard" class="flex items-center gap-2 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-700 hover:bg-slate-50 whitespace-nowrap border-t border-slate-100"><i class="fas fa-broom text-indigo-500 w-4 text-center"></i> ล้างแคชแล้วโหลดใหม่</button></span></span>`;
+            v.innerHTML = `<span class="relative inline-block" id="verWrap"><button type="button" id="verBtn" aria-haspopup="true" aria-expanded="false" title="โหลดหน้าใหม่ / ล้างแคช" class="underline decoration-dotted underline-offset-2 hover:text-indigo-600 font-semibold">v${APP_VERSION} <i class="fas fa-caret-up"></i></button><span id="verMenu" class="hidden absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-[70] flex-col min-w-[200px] bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden text-left" style="transform:translateX(-50%);"><button type="button" data-ver="check" class="flex items-center gap-2 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-700 hover:bg-slate-50 whitespace-nowrap"><i class="fas fa-search text-indigo-500 w-4 text-center"></i> ตรวจหาอัปเดต</button><button type="button" data-ver="reload" class="flex items-center gap-2 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-700 hover:bg-slate-50 whitespace-nowrap border-t border-slate-100"><i class="fas fa-redo-alt text-indigo-500 w-4 text-center"></i> โหลดหน้าใหม่</button><button type="button" data-ver="hard" class="flex items-center gap-2 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-700 hover:bg-slate-50 whitespace-nowrap border-t border-slate-100"><i class="fas fa-broom text-indigo-500 w-4 text-center"></i> ล้างแคชแล้วโหลดใหม่</button></span></span>`;
             const btn = document.getElementById('verBtn'), menu = document.getElementById('verMenu');
             const setOpen = (on) => { menu.classList.toggle('hidden', !on); menu.classList.toggle('flex', on); btn.setAttribute('aria-expanded', String(on)); };
             btn.addEventListener('click', (e) => { e.stopPropagation(); setOpen(menu.classList.contains('hidden')); });
             document.addEventListener('click', (e) => { if (!menu.classList.contains('hidden') && !e.target.closest('#verWrap')) setOpen(false); });
             document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setOpen(false); });
-            menu.addEventListener('click', (e) => { const b = e.target.closest('[data-ver]'); if (!b) return; setOpen(false); if (b.getAttribute('data-ver') === 'reload') location.reload(); else hardReloadPage(); });
+            menu.addEventListener('click', (e) => { const b = e.target.closest('[data-ver]'); if (!b) return; setOpen(false); const k = b.getAttribute('data-ver'); if (k === 'check') checkForUpdate(true); else if (k === 'reload') location.reload(); else hardReloadPage(); });
+            startUpdateWatch();
+        }
+        // ===== [v1.75.3] แจ้งเวอร์ชันใหม่ (เหมือน AcademicHub) — อ่านเลขรุ่นจาก version.json บน GitHub (ไม่ผ่าน Worker = ไม่ใช้โควต้า)
+        // ตอนเปิดหน้า + ทุก 30 นาที + กลับมาที่แท็บ · "ภายหลัง" = ซ่อนรุ่นนั้น 2 ชั่วโมง · "อัปเดตเลย" = ล้างแคชแล้วโหลดใหม่
+        let __updLast = 0, __updShown = '';
+        const __verParts = (v) => String(v || '').split('.').slice(0, 3).map(x => parseInt(x, 10) || 0);
+        function isNewerVersion(remote, local) {
+            if (!remote || remote === local) return false;
+            const a = __verParts(remote), b = __verParts(local);
+            for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+            return true;
+        }
+        async function checkForUpdate(manual) {
+            __updLast = Date.now();
+            let remote = '';
+            try { const r = await fetch(new URL('version.json', location.href).href + '?t=' + Date.now(), { cache: 'no-store' }); if (r.ok) remote = String(((await r.json()) || {}).v || ''); } catch (e) { remote = ''; }
+            if (!remote) { if (manual) showToast('ตรวจหาอัปเดตไม่ได้ (เชื่อมต่อไม่ได้) — ลองใหม่อีกครั้ง', 'error'); return; }
+            if (isNewerVersion(remote, APP_VERSION)) {
+                if (!manual) { try { const sn = JSON.parse(localStorage.getItem('bnksa_upd_snooze') || 'null'); if (sn && sn.v === remote && Date.now() - sn.at < 2 * 3600e3) return; } catch (e) {} }
+                showUpdateCard(remote);
+            } else if (manual) showToast('ใช้เวอร์ชันล่าสุดแล้ว (v' + APP_VERSION + ')');
+        }
+        function showUpdateCard(v) {
+            if (__updShown === v && document.getElementById('updCard')) return;
+            __updShown = v;
+            const old = document.getElementById('updCard'); if (old) old.remove();
+            const c = document.createElement('div'); c.id = 'updCard'; c.setAttribute('role', 'status');
+            c.className = 'fixed z-[90] bottom-3 left-4 right-4 sm:left-auto sm:right-5 sm:bottom-5 sm:w-80 bg-white text-slate-800 border border-slate-200 rounded-2xl shadow-2xl p-4 text-left';
+            c.innerHTML = `<button type="button" data-upd="later" aria-label="ปิด" class="absolute top-2 right-2 w-7 h-7 rounded-lg bg-rose-600 text-white font-bold flex items-center justify-center"><i class="fas fa-times"></i></button>
+                <div class="font-extrabold text-base flex items-center gap-2 pr-8"><i class="fas fa-arrow-circle-up text-indigo-600"></i> มีเวอร์ชันใหม่ ${v}</div>
+                <div class="text-sm text-slate-500 mt-1 mb-3">โหลดหน้าใหม่เพื่อใช้งานเวอร์ชันล่าสุด</div>
+                <div class="flex justify-end gap-2"><button type="button" data-upd="later" class="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm">ภายหลัง</button><button type="button" data-upd="go" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm"><i class="fas fa-redo-alt"></i> อัปเดตเลย</button></div>`;
+            c.addEventListener('click', (e) => {
+                const b = e.target.closest('[data-upd]'); if (!b) return;
+                if (b.getAttribute('data-upd') === 'go') { hardReloadPage(); return; }
+                try { localStorage.setItem('bnksa_upd_snooze', JSON.stringify({ v, at: Date.now() })); } catch (e2) {}
+                c.remove();
+            });
+            document.body.appendChild(c);
+        }
+        function startUpdateWatch() {
+            if (window.__updWatch) return; window.__updWatch = true;
+            setTimeout(() => checkForUpdate(false), 4000);
+            setInterval(() => { if (!document.hidden) checkForUpdate(false); }, 30 * 60e3);
+            document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - __updLast > 10 * 60e3) checkForUpdate(false); });
         }
         // ล้างแคชแล้วโหลดใหม่: ลบ Cache Storage / Service Worker (ถ้ามี) แล้วดึงไฟล์หน้าเว็บ (HTML/JS/CSS) ใหม่จากเซิร์ฟเวอร์ก่อนโหลดหน้าใหม่
         // ไม่ลบการจดจำการเข้าสู่ระบบ / ธีม ที่เก็บไว้ในเครื่อง
