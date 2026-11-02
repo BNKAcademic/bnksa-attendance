@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<!-- 1.80: PWA — ติดตั้งลงหน้าจอหลัก/คอมได้ (manifest + ไอคอน · sw.js ลงทะเบียนใน api.js) -->
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="theme-color" content="#0b6fcc" />
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="BNK Hub" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<script>(function(){try{var t=localStorage.getItem('bnkah_theme');if(t==='dark'||t==='sepia')document.documentElement.setAttribute('data-theme',t);document.documentElement.classList.add('nav-noanim');if(localStorage.getItem('bnkah_memo_off')==='1')document.documentElement.classList.add('memo-off');}catch(e){}})();</script>
+<title>ทำเนียบบุคลากรโรงเรียน — BNKAcademicHub</title>
+<!-- Tailwind CDN ที่เคยฝังไว้ตรงนี้ถูกเอาออกแล้ว (ตั้งแต่ V11.8.3) — สาเหตุที่แท้จริงของปัญหาช่องกรอกข้อมูล "ชิดขอบซ้าย"
+     ที่ผู้ใช้แจ้งซ้ำหลายรอบ ยืนยันด้วยเครื่องคอมที่เพิ่งซื้อใหม่ไม่เคยตั้งค่าอะไรก็ยังเป็น + คอนโซล DevTools แสดง
+     getComputedStyle(...).paddingLeft = "0px" จริง ทั้งที่ style.css ที่เซิร์ฟเวอร์ส่งออกมาตรงกับซอร์สทุกตัวอักษร:
+     สคริปต์ Tailwind CDN ตัวนี้เดิมใส่ไว้แค่ช่วงออกแบบเพื่ออ้างอิงโทนสีเท่านั้น (ไม่มี class ของ Tailwind ใช้งานจริงในเว็บเลย
+     สักจุด — เช็คแล้วทั้ง 5 หน้า) แต่ตัว CDN สร้าง Preflight (CSS reset มาตรฐานของ Tailwind ที่ตั้ง padding/border ของ
+     input ทุกตัวเป็น 0 เพื่อ "ล้างค่า default ของเบราว์เซอร์") แล้วแทรกสไตล์ของตัวเองเข้า <head> ทีหลัง (browser ประมวลผล
+     script แบบ async หลังโหลดเน็ตเวิร์กเสร็จ) ทำให้ชนะลำดับ cascade ทับ padding: 10px 28px ที่ style.css ของเราตั้งไว้
+     โดยไม่มีทางแก้จากฝั่ง style.css เองเลย (เพราะ specificity เท่ากัน ผู้มาทีหลังชนะ) — เกิดเฉพาะตอนเน็ตเวิร์กโหลด CDN
+     สำเร็จเท่านั้น (อธิบายได้ว่าทำไมตอนแรกผมทดสอบในเครื่องแล้วไม่เจอปัญหา เพราะเครื่องทดสอบบล็อกการเรียก CDN ภายนอกไว้)
+     ลบสคริปต์นี้ทิ้งเลยปลอดภัย 100% เพราะไม่มีอะไรในเว็บพึ่งพา class ของ Tailwind อยู่จริง -->
+<!-- Font Awesome ฝังไฟล์ไว้ในเว็บเอง (ไม่พึ่ง CDN ภายนอก ตามแนวทางเดิมของโปรเจกต์ เหมือนฟอนต์ Sarabun) -->
+<link rel="stylesheet" href="assets/fontawesome/css/fontawesome.min.css" />
+<link rel="stylesheet" href="assets/fontawesome/css/solid.min.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700&family=Sarabun:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/style.css?v=1.98.2.021126" />
+<!-- 1.56: ธีมสีจากค่าที่จำไว้ (ใส่หลัง style.css ให้ทับค่าเริ่มต้น) — ดู applyThemeColor ใน api.js -->
+<script>(function(){try{var c=localStorage.getItem('bnkah_theme_css');if(c){var e=document.createElement('style');e.id='bnkahThemeVars';e.textContent=c;document.head.appendChild(e);}}catch(e){}})();</script>
+<style>
+  .dir-section { margin-bottom: 22px; }
+  .dir-section-title { display: flex; align-items: center; gap: 8px; font-size: 1.05rem; font-weight: 800; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 2px solid var(--primary-light); color: var(--primary-dark); }
+  .dir-section-title .dir-count { font-size: 0.78rem; font-weight: 600; color: var(--text-muted); }
+  .dir-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+  .dir-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 12px; text-align: center; box-shadow: var(--shadow); }
+  a.dir-link { display: block; color: inherit; text-decoration: none; transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease; }
+  a.dir-link:hover, a.dir-link:focus-visible { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: var(--primary); outline: none; }
+  .dir-card.dir-exec { border-color: var(--primary); }
+  .dir-avatar { width: 84px; height: 84px; border-radius: 50%; margin: 0 auto 10px; overflow: hidden; background: var(--primary-light); color: var(--primary-dark); display: flex; align-items: center; justify-content: center; }
+  .dir-exec .dir-avatar { width: 104px; height: 104px; }
+  .dir-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .dir-avatar svg { width: 55%; height: 55%; display: block; }
+  .dir-name { font-weight: 700; font-size: 0.98rem; line-height: 1.3; }
+  .dir-pos { color: var(--text-muted); font-size: 0.84rem; margin-top: 3px; }
+  .dir-sub { font-size: 0.78rem; margin-top: 4px; color: var(--primary-dark); font-weight: 600; }
+  .dir-sub.muted { color: var(--text-muted); font-weight: 500; }
+  .dir-head { display: inline-block; margin-top: 6px; padding: 2px 10px; border-radius: 999px; background: var(--warn-light); color: var(--warn); font-size: 0.74rem; font-weight: 700; }
+  .dir-notice { text-align: center; color: var(--text-muted); padding: 40px 10px; }
+  /* ---- ปุ่มสลับมุมมอง ---- */
+  .dir-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px 14px; flex-wrap: wrap; margin: 0 0 14px; }
+  .dir-filters { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; }
+  .dir-filters .dir-label { font-size: 0.85rem; font-weight: 700; color: var(--text-muted); }
+  .dir-filters select { width: auto; min-width: 190px; max-width: 100%; padding: 7px 12px; font-size: 0.88rem; }
+  .dir-toolbar > *, .dir-filters { max-width: 100%; min-width: 0; }
+  .dir-filters select { flex: 1 1 190px; min-width: 0; }
+  @media (max-width: 560px) {
+    .dir-filters .dir-label { width: 100%; }
+    .dir-groupby { display: flex; width: 100%; }
+    .dir-groupby button { flex: 1 1 0; justify-content: center; padding: 7px 8px; font-size: 0.8rem; line-height: 1.3; }
+    .dir-filters select { flex-basis: 100%; }
+  }
+  .dir-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; background: var(--surface); }
+  .dir-toggle button { border: 0; background: transparent; color: var(--text-muted); font: inherit; font-size: 0.85rem; font-weight: 700; padding: 7px 16px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  .dir-toggle button[aria-pressed="true"] { background: var(--primary); color: #fff; }
+  .dir-toggle button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+  /* ---- มุมมองผังองค์กร (แบบเส้นโครง) ---- */
+  .tree-hint { display: none; text-align: center; color: var(--text-muted); font-size: 0.8rem; margin: 0 0 6px; }
+  .tree-hint.show { display: block; }
+  .tree-wrap { overflow-x: auto; padding: 4px 4px 18px; -webkit-overflow-scrolling: touch; }
+  .tree { --tl: #9aa5c4; display: flex; flex-direction: column; align-items: center; width: max-content; margin: 0 auto; }
+  [data-theme="dark"] .tree { --tl: #5b6685; }
+  .tree ul { padding-top: 22px; position: relative; display: flex; justify-content: center; margin: 0; }
+  .tree li { list-style: none; text-align: center; position: relative; padding: 22px 10px 0; }
+  .tree li::before, .tree li::after { content: ''; position: absolute; top: 0; right: 50%; width: 50%; height: 22px; border-top: 2px solid var(--tl); }
+  .tree li::after { right: auto; left: 50%; border-left: 2px solid var(--tl); }
+  .tree li:only-child::before, .tree li:only-child::after { display: none; }
+  .tree li:only-child { padding-top: 0; }
+  .tree li:first-child::before, .tree li:last-child::after { border: 0; }
+  .tree li:last-child::before { border-right: 2px solid var(--tl); border-radius: 0 8px 0 0; }
+  .tree li:first-child::after { border-radius: 8px 0 0 0; }
+  .tree ul ul::before { content: ''; position: absolute; top: 0; left: 50%; border-left: 2px solid var(--tl); height: 22px; }
+  .tree .bus > ul { padding-top: 34px; align-items: flex-start; }
+  .tree .bus > ul::before { content: ''; position: absolute; top: 0; left: 50%; border-left: 2px solid var(--tl); height: 34px; }
+  .tree .bus > ul > li { padding-top: 22px; }
+  .tree .bus > ul > li:only-child::before { display: block; right: auto; left: 50%; width: 0; border: 0; border-left: 2px solid var(--tl); border-radius: 0; }
+  .tree .bus.noroot > ul { padding-top: 0; }
+  .tree .bus.noroot > ul::before { display: none; }
+  .tn { position: relative; display: inline-block; width: 190px; box-sizing: border-box; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 10px 8px; box-shadow: var(--shadow); text-align: center; color: inherit; text-decoration: none; vertical-align: top; }
+  a.tn-link { transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease; }
+  a.tn-link:hover, a.tn-link:focus-visible { transform: translateY(-2px); box-shadow: var(--shadow-lg); border-color: var(--primary); outline: none; }
+  /* 1.46.121026: ชี้เมาส์ที่การ์ดแล้วไม่ขีดเส้นใต้ตัวหนังสือ — บอกด้วยแอนิเมชันการ์ด (ยก + เงา + ขอบสีหลัก) อย่างเดียว */
+  a.dir-link, a.dir-link *, a.tn-link, a.tn-link * { text-decoration: none !important; }
+  a.dir-link:hover .dir-avatar, a.tn-link:hover .tav { transform: scale(1.05); }
+  .dir-avatar, .tav { transition: transform 0.18s ease; }
+  .tn.ex1 { width: 220px; border: 2px solid var(--primary); }
+  .tn.ex2 { width: 200px; border-color: var(--primary); }
+  .tn.head { border: 2px solid #f59e0b; }
+  .tav { width: 54px; height: 54px; border-radius: 50%; margin: 0 auto 6px; overflow: hidden; background: var(--primary-light); color: var(--primary-dark); display: flex; align-items: center; justify-content: center; }
+  .tn.ex1 .tav { width: 70px; height: 70px; }
+  .tav img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .tav svg { width: 55%; height: 55%; display: block; }
+  /* ชื่อ-สกุลบรรทัดเดียวเสมอ (ไม่ตัดขึ้นบรรทัดใหม่) — ชื่อยาวจะ "ย่อขนาดตัวอักษร" ให้พอดีกรอบ (fitTreeNames ใน JS ตั้งแต่ 1.41.111026) ตัดท้ายด้วย … เฉพาะกรณีย่อถึงขนาดเล็กสุดแล้วยังไม่พอ */
+  .tname { font-weight: 700; font-size: 0.82rem; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tn-empty { position: relative; background: var(--surface) !important; width: 190px; box-sizing: border-box; padding: 10px 8px; border: 2px dashed var(--border); border-radius: 14px; color: var(--text-muted); font-size: 0.78rem; }
+  .tpos { color: var(--text-muted); font-size: 0.76rem; margin-top: 2px; }
+  .tsub.muted { background: transparent; color: var(--text-muted); font-weight: 500; }
+  .tsub { display: inline-block; margin-top: 4px; padding: 1px 8px; border-radius: 10px; background: var(--warn-light); color: var(--warn); font-size: 0.68rem; font-weight: 700; line-height: 1.4; }
+  .gtitle { display: inline-block; width: 190px; box-sizing: border-box; padding: 5px 12px; border-radius: 12px; background: var(--primary-light); color: var(--primary-dark); font-size: 0.8rem; font-weight: 800; line-height: 1.35; }
+  .vlist { position: relative; margin: 0 auto; }
+  .vlist::before { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; border-left: 2px solid var(--tl); }
+  .vitem { position: relative; padding-top: 14px; }
+</style>
+</head>
+<body>
+  <div id="app-topbar"></div>
+  <div class="container">
+    <div class="page-header">
+      <h1>ทำเนียบบุคลากรโรงเรียน</h1>
+      <p id="dirSub">คณะผู้บริหารและครู/บุคลากรของโรงเรียน</p>
+    </div>
+    <div class="dir-toolbar"><div class="dir-filters"><span class="dir-label">จัดกลุ่มตาม</span><div class="dir-toggle dir-groupby" role="group" aria-label="เลือกวิธีจัดกลุ่ม"><button type="button" data-group="subject" aria-pressed="true">กลุ่มสาระการเรียนรู้</button><button type="button" data-group="dept" aria-pressed="false">กลุ่มบริหารงาน</button></div><select id="dirFilter" aria-label="กรอง"></select></div><div class="dir-toggle" role="group" aria-label="เลือกมุมมอง"><button type="button" id="dirViewTree" data-view="tree" aria-pressed="false"><i class="fa-solid fa-sitemap"></i> ผังองค์กร</button><button type="button" id="dirViewCards" data-view="cards" aria-pressed="false"><i class="fa-solid fa-th-large"></i> การ์ด</button></div></div>
+    <div id="dirRoot"><div class="loading">กำลังโหลด...</div></div>
+  </div>
+  <script src="assets/api.js?v=1.98.2.021126"></script>
+  <script>
+    var SUBJECT_GROUP_ORDER = ['ภาษาไทย', 'คณิตศาสตร์', 'วิทยาศาสตร์และเทคโนโลยี', 'สังคมศึกษา ศาสนา และวัฒนธรรม', 'สุขศึกษาและพลศึกษา', 'ศิลปะ', 'การงานอาชีพ', 'ภาษาต่างประเทศ'];
+    var POSITION_RANK = ['ครูเชี่ยวชาญพิเศษ', 'ครูเชี่ยวชาญ', 'ครูชำนาญการพิเศษ', 'ครูชำนาญการ', 'ครู', 'ครูผู้ช่วย'];
+    var EXEC_RANK = ['ผู้อำนวยการ', 'รองผู้อำนวยการ'];
+
+    var session = getSession();
+    if (session && getToken()) mountChrome('directory'); else { mountFooter(); applyBranding(); }
+    if (!session) {
+      document.getElementById('app-topbar').innerHTML =
+        '<div class="topbar"><button class="brand js-home-btn" type="button"><span class="js-brand-logo"><span class="logo-dot"></span></span> <span class="js-site-name">BNKAcademicHub</span></button>' +
+        '<div class="topbar-right"><a href="index.html" class="btn btn-ghost btn-sm">เข้าสู่ระบบ</a></div></div>';
+      var hb = document.querySelector('.js-home-btn'); if (hb) hb.addEventListener('click', function () { location.href = 'index.html'; });
+    }
+
+    function rankIndex(list, v) { var i = list.indexOf(v); return i < 0 ? 999 : i; }
+    function hasHead(p, k) { return (p.headRoles || []).indexOf(k) >= 0; }
+    function cmpPerson(a, b) {
+      // หัวหน้าของกลุ่มที่จัดอยู่ (กลุ่มสาระฯ หรือกลุ่มบริหารงาน) ก่อน -> ตำแหน่งสูงไปต่ำ -> ชื่อ
+      var key = groupBy === 'dept' ? 'dept' : 'subject';
+      var h = (hasHead(b, key) ? 1 : 0) - (hasHead(a, key) ? 1 : 0);
+      if (h) return h;
+      var r = rankIndex(POSITION_RANK, a.position) - rankIndex(POSITION_RANK, b.position);
+      if (r) return r;
+      return String(a.name).localeCompare(String(b.name), 'th');
+    }
+    // ชื่อกลุ่มบริหารงานแบบ "คีย์" ไว้เทียบกัน (1.44.111026): ตัดคำนำหน้า "กลุ่มบริหารงาน"/"ฝ่าย" และช่องว่างออก
+    // กันกรณีข้อมูลเก่าเก็บชื่อกลุ่มคนละรูปแบบ (เช่น "ฝ่ายวิชาการ" กับ "วิชาการ") แล้วถูกจัดเป็น "ยังไม่สังกัด" ทั้งที่สังกัดอยู่
+    function dkey(n) { return String(n || '').replace(/\s+/g, '').replace(/^กลุ่มบริหารงาน/, '').replace(/^ฝ่าย/, ''); }
+    function sameDept(a, b) { return !!a && !!b && dkey(a) === dkey(b); }
+    function inDeptList(d) { return deptList.some(function (x) { return sameDept(x, d); }); }
+    // ป้ายใต้ชื่อ (1.44.111026 จัดลำดับใหม่ตามที่ผู้ใช้ขอ: รูป → ชื่อ → ตำแหน่ง → สังกัด)
+    //  - จัดกลุ่มตามกลุ่มสาระฯ: บรรทัด "สังกัด" = กลุ่มบริหารงานที่สังกัด (หรือ "หัวหน้ากลุ่มบริหารงาน…" ถ้าเป็นหัวหน้า / "ไม่ระบุกลุ่มบริหารงาน" ถ้ายังไม่สังกัด)
+    //  - จัดกลุ่มตามกลุ่มบริหารงาน: กลุ่มเป็นหัวข้ออยู่แล้ว บรรทัดใต้ตำแหน่งจึงบอกกลุ่มสาระฯ แทน
+    // ทำเนียบไม่บอกว่าใครเป็นเจ้าหน้าที่/แอดมิน (ตั้งแต่ 1.41.111026) — ผู้บริหารไม่สังกัดกลุ่ม จึงไม่มีบรรทัดนี้
+    // คืนค่า [{text, muted}]
+    function subTags(p, short) {
+      var sub = [];
+      if (p.kind === 'executive') return sub;
+      if (groupBy === 'dept') {
+        if (hasHead(p, 'dept') && p.department) sub.push({ text: short ? 'หัวหน้ากลุ่มบริหารงาน' : 'หัวหน้า' + groupLabel(p.department) });
+        if (hasHead(p, 'subject')) sub.push({ text: (short ? 'หัวหน้ากลุ่มสาระฯ' : 'หัวหน้ากลุ่มสาระการเรียนรู้') + (p.subjectGroup || '') }); // 1.92.5: บอกชื่อกลุ่มสาระฯ
+        else if (p.subjectGroup) sub.push({ text: (short ? 'สาระฯ' : 'กลุ่มสาระการเรียนรู้') + p.subjectGroup });
+      } else {
+        if (p.department) sub.push({ text: (hasHead(p, 'dept') ? 'หัวหน้า' : '') + groupLabel(p.department), dept: p.department }); // 1.56: dept = ใช้สีของกลุ่ม
+        else sub.push({ text: 'ไม่ระบุกลุ่มบริหารงาน', muted: true });
+        if (hasHead(p, 'subject')) sub.push({ text: short ? 'หัวหน้ากลุ่มสาระฯ' : 'หัวหน้ากลุ่มสาระการเรียนรู้' + (p.subjectGroup || '') });
+      }
+      return sub;
+    }
+    function linkAttrs(p) {
+      return ' href="view.html?id=' + encodeURIComponent(p.id) + '" target="_blank" rel="noopener" title="เปิดหน้าแสดงผลงานของ ' + escapeHtml(p.name) + '"';
+    }
+    function cardHtml(p, isExec) {
+      var sub = subTags(p);
+      var inner = '<div class="dir-avatar">' + avatarInnerHtml(p.avatarUrl) + '</div>' +
+        '<div class="dir-name">' + escapeHtml(p.name) + '</div>' +
+        '<div class="dir-pos">' + escapeHtml(p.position || (isExec ? 'ผู้บริหาร' : '')) + '</div>' +
+        sub.map(function (t) { return '<div class="dir-sub' + (t.muted ? ' muted' : '') + '"' + (t.dept ? deptColorAttr(t.dept) : '') + '>' + escapeHtml(t.text) + '</div>'; }).join('');
+      var cls = 'dir-card' + (isExec ? ' dir-exec' : '');
+      // คลิกที่ใดก็ได้ในกรอบการ์ด -> เปิดหน้าแสดงผลงานของคนนั้นในแท็บใหม่ (ผู้บริหารไม่มีหน้าผลงาน จึงไม่เป็นลิงก์)
+      if (p.hasPage) {
+        return '<a class="' + cls + ' dir-link" data-kind="' + p.kind + '"' + linkAttrs(p) + '>' + inner + '</a>';
+      }
+      return '<div class="' + cls + '" data-kind="' + p.kind + '">' + inner + '</div>';
+    }
+    function sectionHtml(title, people, isExec, key) {
+      if (!people.length) return '';
+      return '<section class="dir-section" data-group="' + escapeHtml(key) + '"' + deptColorAttr(key) + '><h2 class="dir-section-title">' + escapeHtml(title) +
+        ' <span class="dir-count">' + people.length + ' คน</span></h2><div class="dir-grid">' +
+        people.map(function (p) { return cardHtml(p, isExec); }).join('') + '</div></section>';
+    }
+    // ---- มุมมองผังองค์กร ----
+    function nodeHtml(p, extra) {
+      var isExec = p.kind === 'executive';
+      var cls = 'tn' + (extra ? ' ' + extra : '') + (hasHead(p, groupBy === 'dept' ? 'dept' : 'subject') ? ' head' : '') + (p.hasPage ? ' tn-link' : '');
+      var inner = '<div class="tav">' + avatarInnerHtml(p.avatarUrl) + '</div>' +
+        '<div class="tname">' + escapeHtml(p.name) + '</div>' +
+        '<div class="tpos">' + escapeHtml(p.position || (isExec ? 'ผู้บริหาร' : '')) + '</div>' +
+        subTags(p, true).map(function (t) { return '<div class="tsub' + (t.muted ? ' muted' : '') + '"' + (t.dept ? deptColorAttr(t.dept) : '') + '>' + escapeHtml(t.text) + '</div>'; }).join('');
+      if (p.hasPage) return '<a class="' + cls + '" data-kind="' + p.kind + '"' + linkAttrs(p) + '>' + inner + '</a>';
+      return '<div class="' + cls + '" data-kind="' + p.kind + '">' + inner + '</div>';
+    }
+    function columnHtml(title, list, key) {
+      // คอลัมน์ของ 8 กลุ่มสาระฯ แสดงเสมอแม้ยังไม่มีรายชื่อ (เห็นโครงร่างของผัง) — มีเฉพาะ "ครูและบุคลากรอื่นๆ" ที่โผล่เมื่อมีคนเท่านั้น
+      if (!list.length && key === 'other') return '';
+      var body = list.length
+        ? list.map(function (p) { return '<div class="vitem">' + nodeHtml(p, '') + '</div>'; }).join('')
+        : '<div class="vitem"><div class="tn-empty">ยังไม่มีรายชื่อ</div></div>';
+      return '<li data-group="' + escapeHtml(key) + '"' + deptColorAttr(key) + (list.length ? '' : ' data-empty="1"') + '><div class="gtitle">' + escapeHtml(title) + '</div><div class="vlist">' + body + '</div></li>';
+    }
+    function splitPeople(people) {
+      var execs = people.filter(function (p) { return p.kind === 'executive'; })
+        .sort(function (a, b) { return rankIndex(EXEC_RANK, a.position) - rankIndex(EXEC_RANK, b.position) || String(a.name).localeCompare(String(b.name), 'th'); });
+      return { execs: execs, rest: people.filter(function (p) { return p.kind !== 'executive'; }) };
+    }
+    // รายการกลุ่ม (คอลัมน์/หัวข้อ) ตามที่เลือกจัดกลุ่ม: กลุ่มสาระฯ = 8 กลุ่มตายตัว · กลุ่มบริหารงาน = ตามรายการที่ตั้งไว้ในระบบ + "ยังไม่สังกัด" ท้ายสุด
+    function buildGroups(rest) {
+      var groups = [];
+      if (groupBy === 'dept') {
+        deptList.forEach(function (d) {
+          groups.push({ key: d, title: groupLabel(d), list: rest.filter(function (p) { return sameDept(p.department, d); }).sort(cmpPerson) });
+        });
+        groups.push({ key: 'other', title: 'ไม่ระบุกลุ่มบริหารงาน', list: rest.filter(function (p) { return !p.department || !inDeptList(p.department); }).sort(cmpPerson) });
+      } else {
+        SUBJECT_GROUP_ORDER.forEach(function (g) {
+          groups.push({ key: g, title: 'กลุ่มสาระการเรียนรู้' + g, list: rest.filter(function (p) { return p.subjectGroup === g; }).sort(cmpPerson) });
+        });
+        groups.push({ key: 'other', title: 'ครูและบุคลากรอื่นๆ', list: rest.filter(function (p) { return SUBJECT_GROUP_ORDER.indexOf(p.subjectGroup) < 0; }).sort(cmpPerson) });
+      }
+      return groups;
+    }
+    function visibleGroups(rest) {
+      var gs = buildGroups(rest);
+      return filterVal ? gs.filter(function (g) { return g.key === filterVal; }) : gs;
+    }
+    function treeHtml(people) {
+      var sp = splitPeople(people), execs = sp.execs, rest = sp.rest;
+      var cols = '';
+      visibleGroups(rest).forEach(function (g) { cols += columnHtml(g.title, g.list, g.key); });
+      var h = '<div class="tree-hint" id="treeHint"><i class="fa-solid fa-arrows-left-right"></i> เลื่อนซ้าย-ขวาเพื่อดูกลุ่มอื่นๆ</div><div class="tree-wrap"><div class="tree" id="dirTree">';
+      if (execs.length) {
+        h += '<ul><li>' + nodeHtml(execs[0], 'ex1');
+        if (execs.length > 1) h += '<ul>' + execs.slice(1).map(function (e) { return '<li>' + nodeHtml(e, 'ex2') + '</li>'; }).join('') + '</ul>';
+        h += '</li></ul>';
+      }
+      // คณะผู้บริหารแสดงเมื่อมีบัญชีผู้บริหารเท่านั้น — ถ้ายังไม่มีเลย ผังเริ่มที่เส้นของกลุ่ม
+      h += '<div class="bus' + (execs.length ? '' : ' noroot') + '"><ul>' + cols + '</ul></div>';
+      return h + '</div></div>';
+    }
+    function cardsHtml(people) {
+      var sp = splitPeople(people), rest = sp.rest;
+      var html = filterVal ? '' : sectionHtml('คณะผู้บริหาร', sp.execs, true, 'executive');
+      visibleGroups(rest).forEach(function (g) { html += sectionHtml(g.title, g.list, false, g.key); });
+      return html;
+    }
+    // ---- เลือกมุมมอง: ค่าเริ่มต้นตามความกว้างจอ (>=768px = ผังองค์กร, มือถือ = การ์ด) ผู้ใช้กดสลับเองได้และจำไว้ในเครื่องนั้น ----
+    var VIEW_KEY = 'bnkah_dir_view';
+    var wideMq = window.matchMedia ? window.matchMedia('(min-width: 768px)') : null;
+    var allPeople = null;
+    var deptList = [];
+    var GROUP_KEY = 'bnkah_dir_group';
+    var groupBy = 'subject', filterVal = '';
+    try { var gv = localStorage.getItem(GROUP_KEY); if (gv === 'dept' || gv === 'subject') groupBy = gv; } catch (e) {}
+    function storedView() { try { var v = localStorage.getItem(VIEW_KEY); return (v === 'tree' || v === 'cards') ? v : null; } catch (e) { return null; } }
+    function currentView() { return storedView() || ((wideMq && wideMq.matches) ? 'tree' : 'cards'); }
+    // ตัวกรอง: เลือกดูทีละกลุ่ม (รายการเปลี่ยนตามวิธีจัดกลุ่ม)
+    function syncGroupControls() {
+      Array.prototype.forEach.call(document.querySelectorAll('.dir-groupby button'), function (b) {
+        b.setAttribute('aria-pressed', b.getAttribute('data-group') === groupBy ? 'true' : 'false');
+      });
+      var sel = document.getElementById('dirFilter');
+      var opts = [{ key: '', title: groupBy === 'dept' ? 'ทุกกลุ่มบริหารงาน' : 'ทุกกลุ่มสาระการเรียนรู้' }];
+      buildGroups([]).forEach(function (g) { opts.push({ key: g.key, title: g.title }); });
+      if (!opts.some(function (o) { return o.key === filterVal; })) filterVal = '';
+      sel.innerHTML = opts.map(function (o) { return '<option value="' + escapeHtml(o.key) + '"' + (o.key === filterVal ? ' selected' : '') + '>' + escapeHtml(o.title) + '</option>'; }).join('');
+      sel.setAttribute('aria-label', groupBy === 'dept' ? 'กรองตามกลุ่มบริหารงาน' : 'กรองตามกลุ่มสาระการเรียนรู้');
+    }
+    function render(people) {
+      if (people) allPeople = people;
+      syncGroupControls();
+      var root = document.getElementById('dirRoot');
+      var view = currentView();
+      Array.prototype.forEach.call(document.querySelectorAll('.dir-toggle:not(.dir-groupby) button'), function (b) {
+        b.setAttribute('aria-pressed', b.getAttribute('data-view') === view ? 'true' : 'false');
+      });
+      root.setAttribute('data-view', view);
+      var html = view === 'tree' ? treeHtml(allPeople || []) : cardsHtml(allPeople || []);
+      root.innerHTML = html || '<div class="dir-notice">ยังไม่มีข้อมูลบุคลากร</div>';
+      fitTreeNames();
+      updateTreeHint();
+      centerTreeOnRoot();
+    }
+    // ชื่อยาวเกินกรอบ -> ลดขนาดตัวอักษรทีละ 0.5px จนพอดีบรรทัดเดียว (ขั้นต่ำ 10px; ต่ำกว่านั้นอ่านยาก จึงปล่อยให้ตัดท้ายด้วย …)
+    var NAME_MIN_PX = 10;
+    function fitTreeNames() {
+      Array.prototype.forEach.call(document.querySelectorAll('#dirTree .tname'), function (el) {
+        el.style.fontSize = '';
+        var size = parseFloat(getComputedStyle(el).fontSize) || 13;
+        while (el.scrollWidth > el.clientWidth + 0.5 && size > NAME_MIN_PX) {
+          size -= 0.5;
+          el.style.fontSize = size + 'px';
+        }
+      });
+    }
+    // ฟอนต์ Sarabun โหลดเสร็จทีหลังแล้วความกว้างตัวอักษรเปลี่ยน -> วัดใหม่อีกรอบ
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { fitTreeNames(); updateTreeHint(); });
+    // ผังกว้างเกินจอ: เลื่อนให้ ผอ. (บนสุด) อยู่กลางจอตั้งแต่แรก ไม่ต้องไปไล่หาทางขวา
+    function centerTreeOnRoot() {
+      var w = document.querySelector('.tree-wrap'), r = document.querySelector('#dirTree > ul .tn');
+      if (!w || !r || w.scrollWidth <= w.clientWidth) return;
+      var wr = w.getBoundingClientRect(), rr = r.getBoundingClientRect();
+      w.scrollLeft = Math.max(0, w.scrollLeft + (rr.left + rr.width / 2) - (wr.left + wr.width / 2));
+    }
+    function updateTreeHint() {
+      var w = document.querySelector('.tree-wrap'), h = document.getElementById('treeHint');
+      if (w && h) h.classList.toggle('show', w.scrollWidth > w.clientWidth + 2);
+    }
+    window.addEventListener('resize', updateTreeHint);
+    Array.prototype.forEach.call(document.querySelectorAll('.dir-groupby button'), function (b) {
+      b.addEventListener('click', function () {
+        groupBy = b.getAttribute('data-group') === 'dept' ? 'dept' : 'subject';
+        filterVal = '';
+        try { localStorage.setItem(GROUP_KEY, groupBy); } catch (e) {}
+        if (allPeople) render();
+      });
+    });
+    document.getElementById('dirFilter').addEventListener('change', function () { filterVal = this.value; if (allPeople) render(); });
+    Array.prototype.forEach.call(document.querySelectorAll('.dir-toggle:not(.dir-groupby) button'), function (b) {
+      b.addEventListener('click', function () {
+        try { localStorage.setItem(VIEW_KEY, b.getAttribute('data-view')); } catch (e) {}
+        if (allPeople) render();
+      });
+    });
+    if (wideMq) {
+      var onMq = function () { if (allPeople) render(); };
+      if (wideMq.addEventListener) wideMq.addEventListener('change', onMq); else if (wideMq.addListener) wideMq.addListener(onMq);
+    }
+    async function load() {
+      var root = document.getElementById('dirRoot');
+      try {
+        var res = (session && getToken()) ? await apiCall('hubListDirectory', {}) : await apiCall('publicGetDirectory', {});
+        deptList = res.departments || [];
+        // Worker รุ่นเก่า (ก่อน 1.41) ไม่ส่งรายชื่อกลุ่มมา — สร้างจากกลุ่มของบุคลากรแทน ไม่ให้ทุกคนตกไปอยู่ "ไม่ระบุกลุ่ม"
+        if (!deptList.length) (res.people || []).forEach(function (p) { if (p.department && !inDeptList(p.department)) deptList.push(p.department); });
+        try { var stD = await getSiteSettings(); if (stD && Array.isArray(stD.teacherPositions) && stD.teacherPositions.length) POSITION_RANK = stD.teacherPositions.slice().reverse(); } catch (e) { /* ไม่มีค่าตั้งค่า = ป้ายกลุ่มใช้สีหลัก */ } // 1.56: สีของแต่ละกลุ่มบริหารงาน · 1.94: ลำดับตำแหน่งจากตั้งค่า (สูงสุดก่อน)
+        render(res.people || []);
+      } catch (err) {
+        var msg = (err && err.message) || 'โหลดไม่สำเร็จ';
+        if (!session) msg = 'ทำเนียบบุคลากรเปิดให้เฉพาะผู้ที่เข้าสู่ระบบ — กรุณาเข้าสู่ระบบก่อน';
+        root.innerHTML = '<div class="dir-notice">' + escapeHtml(msg) + '</div>';
+      }
+    }
+    window.__refreshPageData = load;
+    load();
+  </script>
+</body>
+</html>

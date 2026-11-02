@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<!-- 1.80: PWA — ติดตั้งลงหน้าจอหลัก/คอมได้ (manifest + ไอคอน · sw.js ลงทะเบียนใน api.js) -->
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="theme-color" content="#0b6fcc" />
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="BNK Hub" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<script>(function(){try{var t=localStorage.getItem('bnkah_theme');if(t==='dark'||t==='sepia')document.documentElement.setAttribute('data-theme',t);document.documentElement.classList.add('nav-noanim');if(localStorage.getItem('bnkah_memo_off')==='1')document.documentElement.classList.add('memo-off');}catch(e){}})();</script>
+<title>คลังคำสั่ง — BNKAcademicHub</title>
+<link rel="stylesheet" href="assets/fontawesome/css/fontawesome.min.css" />
+<link rel="stylesheet" href="assets/fontawesome/css/solid.min.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700&family=Sarabun:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/style.css?v=1.98.2.021126" />
+<!-- 1.56: ธีมสีจากค่าที่จำไว้ (ใส่หลัง style.css ให้ทับค่าเริ่มต้น) — ดู applyThemeColor ใน api.js -->
+<script>(function(){try{var c=localStorage.getItem('bnkah_theme_css');if(c){var e=document.createElement('style');e.id='bnkahThemeVars';e.textContent=c;document.head.appendChild(e);}}catch(e){}})();</script>
+</head>
+<body>
+  <!-- คลังคำสั่ง (ตั้งแต่ 1.43.111026 — เดิม "ไฟล์คำสั่ง" ของ 1.41): ทุกบัญชีที่ล็อกอินดู/พรีวิว/เพิ่มคำสั่งได้ · แก้ไข/ลบได้เฉพาะเจ้าของ · PDF เท่านั้น
+       ไฟล์ใน Drive: คลังคำสั่ง / กลุ่มบริหารงาน<ชื่อ> / ปีการศึกษา <ปี> / ภาคเรียนที่ <x> ตั้งชื่อเป็น "<เลขที่-ปี> <ชื่อคำสั่ง> ภาคเรียนที่ <x> ปีการศึกษา <ปี>.pdf" -->
+  <div id="app-topbar"></div>
+  <div class="container">
+    <div class="page-header orders-header">
+      <div>
+        <h1>คลังคำสั่ง</h1>
+        <p id="ordSubtitle">คลังคำสั่งของโรงเรียน</p>
+      </div>
+      <div class="ord-head-btns">
+        <button type="button" class="btn page-refresh-btn" id="ordRefreshBtn" title="รีเฟรชข้อมูล" aria-label="รีเฟรชข้อมูล"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i></button>
+        <button type="button" class="btn btn-primary" id="ordAddBtn" hidden><i class="fa-solid fa-plus"></i> เพิ่มคำสั่ง</button>
+      </div>
+    </div>
+    <!-- 1.79: แถบตัวกรองมาตรฐาน (ค้นหา → ปีการศึกษา → ภาคเรียน → กลุ่ม → ทั้งหมด/ของฉัน) -->
+    <div class="flt" id="ordFlt">
+      <input type="search" class="flt-q" id="ordSearch" placeholder="ค้นหาคำสั่ง (ชื่อ เลขที่ ผู้รับผิดชอบ)" aria-label="ค้นหา" />
+      <button type="button" class="flt-toggle" aria-haspopup="dialog"><i class="fa-solid fa-sliders" aria-hidden="true"></i> ตัวกรอง <span class="flt-n" hidden></span></button>
+      <div class="flt-backdrop"></div>
+      <div class="flt-panel" role="group" aria-label="ตัวกรอง">
+        <div class="flt-head"><span><i class="fa-solid fa-sliders" aria-hidden="true"></i> ตัวกรอง</span><button type="button" class="modal-close-x flt-x" aria-label="ปิด">✕</button></div>
+        <label class="flt-f"><span>ปีการศึกษา</span><select id="ordYear" aria-label="ปีการศึกษา"></select></label>
+        <label class="flt-f"><span>ภาคเรียน</span><select id="ordSem" aria-label="ภาคเรียน"><option value="">ทุกภาคเรียน</option><option value="1">ภาคเรียนที่ 1</option><option value="2">ภาคเรียนที่ 2</option><option value="summer">ภาคฤดูร้อน</option></select></label>
+        <label class="flt-f"><span>กลุ่ม</span><select id="ordSubject" aria-label="กลุ่มบริหารงาน / กลุ่มสาระการเรียนรู้"></select></label>
+        <label class="flt-f"><span>แสดง</span><select id="ordMine" aria-label="แสดง"><option value="">ทั้งหมด</option><option value="mine">ที่ฉันเพิ่ม</option><option value="resp">ที่ฉันรับผิดชอบ</option></select></label>
+        <div class="flt-acts"><button type="button" class="btn btn-close flt-clear" hidden><i class="fa-solid fa-xmark" aria-hidden="true"></i> ล้างตัวกรอง</button><button type="button" class="btn btn-success flt-done">แสดงผล</button></div>
+      </div>
+    </div>
+    <div class="flt-chips" id="ordFltChips"></div>
+    <div class="flt-meta"><span class="flt-count" id="ordFltCount"></span><span class="year-scope-hint" id="ordYearHint" hidden></span></div>
+    <div id="ordRoot"><div class="loading">กำลังโหลด...</div></div>
+  </div>
+
+  <!-- เพิ่ม/แก้ไขคำสั่ง -->
+  <div class="modal-backdrop" id="ordModal" hidden>
+    <div class="modal-box modal-box-wide">
+      <button type="button" class="modal-close-x" id="ordCloseX" aria-label="ปิด">✕</button>
+      <h3 id="ordModalTitle">เพิ่มคำสั่ง</h3>
+      <div id="ordError" class="error-box" hidden></div>
+      <form id="ordForm" style="text-align:left;" novalidate>
+        <div class="field" id="ordFileWrap">
+          <label>ไฟล์คำสั่ง (PDF เท่านั้น สูงสุด 10 ไฟล์ ไม่เกิน <span data-upmax>25MB</span> ต่อไฟล์)</label>
+          <!-- 1.44.111026: ช่องเลือกไฟล์แบบเดียวกับตอนครูส่งผลงาน (ลากไฟล์มาวาง หรือกดเพื่อเลือก) · 1.51.121026: เลือกได้หลายไฟล์ -->
+          <div class="dropzone" id="ordDropzone" tabindex="0">
+            <div><i class="fas fa-paperclip ui-icon" aria-hidden="true"></i> ลากไฟล์ PDF มาวางที่นี่ หรือกดเพื่อเลือกไฟล์ (เลือกได้หลายไฟล์)</div>
+            <input id="ordFile" type="file" accept="application/pdf,.pdf" multiple hidden />
+          </div>
+          <div id="ordFileChip"></div>
+        </div>
+        <div class="field">
+          <label for="ordTitle">ชื่อคำสั่ง</label>
+          <input id="ordTitle" maxlength="300" placeholder="เช่น แต่งตั้งคณะกรรมการดำเนินงานกีฬาสี" />
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="ordNoNum">เลขที่คำสั่ง (ถ้ามี)</label>
+            <div class="ord-no-row">
+              <input id="ordNoNum" maxlength="20" inputmode="numeric" placeholder="123" aria-label="เลขที่คำสั่ง" />
+              <span class="ord-no-slash">/</span>
+              <input id="ordNoYear" maxlength="4" inputmode="numeric" placeholder="2569" aria-label="ปี พ.ศ. ของเลขที่คำสั่ง" />
+            </div>
+          </div>
+          <div class="field">
+            <label for="ordDate">วันที่จัดทำคำสั่ง</label>
+            <input id="ordDate" type="date" />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="ordAcYear">ปีการศึกษา</label>
+            <input id="ordAcYear" maxlength="4" inputmode="numeric" placeholder="2569" />
+          </div>
+          <div class="field">
+            <label for="ordSem">ภาคเรียน</label>
+            <select id="ordSem"></select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="ordActStart">กิจกรรมเริ่มวันที่ (ถ้ามี)</label>
+            <input id="ordActStart" type="date" />
+          </div>
+          <div class="field">
+            <label for="ordActEnd">ถึงวันที่ (เว้นว่าง = วันเดียว)</label>
+            <input id="ordActEnd" type="date" />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="ordDeptSel">กลุ่มบริหารงาน</label>
+            <select id="ordDeptSel"></select>
+          </div>
+          <div class="field">
+            <label for="ordSubjectSel">กลุ่มสาระการเรียนรู้ (ถ้ามี)</label>
+            <select id="ordSubjectSel"></select>
+          </div>
+        </div>
+        <div class="field">
+          <label for="ordRespSearch">ผู้รับผิดชอบ (เลือกได้หลายคน)</label>
+          <div class="resp-chips" id="ordRespChips"></div>
+          <input type="search" id="ordRespSearch" placeholder="พิมพ์ชื่อเพื่อค้นหา" autocomplete="off" />
+          <div class="resp-list" id="ordRespList"></div>
+        </div>
+        <div class="hint ord-drive-name" id="ordDriveName"></div>
+        <div class="modal-actions">
+          <button type="submit" class="btn btn-primary" id="ordSaveBtn">บันทึก</button>
+          <button type="button" class="btn btn-ghost btn-close" id="ordCancel">ยกเลิก</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- เพิ่มไฟล์ในคำสั่งที่มีอยู่ (1.51.121026) -->
+  <div class="modal-backdrop" id="ordFilesModal" hidden>
+    <div class="modal-box modal-box-wide">
+      <button type="button" class="modal-close-x" id="ordFilesCloseX" aria-label="ปิด">✕</button>
+      <h3>เพิ่มไฟล์ในคำสั่ง</h3>
+      <p class="hint" id="ordFilesFor" style="margin-top:-6px;"></p>
+      <div id="ordFilesError" class="error-box" hidden></div>
+      <div style="text-align:left;">
+        <div class="dropzone" id="ordFilesDrop" tabindex="0">
+          <div><i class="fas fa-paperclip ui-icon" aria-hidden="true"></i> ลากไฟล์ PDF มาวางที่นี่ หรือกดเพื่อเลือกไฟล์</div>
+          <input id="ordFilesInput" type="file" accept="application/pdf,.pdf" multiple hidden />
+        </div>
+        <div id="ordFilesChips"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-primary" id="ordFilesSave">อัปโหลด</button>
+        <button type="button" class="btn btn-ghost btn-close" id="ordFilesCancel">ยกเลิก</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="app-footer"></div>
+  <script src="assets/api.js?v=1.98.2.021126"></script>
+  <script>
+    var session = requireLogin();
+    var orders = [], departments = [], subjectGroups = [], people = [], myDepartment = '', summerOn = true, retentionYears = 0;
+    var editingId = '';
+
+    var respSelected = []; // id ของผู้รับผิดชอบที่เลือกในฟอร์ม (เรียงตามลำดับที่เลือก)
+
+    function $(id) { return document.getElementById(id); }
+    function showErr(msg) { var e = $('ordError'); e.textContent = msg || ''; e.hidden = !msg; if (msg) e.scrollIntoView({ block: 'nearest' }); }
+    function semText(s) { return s === 'summer' ? 'ภาคฤดูร้อน' : 'ภาคเรียนที่ ' + s; }
+    function personName(id) { var p = people.filter(function (x) { return x.id === id; })[0]; return p ? p.name : ''; }
+
+    function activityText(o) {
+      if (!o.activityStart) return '';
+      if (!o.activityEnd) return formatDateThai(o.activityStart);
+      return formatDateThai(o.activityStart) + ' – ' + formatDateThai(o.activityEnd);
+    }
+    // ปีการศึกษาของคำสั่ง (คำสั่งเก่าจาก 1.41–1.42 ไม่มีปีการศึกษา ใช้ปี พ.ศ. ของวันที่จัดทำแทนในตัวกรอง)
+    function yearOf(o) { return o.academicYear || String(Number(String(o.orderDate).slice(0, 4)) + 543); }
+
+    // 1.48.121026: ตัวกรองปีการศึกษาเริ่มต้นที่ปีการศึกษาปัจจุบัน (ครั้งแรกที่เปิดหน้า) และมีตัวเลือกปีนี้เสมอแม้ยังไม่มีคำสั่ง
+    var fltBar = initFilterBar('ordFlt', { unit: 'คำสั่ง', defaults: function () { return { ordYear: curTerm ? String(curTerm.year || '') : '', ordSem: '', ordSubject: '', ordMine: '' }; } });
+    var curTerm = null, yearDefaulted = false, selYear = null, allYears = [], shownN = LIST_PAGE;
+    function fillFilters() {
+      var s = $('ordSubject'), y = $('ordYear');
+      var sv = s.value, yv = y.value;
+      yv = selYear || ''; // 1.63: ปีที่โหลดอยู่
+      s.innerHTML = groupFilterOptions(departments, subjectGroups, true); // 1.79: กลุ่มบริหารงาน + กลุ่มสาระฯ ในช่องเดียว
+      if (!summerOn) { var so = $('ordSem').querySelector('[value="summer"]'); if (so) so.remove(); }
+      var years = {};
+      allYears.forEach(function (x) { years[x] = 1; });
+      orders.forEach(function (o) { years[yearOf(o)] = 1; });
+      if (curTerm && curTerm.year) years[curTerm.year] = 1;
+      if (selYear) years[selYear] = 1;
+      var ylist = Object.keys(years).sort(function (a, b) { return b - a; });
+      y.innerHTML = '<option value="">ทุกปีการศึกษา</option>' + ylist.map(function (x) { return '<option value="' + x + '">ปีการศึกษา ' + x + '</option>'; }).join('');
+      s.value = sv; y.value = yv;
+      if (s.value !== sv) s.value = '';
+      if (y.value !== yv) y.value = '';
+    }
+
+    // ---------- รายการแบบ "ป้ายปฏิทิน" (แบบ C ที่ผู้ใช้เลือก — 1.47.121026) ----------
+    // แบบย่อ: วันที่จัดทำ (ป้ายปฏิทิน) · ชื่อคำสั่ง (ยาวเกินตัดเป็น …) · ชิปเลขที่ + กลุ่มบริหารงาน · ปุ่มพรีวิว · ลูกศรขยาย
+    // แบบขยาย: ตารางรายละเอียดเต็ม + ปุ่มแก้ไข/ลบ (เฉพาะเจ้าของ) — เรียงตามวันที่จัดทำล่าสุดก่อน รายการเดียว ไม่แยกหัวข้อตามกลุ่ม
+    var expanded = {};
+    function rerender() { shownN = LIST_PAGE; render(); }
+    function render() {
+      var q = $('ordSearch').value.trim().toLowerCase();
+      var hint = $('ordYearHint');
+      hint.hidden = !(q && selYear);
+      if (!hint.hidden) hint.innerHTML = '<i class="fa-solid fa-circle-info"></i> ค้นหาเฉพาะปีการศึกษา ' + escapeHtml(selYear) + ' — <button type="button" id="ordSearchAllYears">ค้นหาทุกปีการศึกษา</button>';
+      var fs = $('ordSubject').value, fy = $('ordYear').value, fsem = $('ordSem').value, fm = $('ordMine').value;
+      var list = orders.filter(function (o) {
+        if (!groupFilterMatch(fs, o.department, o.subjectGroup)) return false;
+        if (fy && yearOf(o) !== fy) return false;
+        if (fsem && o.semester !== fsem) return false;
+        if (fm === 'mine' && !o.isOwner) return false;
+        if (fm === 'resp' && !(o.responsible || []).some(function (r) { return r.id === session.id; })) return false;
+        if (q) {
+          var hay = (o.title + ' ' + o.orderNo + ' ' + groupLabel(o.department) + ' ' + (o.subjectGroup || '') + ' ' + (o.responsible || []).map(function (r) { return r.name; }).join(' ')).toLowerCase();
+          if (hay.indexOf(q) < 0) return false;
+        }
+        return true;
+      });
+      var root = $('ordRoot');
+      fltBar.update(list.length);
+      if (!orders.length) { root.innerHTML = '<div class="orders-empty">' + (selYear ? 'ยังไม่มีคำสั่งในปีการศึกษา ' + escapeHtml(selYear) : 'ยังไม่มีคำสั่งในคลังคำสั่ง') + '</div>'; return; }
+      if (!list.length) { root.innerHTML = '<div class="orders-empty">ไม่พบคำสั่งที่ตรงกับเงื่อนไข</div>'; return; }
+      root.innerHTML = '<ul class="ordc-list">' + list.slice(0, shownN).map(rowHtml).join('') + '</ul>' + listMoreHtml(shownN, list.length);
+    }
+
+    function respText(o) {
+      var r = o.responsible || [];
+      return r.length ? r.map(function (x) { return escapeHtml(x.name); }).join(', ') : '—';
+    }
+    var TH_MONTH_ABBR = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+    function dateTile(iso) {
+      var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+      if (!m) return '<div class="ordc-date"><span class="m">—</span><span class="d">?</span><span class="y"></span></div>';
+      return '<div class="ordc-date" aria-hidden="true"><span class="m">' + TH_MONTH_ABBR[Number(m[2]) - 1] + '</span><span class="d">' + Number(m[3]) + '</span><span class="y">' + (Number(m[1]) + 543) + '</span></div>';
+    }
+    // ---------- ไฟล์ของคำสั่ง (1.51.121026: คำสั่งหนึ่งมีได้หลายไฟล์ — o.files[0] = ไฟล์แรก ref 'main') ----------
+    var MAX_FILES = 10;
+    function filesOf(o) { return (o.files && o.files.length) ? o.files : [{ ref: 'main', name: o.fileName, fileUrl: o.fileUrl, previewUrl: o.previewUrl, mimeType: 'application/pdf' }]; }
+    function orderTitleFull(o) { return (o.orderNo ? 'คำสั่งที่ ' + o.orderNo + ' ' : '') + o.title; }
+    function previewOrder(o, startIdx) {
+      var fs = filesOf(o);
+      function show(i) {
+        var f = fs[i];
+        openFilePreview(f.previewUrl || drivePreviewUrl(f.fileUrl), orderTitleFull(o) + (fs.length > 1 ? ' — ' + f.name : ''), f.fileUrl, undefined,
+          fs.length > 1 ? { index: i, total: fs.length, go: show } : null, fileKindOf(f.name, f.mimeType));
+      }
+      show(Math.max(0, Math.min(startIdx || 0, fs.length - 1)));
+    }
+    // ดาวน์โหลดหลายไฟล์: ใช้ iframe ซ่อนทีละไฟล์ (ไม่โดนบล็อกป๊อปอัป) — เบราว์เซอร์อาจถาม "อนุญาตให้ดาวน์โหลดหลายไฟล์" ครั้งแรก
+    function downloadAll(o) {
+      var urls = filesOf(o).map(function (f) { return driveDownloadUrl(f.fileUrl); }).filter(Boolean);
+      urls.forEach(function (u, i) {
+        setTimeout(function () {
+          var fr = document.createElement('iframe');
+          fr.style.display = 'none'; fr.className = 'dl-frame'; fr.src = u;
+          document.body.appendChild(fr);
+          setTimeout(function () { fr.remove(); }, 60000);
+        }, i * 900);
+      });
+      showToast('กำลังดาวน์โหลด ' + urls.length + ' ไฟล์ — ถ้าเบราว์เซอร์ถาม ให้กด "อนุญาต" ดาวน์โหลดหลายไฟล์');
+    }
+    function dlLink(f, cls, label) {
+      var u = driveDownloadUrl(f.fileUrl) || f.fileUrl;
+      return '<a class="' + cls + '" href="' + escapeHtml(u) + '" target="_blank" rel="noopener" download title="ดาวน์โหลด" aria-label="ดาวน์โหลด ' + escapeHtml(f.name) + '">' + label + '</a>';
+    }
+    function filesTableHtml(o) {
+      var fs = filesOf(o);
+      return '<table class="sub-files ord-files"><thead><tr><th>#</th><th>ไฟล์</th><th><span class="sr-only">จัดการ</span></th></tr></thead><tbody>' +
+        fs.map(function (f, i) {
+          return '<tr data-ofile="' + escapeHtml(f.ref) + '"><td class="n">' + (i + 1) + '</td>' +
+            '<td><div class="sub-file-name">' + fileTypeIconHtml(f.name || 'x.pdf', f.mimeType || 'application/pdf', 'sm') + '<span class="sub-file-title">' + escapeHtml(f.name || ('ไฟล์ที่ ' + (i + 1))) + '</span></div></td>' +
+            '<td class="a"><button type="button" class="icon-btn" data-ofile-preview="' + escapeHtml(o.id) + '" data-idx="' + i + '" title="พรีวิว" aria-label="พรีวิว ' + escapeHtml(f.name) + '"><i class="fa-solid fa-eye"></i></button>' +
+            dlLink(f, 'icon-btn', '<i class="fa-solid fa-download"></i>') +
+            (o.canManage && fs.length > 1 ? '<button type="button" class="icon-btn del" data-ofile-del="' + escapeHtml(o.id) + '" data-ref="' + escapeHtml(f.ref) + '" title="ลบไฟล์" aria-label="ลบไฟล์ ' + escapeHtml(f.name) + '"><i class="fa-solid fa-trash"></i></button>' : '') +
+            '</td></tr>';
+        }).join('') + '</tbody></table>';
+    }
+    function rowHtml(o) {
+      var act = activityText(o);
+      var open = !!expanded[o.id];
+      var fs = filesOf(o);
+      var rows = [
+        ['ชื่อคำสั่ง', escapeHtml(o.title)],
+        ['เลขที่คำสั่ง', o.orderNo ? escapeHtml(o.orderNo) : '—'],
+        ['วันที่จัดทำ', escapeHtml(formatDateThai(o.orderDate))],
+        ['ภาคเรียน / ปีการศึกษา', o.academicYear ? escapeHtml(semText(o.semester) + ' ปีการศึกษา ' + o.academicYear) : '—'],
+        ['กิจกรรม', act ? escapeHtml(act) : '—'],
+        ['กลุ่มบริหารงาน', '<span class="dept-tag"' + deptColorAttr(o.department) + '>' + escapeHtml(groupLabel(o.department)) + '</span>'],
+        ['กลุ่มสาระการเรียนรู้', o.subjectGroup ? escapeHtml(o.subjectGroup) : '—'],
+        ['ผู้รับผิดชอบ', respText(o)],
+        ['เพิ่มโดย', o.createdByName ? escapeHtml(o.createdByName) : '—']
+      ];
+      var canAddMore = o.canManage && fs.length < MAX_FILES;
+      return '<li class="ordc-item orders-row' + (open ? ' open' : '') + '" data-id="' + escapeHtml(o.id) + '">' +
+        '<div class="ordc-main" data-expand="' + escapeHtml(o.id) + '" role="button" tabindex="0" aria-expanded="' + open + '">' +
+          dateTile(o.orderDate) +
+          '<div class="ordc-body">' +
+            '<div class="ordc-title orders-title" title="' + escapeHtml(o.title) + '">' + escapeHtml(o.title) + '</div>' +
+            '<div class="ordc-chips">' +
+              (o.orderNo ? '<span class="ordc-chip no">คำสั่งที่ ' + escapeHtml(o.orderNo) + '</span>' : '<span class="ordc-chip">ไม่มีเลขที่</span>') +
+              '<span class="ordc-chip dept-c"' + deptColorAttr(o.department) + '>' + escapeHtml(groupLabel(o.department)) + '</span>' +
+              (fs.length > 1 ? '<span class="ordc-chip cnt"><i class="fa-solid fa-copy"></i> ' + fs.length + ' ไฟล์</span>' : '') +
+              (o.isOwner ? '<span class="ordc-chip own">ของฉัน</span>' : '') +
+            '</div>' +
+          '</div>' +
+          // 1.52.121026: แถวย่อเหลือแค่ไอคอน (พรีวิว / ดาวน์โหลด) — ปุ่มเต็มอยู่ล่างสุดตอนขยาย
+          '<div class="ordc-btns orders-actions">' +
+            '<button type="button" class="icon-btn ord-ic" data-preview="' + escapeHtml(o.id) + '" title="' + (fs.length > 1 ? 'พรีวิวทีละไฟล์' : 'พรีวิว') + '" aria-label="พรีวิว ' + escapeHtml(o.title) + '"><i class="fa-solid fa-eye"></i></button>' +
+            (fs.length > 1
+              ? '<button type="button" class="icon-btn ord-ic" data-dlall="' + escapeHtml(o.id) + '" title="ดาวน์โหลดทั้งหมด (' + fs.length + ' ไฟล์)" aria-label="ดาวน์โหลดทั้งหมด ' + fs.length + ' ไฟล์"><i class="fa-solid fa-download"></i></button>'
+              : dlLink(fs[0], 'icon-btn ord-ic ord-dl', '<i class="fa-solid fa-download"></i>')) +
+          '</div>' +
+          '<i class="fa-solid fa-chevron-down ordc-chev" aria-hidden="true"></i>' +
+        '</div>' +
+        (open ? '<div class="ordc-detail"><table>' + rows.map(function (r) { return '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>'; }).join('') + '</table>' +
+          filesTableHtml(o) +
+          '<div class="sub-group-bar ord-file-bar">' +
+            (fs.length > 1
+              ? '<button type="button" class="btn btn-primary btn-sm" data-preview="' + escapeHtml(o.id) + '"><i class="fa-solid fa-images"></i> พรีวิวทีละไฟล์</button>' +
+                '<button type="button" class="btn btn-secondary btn-sm" data-dlall="' + escapeHtml(o.id) + '"><i class="fa-solid fa-download"></i> ดาวน์โหลดทั้งหมด</button>'
+              : '<button type="button" class="btn btn-primary btn-sm" data-preview="' + escapeHtml(o.id) + '"><i class="fa-solid fa-eye"></i> พรีวิว</button>' +
+                dlLink(fs[0], 'btn btn-secondary btn-sm', '<i class="fa-solid fa-download"></i> ดาวน์โหลด')) +
+            (canAddMore ? '<button type="button" class="btn btn-secondary btn-sm" data-addfiles="' + escapeHtml(o.id) + '"><i class="fa-solid fa-plus"></i> เพิ่มไฟล์</button>' : '') +
+          '</div>' +
+          (o.canManage ? '<div class="ordc-acts"><button type="button" class="btn btn-ghost btn-sm" data-edit="' + escapeHtml(o.id) + '">แก้ไข</button><button type="button" class="btn btn-danger btn-sm" data-del="' + escapeHtml(o.id) + '">ลบคำสั่ง</button></div>' : '') +
+        '</div>' : '') +
+      '</li>';
+    }
+
+    // 1.63: โหลดทีละปีการศึกษา (ค่าเริ่มต้น = ปีปัจจุบัน) · ทุกปีการศึกษา = โหลดทั้งหมด · ปีที่โหลดแล้วจำไว้
+    var ordCache = makeYearCache(function (y) { return apiCall('orderList', { year: y }); });
+    async function load() { ordCache.clear(); await loadYear(selYear); }
+    async function loadYear(y) {
+      if (!curTerm) { try { curTerm = await currentAcademicTerm(); } catch (e) { curTerm = { year: '' }; } }
+      if (y === null || y === undefined) y = String(curTerm.year || '');
+      selYear = y;
+      if (!ordCache.has(y)) $('ordRoot').innerHTML = yearLoadingHtml(y);
+      try {
+        var res = await ordCache.get(y);
+        if (selYear !== y) return;
+        allYears = res.years || [];
+        try { await getSiteSettings(); } catch (e) { /* ไม่เป็นไร */ } // 1.56: สีป้ายกลุ่มบริหารงาน
+        orders = res.orders || []; departments = res.departments || []; subjectGroups = res.subjectGroups || [];
+        if (res.maxFiles) MAX_FILES = Number(res.maxFiles) || MAX_FILES;
+        people = res.people || []; myDepartment = res.myDepartment || ''; summerOn = res.summerEnabled !== false; retentionYears = Number(res.retentionYears || 0);
+      } catch (err) {
+        $('ordRoot').innerHTML = '<div class="error-box">' + escapeHtml(err.message || 'โหลดข้อมูลไม่สำเร็จ') + '</div>';
+        return;
+      }
+      $('ordAddBtn').hidden = !departments.length;
+      $('ordSubtitle').textContent = 'คลังคำสั่งของโรงเรียน (ไฟล์ PDF) — ทุกคนเพิ่มคำสั่งได้ แก้ไข/ลบได้เฉพาะผู้อัปโหลด' +
+        (retentionYears ? ' · เก็บไว้ ' + retentionYears + ' ปีหลังอัปโหลด แล้วระบบจะลบอัตโนมัติ' : '');
+      fillFilters();
+      rerender();
+    }
+
+    // ---------- ผู้รับผิดชอบ (เลือกหลายคน) ----------
+    function renderResp() {
+      $('ordRespChips').innerHTML = respSelected.length ? respSelected.map(function (id) {
+        return '<span class="resp-chip">' + escapeHtml(personName(id) || 'บัญชีที่ถูกลบ') + '<button type="button" data-resp-remove="' + escapeHtml(id) + '" aria-label="เอาออก">✕</button></span>';
+      }).join('') : '<span class="hint">ยังไม่ได้เลือก</span>';
+      var q = $('ordRespSearch').value.trim().toLowerCase();
+      var list = people.filter(function (p) { return !q || String(p.name).toLowerCase().indexOf(q) >= 0; });
+      $('ordRespList').innerHTML = list.length ? list.map(function (p) {
+        return '<label class="resp-item"><input type="checkbox" data-resp-id="' + escapeHtml(p.id) + '"' + (respSelected.indexOf(p.id) >= 0 ? ' checked' : '') + ' /> ' + escapeHtml(p.name) + '</label>';
+      }).join('') : '<div class="hint" style="padding:8px;">ไม่พบชื่อ</div>';
+    }
+
+    // ตัวอย่างชื่อไฟล์ที่จะบันทึกใน Google Drive (ฝั่ง Worker ตั้งชื่อจริงให้ — ตรงกับ orderDriveFileName ใน handlers/orders.js)
+    function updateDriveName() {
+      var num = $('ordNoNum').value.trim(), y = $('ordNoYear').value.trim(), title = $('ordTitle').value.trim(), ay = $('ordAcYear').value.trim(), sem = $('ordSem').value;
+      if (!title || !ay) { $('ordDriveName').textContent = ''; return; }
+      var name = [num && y ? num + '-' + y : '', title, semText(sem), 'ปีการศึกษา ' + ay].filter(Boolean).join(' ').replace(/[\\/:*?"<>|%]/g, ' ').replace(/\s+/g, ' ').trim() + '.pdf';
+      $('ordDriveName').innerHTML = '<i class="fa-solid fa-folder-tree"></i> ชื่อไฟล์ใน Google Drive: <b>' + escapeHtml(name) + '</b> <span class="hint">(ในระบบจะแสดงตามที่กรอก)</span>';
+    }
+
+    async function openModal(o) {
+      editingId = o ? o.id : '';
+      showErr('');
+      $('ordModalTitle').textContent = o ? 'แก้ไขข้อมูลคำสั่ง' : 'เพิ่มคำสั่ง';
+      $('ordFileWrap').hidden = !!o;
+      $('ordFile').value = '';
+      ordSelectedFiles = []; renderFileChip();
+      $('ordTitle').value = o ? o.title : '';
+      $('ordNoNum').value = o ? o.orderNoNumber : '';
+      $('ordNoYear').value = o ? o.orderNoYear : '';
+      $('ordDate').value = o ? o.orderDate : '';
+      $('ordActStart').value = o ? o.activityStart : '';
+      $('ordActEnd').value = o ? o.activityEnd : '';
+      $('ordSem').innerHTML = '<option value="1">ภาคเรียนที่ 1</option><option value="2">ภาคเรียนที่ 2</option>' + (summerOn ? '<option value="summer">ภาคฤดูร้อน</option>' : '');
+      var term = { year: '', semester: '1' };
+      try { term = await currentAcademicTerm(); } catch (e) { /* ใช้ค่าว่าง */ }
+      $('ordAcYear').value = o && o.academicYear ? o.academicYear : term.year;
+      $('ordSem').value = o && o.semester ? o.semester : term.semester;
+      if (!$('ordSem').value) $('ordSem').value = '1';
+      if (!o && !$('ordNoYear').value) $('ordNoYear').placeholder = String(new Date().getFullYear() + 543);
+      $('ordDeptSel').innerHTML = departments.map(function (x) { return '<option value="' + escapeHtml(x) + '">' + escapeHtml(groupLabel(x)) + '</option>'; }).join('');
+      $('ordDeptSel').value = o ? o.department : (departments.indexOf(myDepartment) >= 0 ? myDepartment : departments[0] || '');
+      $('ordSubjectSel').innerHTML = '<option value="">--ไม่มีกลุ่มสาระ--</option>' + subjectGroups.map(function (x) { return '<option value="' + escapeHtml(x) + '">' + escapeHtml(x) + '</option>'; }).join('');
+      $('ordSubjectSel').value = o ? o.subjectGroup : '';
+      respSelected = o ? (o.responsible || []).map(function (r) { return r.id; }).filter(function (id) { return !!personName(id); }) : [];
+      $('ordRespSearch').value = '';
+      renderResp();
+      updateDriveName();
+      showModalEl($('ordModal'));
+    }
+    function closeModal() { hideModalEl($('ordModal')); }
+
+    // ---------- เลือกไฟล์ (dropzone เหมือนหน้าส่งผลงาน — 1.51.121026: หลายไฟล์ สูงสุด MAX_FILES) ----------
+    var ordSelectedFiles = [];
+    function chipsHtml(list, removeAttr) {
+      if (!list.length) return '';
+      return '<div class="hint" style="margin:8px 0 2px;">เลือกแล้ว ' + list.length + ' ไฟล์</div>' + list.map(function (f, i) {
+        return '<div class="file-chip"><span class="file-chip-name">' + fileTypeIconHtml(f.name, f.type, 'xs') + '<span>' + escapeHtml(f.name) + ' (' + formatBytes(f.size) + ')</span></span><button type="button" class="file-chip-remove" ' + removeAttr + '="' + i + '" aria-label="เอาไฟล์ออก">&times;</button></div>';
+      }).join('');
+    }
+    function renderFileChip() { $('ordFileChip').innerHTML = chipsHtml(ordSelectedFiles, 'data-rm-file'); }
+    // ตรวจไฟล์ที่เลือก (PDF ≤ maxUploadBytes) แล้วเพิ่มเข้า list ได้ไม่เกิน limit — คืนข้อความ error (ถ้ามี)
+    function addPicked(list, fileList, limit) {
+      var errs = [];
+      Array.from(fileList || []).forEach(function (f) {
+        if (!/\.pdf$/i.test(f.name) || (f.type && f.type !== 'application/pdf')) { errs.push('"' + f.name + '" ไม่ใช่ไฟล์ PDF'); return; }
+        if (f.size > maxUploadBytes()) { errs.push('"' + f.name + '" ใหญ่เกิน ' + maxUploadLabel()); return; } // 1.86: ส่งตรงได้ถึง 100MB
+        if (list.length >= limit) { errs.push('เลือกได้สูงสุด ' + limit + ' ไฟล์'); return; }
+        list.push(f);
+      });
+      return errs.filter(function (x, i) { return errs.indexOf(x) === i; }).join(' · ');
+    }
+    function pickFile(fileList) {
+      var err = addPicked(ordSelectedFiles, fileList, MAX_FILES);
+      showErr(err ? 'คลังคำสั่งรับเฉพาะไฟล์ PDF — ' + err : '');
+      renderFileChip();
+    }
+
+    // อัปไฟล์เพิ่มเข้าคำสั่ง (ไฟล์ที่ startIdx+1 .. total ของแถบคืบหน้า) — คืนรายการไฟล์ที่ไม่สำเร็จ
+    async function uploadMoreFiles(orderId, list, p, startIdx, total, logAdd, done) {
+      var failed = [], seg = 100 / total;
+      for (var k = 0; k < list.length; k++) {
+        var f = list[k], i = startIdx + k, s0 = i * seg;
+        if (done && done.indexOf(f) !== -1) continue; // 1.85: ส่งใหม่ — ข้ามไฟล์ที่สำเร็จแล้ว
+        var head = 'ไฟล์ ' + (i + 1) + '/' + total + ': ' + f.name;
+        try {
+          p.setProgress(s0 + seg * 0.02, 'กำลังเตรียม ' + head);
+          var fp = await apiCall('orderFilePrepare', Object.assign({ orderId: orderId, fileName: f.name, mimeType: 'application/pdf', fileSize: f.size }, directUploadParams()));
+          var u = await sendPreparedFileProgress(fp, f, p, s0 + seg * 0.08, s0 + seg * 0.9, 'กำลังอัปโหลด ' + head + ' (' + formatBytes(f.size) + ')', { mimeType: 'application/pdf' }); // 1.86: ส่งตรง/สำรอง
+          p.setProgress(s0 + seg * 0.94, 'กำลังบันทึก ' + head);
+          await apiCall('orderFileFinalize', { orderId: orderId, fileRowId: fp.fileRowId, fileId: u.fileId, fileUrl: u.url, directUrl: u.directUrl, logAdd: !!logAdd, via: u.via, fallbackReason: u.fallbackReason || '' });
+          if (done) done.push(f);
+        } catch (err) { failed.push(f.name + ': ' + (err && err.message)); }
+        p.setProgress(s0 + seg);
+      }
+      return failed;
+    }
+
+    // ---------- เพิ่มไฟล์ในคำสั่งที่มีอยู่ (1.51.121026) ----------
+    var addFilesOrder = null, addFilesList = [];
+    function renderAddChips() { $('ordFilesChips').innerHTML = chipsHtml(addFilesList, 'data-rm-add'); }
+    function addFilesRoom() { return addFilesOrder ? MAX_FILES - filesOf(addFilesOrder).length : 0; }
+    function showAddErr(m) { $('ordFilesError').textContent = m || ''; $('ordFilesError').hidden = !m; }
+    function openAddFiles(o) {
+      addFilesOrder = o; addFilesList = []; renderAddChips(); showAddErr('');
+      $('ordFilesFor').textContent = orderTitleFull(o) + ' — มีอยู่ ' + filesOf(o).length + ' ไฟล์ เพิ่มได้อีก ' + addFilesRoom() + ' ไฟล์';
+      showModalEl($('ordFilesModal'));
+    }
+    function closeAddFiles() { hideModalEl($('ordFilesModal')); }
+    async function saveAddFiles() {
+      if (!addFilesList.length) return showAddErr('กรุณาเลือกไฟล์ PDF อย่างน้อย 1 ไฟล์');
+      var o = addFilesOrder, list = addFilesList.slice();
+      closeAddFiles();
+      var doneAdd = [];
+      var r = await withProgress('กำลังเพิ่มไฟล์ในคำสั่ง...', async function (p) {
+        var failed = await uploadMoreFiles(o.id, list, p, 0, list.length, true, doneAdd);
+        if (failed.length) throw Object.assign(new Error('อัปโหลดไม่สำเร็จ ' + failed.length + '/' + list.length + ' ไฟล์ — ' + failed.join('; ')), { retryLabel: 'ส่งใหม่ ' + failed.length + ' ไฟล์' });
+        return true;
+      }, { successLabel: 'เพิ่ม ' + list.length + ' ไฟล์แล้ว', upload: true });
+      expanded[o.id] = true;
+      await load();
+      void r;
+    }
+
+    async function onSubmit(ev) {
+      ev.preventDefault();
+      showErr('');
+      var fields = {
+        title: $('ordTitle').value.trim(), orderNoNumber: $('ordNoNum').value.trim(), orderNoYear: $('ordNoYear').value.trim(), orderDate: $('ordDate').value,
+        academicYear: $('ordAcYear').value.trim(), semester: $('ordSem').value,
+        activityStart: $('ordActStart').value, activityEnd: $('ordActEnd').value,
+        department: $('ordDeptSel').value, subjectGroup: $('ordSubjectSel').value, responsibleIds: respSelected.slice()
+      };
+      if (!editingId) {
+        if (!ordSelectedFiles.length) return showErr('กรุณาเลือกไฟล์คำสั่ง (PDF) อย่างน้อย 1 ไฟล์');
+      }
+      if (!fields.title) return showErr('กรุณากรอกชื่อคำสั่ง');
+      if (!!fields.orderNoNumber !== !!fields.orderNoYear) return showErr('กรุณากรอกเลขที่คำสั่งให้ครบทั้ง 2 ช่อง (เลขที่ / ปี พ.ศ.) หรือเว้นว่างทั้งคู่');
+      if (fields.orderNoNumber && fields.orderNoNumber.indexOf('/') >= 0) return showErr('ช่องเลขที่คำสั่งไม่ต้องใส่ / (ใส่ปีในช่องถัดไป)');
+      if (fields.orderNoYear && !/^\d{4}$/.test(fields.orderNoYear)) return showErr('ปีของเลขที่คำสั่งต้องเป็นปี พ.ศ. 4 หลัก เช่น 2569');
+      if (!fields.orderDate) return showErr('กรุณาเลือกวันที่จัดทำคำสั่ง');
+      if (!/^\d{4}$/.test(fields.academicYear)) return showErr('กรุณากรอกปีการศึกษา (พ.ศ. 4 หลัก เช่น 2569)');
+      if (!fields.department) return showErr('กรุณาเลือกกลุ่มบริหารงาน');
+      if (fields.activityEnd && !fields.activityStart) return showErr('กรุณาระบุวันที่เริ่มกิจกรรมก่อน');
+      if (fields.activityEnd && fields.activityEnd < fields.activityStart) return showErr('วันที่สิ้นสุดกิจกรรมต้องไม่ก่อนวันที่เริ่ม');
+      if (editingId) {
+        var r1 = await withProgress('กำลังบันทึก...', function () { return apiCall('orderUpdate', Object.assign({ orderId: editingId }, fields)); }, { successLabel: 'บันทึกแล้ว' });
+        if (!r1.ok) return showErr(r1.error && r1.error.message);
+        if (r1.data && r1.data.driveSynced === false) showToast('บันทึกข้อมูลแล้ว แต่ยังเปลี่ยนชื่อ/ย้ายไฟล์ใน Google Drive ไม่ได้ (ผู้ดูแลระบบต้องอัปเดต Drive relay)', true);
+      } else {
+        var files = ordSelectedFiles.slice();
+        var made = null, doneMore = []; // 1.85: ส่งใหม่ — ไม่สร้างคำสั่งซ้ำ / ไม่ส่งไฟล์ที่สำเร็จแล้วซ้ำ
+        var r2 = await withProgress('กำลังอัปโหลดคำสั่ง...', async function (p) {
+          // 1.50.121026: แสดงขั้นตอน + แถบคืบหน้าแบบประมาณจากขนาดไฟล์ + ตัวจับเวลา (ดู withProgress opts.upload ใน api.js)
+          // 1.51.121026: ไฟล์แรกสร้างคำสั่ง (orderUploadPrepare/Finalize) ไฟล์ที่เหลือเพิ่มเข้าคำสั่งเดียวกัน (orderFilePrepare/Finalize)
+          var n = files.length, seg = 100 / n, file = files[0];
+          var head = function (i) { return (n > 1 ? 'ไฟล์ ' + (i + 1) + '/' + n + ': ' : '') + files[i].name; };
+          if (!made) {
+            p.setProgress(2, 'กำลังเตรียม ' + head(0));
+            var prep = await apiCall('orderUploadPrepare', Object.assign({ fileName: file.name, mimeType: 'application/pdf', fileSize: file.size }, fields, directUploadParams()));
+            var up = await sendPreparedFileProgress(prep, file, p, seg * 0.08, seg * 0.9, 'กำลังอัปโหลด ' + head(0) + ' (' + formatBytes(file.size) + ') ไปที่ Google Drive', { mimeType: 'application/pdf' }); // 1.86
+            p.setProgress(seg * 0.94, 'กำลังบันทึกรายการคำสั่ง');
+            await apiCall('orderUploadFinalize', { orderId: prep.orderId, fileId: up.fileId, fileUrl: up.url, directUrl: up.directUrl, fileName: prep.uploadFileName || file.name, mimeType: 'application/pdf', via: up.via, fallbackReason: up.fallbackReason || '' });
+            made = prep.orderId;
+          }
+          var failed = await uploadMoreFiles(made, files.slice(1), p, 1, n, false, doneMore);
+          if (failed.length) throw Object.assign(new Error('สร้างคำสั่งแล้ว แต่อัปโหลดไม่สำเร็จ ' + failed.length + '/' + n + ' ไฟล์ — ' + failed.join('; ')), { retryLabel: 'ส่งใหม่ ' + failed.length + ' ไฟล์' });
+          return true;
+        }, { successLabel: files.length > 1 ? 'เพิ่มคำสั่งพร้อมไฟล์ ' + files.length + ' ไฟล์แล้ว' : 'เพิ่มคำสั่งแล้ว', upload: true });
+        if (!r2.ok) { closeModal(); await load(); return showToast(r2.error && r2.error.message, true); }
+      }
+      closeModal();
+      await load();
+    }
+
+    if (session) {
+      mountChrome('orders');
+      $('ordAddBtn').addEventListener('click', function () { openModal(null); });
+      var dz = $('ordDropzone');
+      dz.addEventListener('click', function () { $('ordFile').click(); });
+      dz.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('ordFile').click(); } });
+      dz.addEventListener('dragover', function (e) { e.preventDefault(); dz.classList.add('dragover'); });
+      dz.addEventListener('dragleave', function () { dz.classList.remove('dragover'); });
+      dz.addEventListener('drop', function (e) { e.preventDefault(); dz.classList.remove('dragover'); if (e.dataTransfer) pickFile(e.dataTransfer.files); });
+      $('ordFile').addEventListener('change', function (e) { pickFile(e.target.files); e.target.value = ''; });
+      $('ordFileChip').addEventListener('click', function (e) { var b = e.target.closest('[data-rm-file]'); if (!b) return; ordSelectedFiles.splice(Number(b.getAttribute('data-rm-file')), 1); renderFileChip(); });
+      var dz2 = $('ordFilesDrop');
+      dz2.addEventListener('click', function () { $('ordFilesInput').click(); });
+      dz2.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('ordFilesInput').click(); } });
+      dz2.addEventListener('dragover', function (e) { e.preventDefault(); dz2.classList.add('dragover'); });
+      dz2.addEventListener('dragleave', function () { dz2.classList.remove('dragover'); });
+      var pickAdd = function (fl) { var err = addPicked(addFilesList, fl, addFilesRoom()); showAddErr(err); renderAddChips(); };
+      dz2.addEventListener('drop', function (e) { e.preventDefault(); dz2.classList.remove('dragover'); if (e.dataTransfer) pickAdd(e.dataTransfer.files); });
+      $('ordFilesInput').addEventListener('change', function (e) { pickAdd(e.target.files); e.target.value = ''; });
+      $('ordFilesChips').addEventListener('click', function (e) { var b = e.target.closest('[data-rm-add]'); if (!b) return; addFilesList.splice(Number(b.getAttribute('data-rm-add')), 1); renderAddChips(); });
+      $('ordFilesSave').addEventListener('click', saveAddFiles);
+      $('ordFilesCancel').addEventListener('click', closeAddFiles);
+      $('ordFilesCloseX').addEventListener('click', closeAddFiles);
+      $('ordForm').addEventListener('submit', onSubmit);
+      $('ordCancel').addEventListener('click', closeModal);
+      $('ordCloseX').addEventListener('click', closeModal);
+      ['ordTitle', 'ordNoNum', 'ordNoYear', 'ordAcYear'].forEach(function (id) { $(id).addEventListener('input', updateDriveName); });
+      $('ordSem').addEventListener('change', updateDriveName);
+      $('ordRespSearch').addEventListener('input', renderResp);
+      $('ordRespList').addEventListener('change', function (ev) {
+        var id = ev.target.getAttribute && ev.target.getAttribute('data-resp-id');
+        if (!id) return;
+        var i = respSelected.indexOf(id);
+        if (ev.target.checked && i < 0) respSelected.push(id);
+        if (!ev.target.checked && i >= 0) respSelected.splice(i, 1);
+        renderResp();
+      });
+      $('ordRespChips').addEventListener('click', function (ev) {
+        var b = ev.target.closest('[data-resp-remove]');
+        if (!b) return;
+        var i = respSelected.indexOf(b.getAttribute('data-resp-remove'));
+        if (i >= 0) respSelected.splice(i, 1);
+        renderResp();
+      });
+      ['ordSearch'].forEach(function (id) { $(id).addEventListener('input', rerender); });
+      ['ordSubject', 'ordSem', 'ordMine'].forEach(function (id) { $(id).addEventListener('change', rerender); });
+      $('ordYear').addEventListener('change', function () { loadYear(this.value); });
+      $('ordYearHint').addEventListener('click', function (e) { if (e.target.closest('#ordSearchAllYears')) { $('ordYear').value = ''; loadYear(''); } });
+      $('ordRoot').addEventListener('keydown', function (ev) {
+        if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.matches && ev.target.matches('[data-expand]')) { ev.preventDefault(); ev.target.click(); }
+      });
+      $('ordRoot').addEventListener('click', async function (ev) {
+        var mb = ev.target.closest('[data-more]'); if (mb) { shownN = mb.hasAttribute('data-more-all') ? 1e9 : shownN + LIST_PAGE; render(); return; }
+        if (ev.target.closest('a[download]')) return; // ลิงก์ดาวน์โหลด — ไม่ต้องขยาย/ยุบแถว
+        var t = ev.target.closest('[data-edit],[data-del],[data-preview],[data-expand],[data-dlall],[data-addfiles],[data-ofile-preview],[data-ofile-del]');
+        if (!t) return;
+        var byId = function (attr) { var v = t.getAttribute(attr); return orders.filter(function (x) { return x.id === v; })[0]; };
+        if (t.hasAttribute('data-expand')) { var k = t.getAttribute('data-expand'); expanded[k] = !expanded[k]; render(); return; }
+        if (t.hasAttribute('data-preview')) { var op = byId('data-preview'); if (op) previewOrder(op, 0); return; }
+        if (t.hasAttribute('data-ofile-preview')) { var oq = byId('data-ofile-preview'); if (oq) previewOrder(oq, Number(t.getAttribute('data-idx')) || 0); return; }
+        if (t.hasAttribute('data-dlall')) { var oa = byId('data-dlall'); if (oa) downloadAll(oa); return; }
+        if (t.hasAttribute('data-addfiles')) { var ob = byId('data-addfiles'); if (ob) openAddFiles(ob); return; }
+        if (t.hasAttribute('data-ofile-del')) {
+          var oc = byId('data-ofile-del'); if (!oc) return;
+          var ref = t.getAttribute('data-ref');
+          var fdel = filesOf(oc).filter(function (x) { return x.ref === ref; })[0];
+          var yes2 = await askConfirm('ลบไฟล์ "' + (fdel ? fdel.name : '') + '" ออกจากคำสั่ง "' + oc.title + '"? ไฟล์จะถูกย้ายลงถังขยะของ Google Drive', 'ลบไฟล์');
+          if (!yes2) return;
+          var r3 = await withProgress('กำลังลบไฟล์...', function () { return apiCall('orderFileDelete', { orderId: oc.id, ref: ref }); }, { successLabel: 'ลบไฟล์แล้ว' });
+          if (r3.ok) await load();
+          return;
+        }
+        if (t.hasAttribute('data-edit')) { var id = t.getAttribute('data-edit'); var o = orders.filter(function (x) { return x.id === id; })[0]; if (o) openModal(o); return; }
+        if (t.hasAttribute('data-del')) {
+          var did = t.getAttribute('data-del'); var od = orders.filter(function (x) { return x.id === did; })[0];
+          if (!od) return;
+          var nf = filesOf(od).length;
+          var yes = await askConfirm('ลบคำสั่ง "' + od.title + '" ออกจากคลังคำสั่ง? ' + (nf > 1 ? 'ไฟล์ทั้ง ' + nf + ' ไฟล์' : 'ไฟล์') + 'จะถูกย้ายลงถังขยะของ Google Drive', 'ลบคำสั่ง');
+          if (!yes) return;
+          var r = await withProgress('กำลังลบ...', function () { return apiCall('orderDelete', { orderId: did }); }, { successLabel: 'ลบแล้ว' });
+          if (r.ok) await load();
+        }
+      });
+      $('ordRefreshBtn').addEventListener('click', async function () {
+        var b = this; b.classList.add('spinning'); b.disabled = true;
+        try { await load(); } finally { b.classList.remove('spinning'); b.disabled = false; }
+      });
+      load();
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<!-- 1.80: PWA — ติดตั้งลงหน้าจอหลัก/คอมได้ (manifest + ไอคอน · sw.js ลงทะเบียนใน api.js) -->
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="theme-color" content="#0b6fcc" />
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="BNK Hub" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<script>(function(){try{var t=localStorage.getItem('bnkah_theme');if(t==='dark'||t==='sepia')document.documentElement.setAttribute('data-theme',t);document.documentElement.classList.add('nav-noanim');if(localStorage.getItem('bnkah_memo_off')==='1')document.documentElement.classList.add('memo-off');}catch(e){}})();</script>
+<title>บันทึกข้อความส่งงาน — BNKAcademicHub</title>
+<link rel="stylesheet" href="assets/fontawesome/css/fontawesome.min.css" />
+<link rel="stylesheet" href="assets/fontawesome/css/solid.min.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700&family=Sarabun:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/style.css?v=1.98.2.021126" />
+<!-- 1.56: ธีมสีจากค่าที่จำไว้ (ใส่หลัง style.css ให้ทับค่าเริ่มต้น) — ดู applyThemeColor ใน api.js -->
+<script>(function(){try{var c=localStorage.getItem('bnkah_theme_css');if(c){var e=document.createElement('style');e.id='bnkahThemeVars';e.textContent=c;document.head.appendChild(e);}}catch(e){}})();</script>
+<style>
+  /* ---------- หน้า "บันทึกข้อความส่งงาน" (ตั้งแต่ 1.25.081026) ----------
+     แบ่งเป็น 2 ส่วนชัดเจน: (1) ส่วนควบคุม/แก้ไขข้อมูล (.no-print) ใช้ .card/.field ปกติของเว็บ เห็นเฉพาะตอนดูบนจอ
+     (2) กระดาษบันทึกข้อความจำลอง A4 จริง (#memoPaper) ที่ปริ้น/เซฟ PDF ได้ตรงจากเบราว์เซอร์ (window.print()) โดยตรง
+     ไม่ผ่าน html2canvas/jsPDF เหมือนหน้า summary.html เพราะเป็นเอกสารทางการที่ต้องการตัวอักษรคมชัด เลือกคัดลอกได้จริง
+     ไม่ใช่ภาพถ่ายหน้าจอ — หลีกเลี่ยงปัญหา "สีซีด"/คุณภาพภาพที่เคยเจอกับการจับภาพ canvas ไปในตัว */
+  .memo-controls-wrap { max-width: 900px; margin: 0 auto; padding: 0 16px 32px; }
+  .memo-paper-outer { background: #525659; padding: 24px 0 60px; overflow-x: auto; }
+  /* 1.80: จอแคบกว่ากระดาษ A4 (มือถือ) = ย่อกระดาษให้พอดีจอด้วย zoom (fitMemoPaper) — พิมพ์/บันทึก PDF ยังเป็น A4 เต็มขนาด */
+  @media (max-width: 860px) { .memo-paper-outer { padding: 12px 0 32px; } }
+  .memo-paper {
+    width: 210mm; min-height: 297mm; margin: 0 auto; background: #ffffff; color: #111827;
+    padding: 20mm 18mm; box-shadow: 0 6px 24px rgba(0,0,0,0.35); font-family: 'Sarabun', 'Noto Sans Thai', sans-serif;
+    font-size: 15.5px; line-height: 1.85; box-sizing: border-box;
+  }
+  .memo-head { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 4px; }
+  .memo-head img { width: 42px; height: auto; flex-shrink: 0; margin-top: 2px; }
+  .memo-head h1 { flex: 1; text-align: center; font-size: 1.5rem; font-weight: 700; margin: 0; padding-right: 56px; }
+  .memo-line { margin: 6px 0; }
+  .memo-row { display: flex; justify-content: space-between; gap: 20px; margin: 6px 0; }
+  .memo-indent { text-indent: 2.5em; }
+  .memo-table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+  .memo-table th, .memo-table td { border: 1px solid #333; padding: 5px 8px; text-align: left; vertical-align: top; }
+  .memo-table th { background: #f1f1f1; font-weight: 700; text-align: center; }
+  .memo-table td.memo-no { text-align: center; width: 36px; }
+  .memo-qr-box { display: flex; align-items: center; gap: 14px; margin: 10px 0 18px; }
+  .memo-qr-box .memo-qr-caption { font-size: 13px; color: #374151; max-width: 320px; }
+  .memo-sign-block { margin-top: 26px; text-align: center; width: 280px; margin-left: auto; margin-right: 0; }
+  .memo-sign-line { margin-bottom: 2px; }
+  .memo-approval { margin-top: 30px; }
+  .memo-approval-title { font-weight: 700; margin-bottom: 6px; }
+  .memo-checkbox-line { margin: 4px 0 4px 0; }
+  .memo-dotted { border-bottom: 1px dotted #333; display: inline-block; min-width: 60px; }
+  @media print {
+    #app-topbar, #app-footer, .no-print { display: none !important; }
+    .memo-paper-outer { background: #fff; padding: 0; }
+    .memo-paper { width: auto; min-height: 0; margin: 0; box-shadow: none; padding: 14mm 16mm; zoom: 1 !important; }
+    .memo-paper-outer { overflow: visible; }
+    @page { size: A4; margin: 0; }
+    body { margin: 0; }
+  }
+</style>
+</head>
+<body>
+  <div id="app-topbar" class="no-print"></div>
+
+  <div class="container no-print memo-controls-wrap">
+    <div class="page-header">
+      <h1>บันทึกข้อความส่งงาน</h1>
+      <p>กรอก/แก้ไขข้อมูลด้านล่างให้ตรงกับความเป็นจริง แล้วกด "พิมพ์ / บันทึกเป็น PDF" — ระบบจะดึงรายชื่อครูและรายการผลงานที่ส่งแล้วมาเติมให้อัตโนมัติ</p>
+    </div>
+
+    <div class="card">
+      <div class="section-title"><i class="fas fa-calendar-day ui-icon" style="font-size:17px" aria-hidden="true"></i> ภาคเรียน/ปีการศึกษาที่รายงาน</div>
+      <div class="field-row">
+        <div class="field">
+          <label for="memoYear">ปีการศึกษา</label>
+          <select id="memoYear"></select>
+        </div>
+        <div class="field">
+          <label for="memoSemester">ภาคเรียน</label>
+          <select id="memoSemester">
+            <option value="1">ภาคเรียนที่ 1</option>
+            <option value="2">ภาคเรียนที่ 2</option>
+            <option value="summer">ภาคฤดูร้อน</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title"><i class="fas fa-list-check ui-icon" style="font-size:17px" aria-hidden="true"></i> รายการที่จะแนบในบันทึกข้อความ</div>
+      <p class="hint" style="margin-top:-8px; margin-bottom:10px;">ค่าเริ่มต้นเลือกไว้ทุกรายการที่ส่งแล้วในภาคเรียนที่เลือก — ยกเลิกติ๊กรายการที่ไม่ต้องการแนบได้</p>
+      <div id="memoItemsList"><div class="loading">กำลังโหลด</div></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title"><i class="fas fa-file-lines ui-icon" style="font-size:17px" aria-hidden="true"></i> ข้อมูลบันทึกข้อความ</div>
+      <div class="field-row">
+        <div class="field">
+          <label for="memoNumber">ที่ (เลขที่หนังสือ — ถ้ามี)</label>
+          <input id="memoNumber" placeholder="เช่น บค. ๑๒/๒๕๖๙ — เว้นว่างได้" />
+        </div>
+        <div class="field">
+          <label for="memoDate">วันที่</label>
+          <input id="memoDate" type="date" />
+        </div>
+      </div>
+      <!-- หัวเรื่องบันทึกข้อความ (ตั้งแต่ 1.28.091026): เลือกจากหัวเรื่องที่เจ้าหน้าที่ฝ่ายต่างๆ สร้างไว้ล่วงหน้าเป็นทางหลัก
+           (เลือกแล้วจะเติม "เรื่อง"/"เนื้อหา" ให้อัตโนมัติ และกรอง "รายการที่จะแนบ" ด้านบนให้เหลือเฉพาะประเภทงานที่หัวเรื่องนี้ผูกไว้)
+           หรือเลือก "พิมพ์เอง" เพื่อกรอกหัวเรื่องแบบอิสระเหมือนเดิม (ไม่กรองรายการที่จะแนบ) — ตอนนั้นจะมีช่อง "ฝ่ายที่จะส่งถึง"
+           เพิ่มมาให้เลือก เพื่อให้ชื่อหัวหน้าฝ่าย/รองผู้อำนวยการฝ่ายที่พิมพ์ท้ายใบยังถูกต้องตามฝ่ายที่เลือก -->
+      <div class="field">
+        <label for="memoSubjectSelect">หัวเรื่องบันทึกข้อความ</label>
+        <select id="memoSubjectSelect"></select>
+      </div>
+      <div class="field" id="memoCustomDeptWrap" hidden>
+        <label for="memoDeptSelect">กลุ่มบริหารงานที่จะส่งถึง</label>
+        <select id="memoDeptSelect"></select>
+      </div>
+      <div class="field">
+        <label for="memoSubject">เรื่อง</label>
+        <input id="memoSubject" />
+      </div>
+      <div class="field">
+        <label for="memoTo">เรียน</label>
+        <input id="memoTo" />
+      </div>
+      <div class="field">
+        <label for="memoBody">เนื้อหา (แก้ไขได้อิสระให้ตรงกับความเป็นจริง)</label>
+        <textarea id="memoBody" rows="5"></textarea>
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn btn-primary" type="button" id="memoPrintBtn"><i class="fas fa-print ui-icon" aria-hidden="true"></i> พิมพ์ / บันทึกเป็น PDF</button>
+      </div>
+      <p class="hint" style="margin-top:10px;">กด "พิมพ์ / บันทึกเป็น PDF" แล้วเลือกปลายทางเป็นเครื่องพิมพ์ หรือเลือก "Save as PDF" ในหน้าต่างพิมพ์ของเบราว์เซอร์ได้เลย</p>
+    </div>
+  </div>
+
+  <div class="memo-paper-outer">
+    <div class="memo-paper" id="memoPaper">
+      <div class="loading" style="padding:40px; text-align:center;">กำลังเตรียมเอกสาร...</div>
+    </div>
+  </div>
+
+  <div id="app-footer" class="no-print"></div>
+
+  <script src="assets/api.js?v=1.98.2.021126"></script>
+  <script src="assets/qrcode.min.js"></script>
+  <script>
+    var session = requireHubAccess();
+    // 1.53.121026: ปิดฟังก์ชันไว้ (จำไว้ในเครื่อง) -> พากลับหน้าแรกทันทีโดยไม่แสดงหน้านี้
+    if (session && memoOffCached()) { location.replace(homePageFor(session)); session = null; }
+    if (session) mountChrome('memo');
+    // หน้านี้เปิดให้ทุกบัญชีที่มีหน้าฮับและส่งงานผ่านระบบได้ (ตั้งแต่ 1.25.081026 แก้ตาม): ครู (role='teacher')
+    // และเจ้าหน้าที่ฝ่ายวิชาการ (role='admin' + hasHub) เพราะเจ้าหน้าที่ก็เป็นครูที่ต้องส่งงานเหมือนกัน — requireHubAccess()
+    // ด้านบนกรองให้เหลือแค่ 2 กลุ่มนี้อยู่แล้ว (Super Admin ไม่มีหน้าฮับจะถูกเด้งไปที่อื่นไปก่อนถึงจุดนี้) จึงไม่ต้องเช็ค role ซ้ำอีก
+
+    var mySubmissions = [];
+    var checkedIds = {}; // submissionId -> true/false ที่ผู้ใช้ติ๊ก/ยกเลิกติ๊กเอง
+
+    // หัวเรื่องบันทึกข้อความ (memo_subjects) + ฝ่ายที่จะส่งถึง (ตั้งแต่ 1.28.091026) — ดูคอมเมนต์ที่ #memoSubjectSelect ด้านบน
+    var CUSTOM_SUBJECT_VALUE = '__custom__';
+    var memoSubjectsList = [];
+    var memoDepartmentsList = [];
+    function selectedTemplateSubject() {
+      var sel = document.getElementById('memoSubjectSelect');
+      if (!sel || sel.value === CUSTOM_SUBJECT_VALUE || !sel.value) return null;
+      return memoSubjectsList.filter(function (m) { return m.id === sel.value; })[0] || null;
+    }
+    // ฝ่ายที่ใช้หาชื่อผู้ลงนาม (หัวหน้าฝ่าย/รองผู้อำนวยการฝ่าย) ของบันทึกข้อความใบนี้ — มาจากหัวเรื่องที่เลือก (ถ้าเลือกจากรายการ)
+    // หรือจากช่อง "ฝ่ายที่จะส่งถึง" ที่เลือกเอง (ถ้าอยู่ในโหมด "พิมพ์เอง")
+    function currentMemoDepartment() {
+      var tpl = selectedTemplateSubject();
+      if (tpl) return tpl.department || '';
+      var deptSel = document.getElementById('memoDeptSelect');
+      return deptSel ? deptSel.value : '';
+    }
+
+    (function fillYearOptions() {
+      var beYear = new Date().getFullYear() + 543;
+      var sel = document.getElementById('memoYear');
+      for (var y = beYear + 2; y >= beYear - 3; y--) {
+        var opt = document.createElement('option');
+        opt.value = y; opt.textContent = 'ปีการศึกษา ' + y;
+        if (y === beYear) opt.selected = true;
+        sel.appendChild(opt);
+      }
+    })();
+
+    function selectedSubmissions() {
+      var year = document.getElementById('memoYear').value;
+      var semester = document.getElementById('memoSemester').value;
+      var items = mySubmissions.filter(function (s) { return String(s.academicYear) === String(year) && s.semester === semester; });
+      // ตั้งแต่ 1.28.091026: เลือกหัวเรื่องจากรายการ (ไม่ใช่โหมด "พิมพ์เอง") แล้ว กรองให้เหลือเฉพาะประเภทงานที่หัวเรื่องนี้ผูกไว้
+      // (hard filter ตามที่ผู้ใช้เลือกไว้ใน AskUserQuestion — ไม่ใช่แค่ค่าเริ่มต้นที่ยกเลิกติ๊กได้)
+      var tpl = selectedTemplateSubject();
+      if (tpl) items = items.filter(function (s) { return tpl.categoryIds.indexOf(s.categoryId) !== -1; });
+      return items;
+    }
+    function checkedSubmissions() {
+      return selectedSubmissions().filter(function (s) { return checkedIds[s.id] !== false; }); // ค่าเริ่มต้น = ติ๊กไว้ (undefined ก็ถือว่าติ๊ก)
+    }
+
+    function renderItemsList() {
+      var wrap = document.getElementById('memoItemsList');
+      var items = selectedSubmissions();
+      if (items.length === 0) { wrap.innerHTML = '<div class="empty-state">ยังไม่มีผลงานที่ส่งแล้วในภาคเรียนนี้</div>'; renderMemoPaper(); return; }
+      var html = '<div>';
+      items.forEach(function (s) {
+        var checked = checkedIds[s.id] !== false;
+        html += '<label class="event-list-item" style="cursor:pointer;">' +
+          '<input type="checkbox" class="memo-item-check" data-id="' + s.id + '" ' + (checked ? 'checked' : '') + ' style="width:auto; flex-shrink:0; margin-right:10px;" />' +
+          '<div style="flex:1 1 220px; min-width:220px;">' +
+            '<div class="sub-item-title">' + escapeHtml(s.title || s.fileName) + '</div>' +
+            '<div class="sub-item-meta">' + escapeHtml(s.categoryName) + ' · ส่งเมื่อ ' + formatDateThai(s.uploadedAt) + '</div>' +
+          '</div>' +
+        '</label>';
+      });
+      html += '</div>';
+      wrap.innerHTML = html;
+      wrap.querySelectorAll('.memo-item-check').forEach(function (chk) {
+        chk.addEventListener('change', function () {
+          checkedIds[chk.getAttribute('data-id')] = chk.checked;
+          renderMemoPaper();
+        });
+      });
+      renderMemoPaper();
+    }
+
+    function termLabelOf(semester) {
+      return semester === 'summer' ? 'ภาคฤดูร้อน' : 'ภาคเรียนที่ ' + semester;
+    }
+
+    function defaultSubjectAndBody() {
+      var year = document.getElementById('memoYear').value;
+      var semester = document.getElementById('memoSemester').value;
+      var termText = termLabelOf(semester) + ' ปีการศึกษา ' + year;
+      // ตั้งแต่ 1.28.091026: ถ้าเลือกหัวเรื่องจากรายการ (ไม่ใช่ "พิมพ์เอง") ใช้เรื่อง/เนื้อหาเริ่มต้นของหัวเรื่องนั้นแทนข้อความทั่วไปเดิม
+      var tpl = selectedTemplateSubject();
+      if (tpl) {
+        return { subject: tpl.subject, body: tpl.defaultBody || ('ข้าพเจ้าได้จัดทำและส่งผลงาน/เอกสารตามหัวเรื่องนี้ ประจำ' + termText + ' เรียบร้อยแล้ว จำนวน {N} รายการ ดังรายละเอียดที่แนบมาพร้อมนี้ จึงเรียนมาเพื่อโปรดทราบและพิจารณา') };
+      }
+      return {
+        subject: 'รายงานการส่งผลงาน/เอกสารการปฏิบัติงาน ประจำ' + termText,
+        body: 'ข้าพเจ้าได้จัดทำและส่งผลงาน/เอกสารตามที่ได้รับมอบหมาย ประจำ' + termText + ' เรียบร้อยแล้ว จำนวน {N} รายการ ดังรายละเอียดที่แนบมาพร้อมนี้ จึงเรียนมาเพื่อโปรดทราบและพิจารณา'
+      };
+    }
+
+    var subjectTouched = false, bodyTouched = false;
+    document.getElementById('memoSubject').addEventListener('input', function () { subjectTouched = true; renderMemoPaper(); });
+    document.getElementById('memoBody').addEventListener('input', function () { bodyTouched = true; renderMemoPaper(); });
+    document.getElementById('memoTo').addEventListener('input', renderMemoPaper);
+    document.getElementById('memoNumber').addEventListener('input', renderMemoPaper);
+    document.getElementById('memoDate').addEventListener('input', renderMemoPaper);
+    ['memoYear', 'memoSemester'].forEach(function (id) {
+      document.getElementById(id).addEventListener('change', function () {
+        if (!subjectTouched) document.getElementById('memoSubject').value = defaultSubjectAndBody().subject;
+        if (!bodyTouched) document.getElementById('memoBody').value = bodyWithCount();
+        renderItemsList();
+      });
+    });
+
+    // เลือก/เปลี่ยนหัวเรื่องบันทึกข้อความ (ตั้งแต่ 1.28.091026) — เลือกหัวเรื่องจริงแล้วเติม "เรื่อง"/"เนื้อหา" ให้ใหม่เสมอ (ทับของเดิม
+    // ที่พิมพ์ไว้) และกรองรายการที่จะแนบให้เหลือเฉพาะประเภทงานที่ผูกไว้ ส่วน "พิมพ์เอง" จะโชว์ช่อง "ฝ่ายที่จะส่งถึง" เพิ่มมาให้เลือก
+    // (ตามที่ผู้ใช้ยืนยันผ่าน AskUserQuestion — primary path คือเลือกจากรายการ แต่ยังพิมพ์เองได้เสมอ)
+    document.getElementById('memoSubjectSelect').addEventListener('change', function () {
+      var isCustom = this.value === CUSTOM_SUBJECT_VALUE;
+      document.getElementById('memoCustomDeptWrap').hidden = !isCustom;
+      subjectTouched = false;
+      bodyTouched = false;
+      document.getElementById('memoSubject').value = defaultSubjectAndBody().subject;
+      document.getElementById('memoBody').value = bodyWithCount();
+      renderItemsList();
+    });
+    document.getElementById('memoDeptSelect').addEventListener('change', renderMemoPaper);
+
+    function bodyWithCount() {
+      var n = checkedSubmissions().length;
+      return defaultSubjectAndBody().body.replace('{N}', String(n));
+    }
+
+    // 1.80: ย่อกระดาษ A4 ให้พอดีความกว้างจอ (มือถือ) — ไม่กระทบการพิมพ์ (@media print ตั้ง zoom: 1)
+    function fitMemoPaper() {
+      var paper = document.getElementById('memoPaper'), outer = paper.parentElement;
+      paper.style.zoom = '';
+      var avail = outer.clientWidth - 16, w = paper.offsetWidth;
+      if (w > 0 && avail > 0 && avail < w) paper.style.zoom = String(Math.max(0.3, avail / w));
+    }
+    window.addEventListener('resize', fitMemoPaper);
+    window.addEventListener('beforeprint', function () { document.getElementById('memoPaper').style.zoom = ''; });
+    window.addEventListener('afterprint', fitMemoPaper);
+    fitMemoPaper();
+
+    async function renderMemoPaper() {
+      var paper = document.getElementById('memoPaper');
+      var settings = await getSiteSettings();
+      var fresh = await refreshSessionUser();
+      var items = checkedSubmissions();
+
+      var number = document.getElementById('memoNumber').value.trim();
+      var dateVal = document.getElementById('memoDate').value;
+      var dateThai = dateVal ? formatDateThai(dateVal + 'T00:00:00') : formatDateThai(new Date().toISOString());
+      var subject = document.getElementById('memoSubject').value.trim();
+      var toWhom = document.getElementById('memoTo').value.trim();
+      var body = document.getElementById('memoBody').value.trim();
+
+      var schoolLine = [settings.schoolName, settings.schoolDistrict, settings.schoolProvince].filter(Boolean).join(' ');
+      var qrUrl = location.origin + location.pathname.replace(/memo\.html$/, '') + 'view.html?u=' + encodeURIComponent(fresh.username);
+
+      // ชื่อผู้ลงนามตามฝ่าย (ตั้งแต่ 1.28.091026) — หาฝ่ายจากหัวเรื่องที่เลือก (หรือ "ฝ่ายที่จะส่งถึง" ถ้าอยู่โหมด "พิมพ์เอง")
+      // แล้วดึงชื่อหัวหน้าฝ่าย/รองผู้อำนวยการฝ่ายของฝ่ายนั้นจาก settings.departmentSigners — แทนที่ settings.memoHeadName/
+      // memoDeputyName แบบ global เดิม ยังไม่เลือกฝ่าย/ฝ่ายยังไม่ตั้งชื่อผู้ลงนาม = เว้นจุดประ + ใช้ตำแหน่งทั่วไปแทน
+      var memoDept = currentMemoDepartment();
+      var deptSigner = (settings.departmentSigners && settings.departmentSigners[memoDept]) || {};
+      var headTitle = 'ความเห็นของ' + (deptSigner.headPosition || (memoDept ? ('หัวหน้า' + groupLabel(memoDept)) : 'หัวหน้ากลุ่มบริหารงานที่เกี่ยวข้อง'));
+      var deputyTitle = 'ความเห็นของ' + (deptSigner.deputyPosition || (memoDept ? ('รองผู้อำนวยการ' + groupLabel(memoDept)) : 'รองผู้อำนวยการกลุ่มบริหารงานที่เกี่ยวข้อง'));
+
+      var tableRows = items.map(function (s, i) {
+        return '<tr><td class="memo-no">' + (i + 1) + '</td><td>' + escapeHtml(s.title || s.fileName) + '</td><td>' + escapeHtml(s.categoryName) + '</td><td>' + formatDateThai(s.uploadedAt) + '</td></tr>';
+      }).join('');
+      var tableHtml = items.length > 0
+        ? '<table class="memo-table"><thead><tr><th>ที่</th><th>ชื่อผลงาน/เอกสาร</th><th>ประเภทงาน</th><th>วันที่ส่ง</th></tr></thead><tbody>' + tableRows + '</tbody></table>'
+        : '<p class="hint" style="margin:10px 0;">(ยังไม่ได้เลือกรายการที่จะแนบ)</p>';
+
+      var html = '';
+      html += '<div class="memo-head"><img src="assets/garuda-emblem.png" alt="" /><h1>บันทึกข้อความ</h1></div>';
+      html += '<div class="memo-line">ส่วนราชการ&nbsp;&nbsp;' + escapeHtml(schoolLine || '.................................................') + '</div>';
+      html += '<div class="memo-row">' +
+        '<div>ที่&nbsp;&nbsp;' + (number ? escapeHtml(number) : '<span class="memo-dotted">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>') + '</div>' +
+        '<div>วันที่&nbsp;&nbsp;' + escapeHtml(dateThai) + '</div>' +
+      '</div>';
+      html += '<div class="memo-line">เรื่อง&nbsp;&nbsp;' + escapeHtml(subject) + '</div>';
+      html += '<div class="memo-line">เรียน&nbsp;&nbsp;' + escapeHtml(toWhom) + '</div>';
+      html += '<div class="memo-line memo-indent">ด้วยข้าพเจ้า ' + escapeHtml(fresh.name) +
+        (fresh.position ? ' ตำแหน่ง ' + escapeHtml(fresh.position) : ' ตำแหน่ง<span class="memo-dotted">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>') +
+        (fresh.subjectGroup ? ' กลุ่มสาระการเรียนรู้' + escapeHtml(fresh.subjectGroup) : ' กลุ่มสาระการเรียนรู้<span class="memo-dotted">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>') +
+      '</div>';
+      html += '<div class="memo-line memo-indent">' + escapeHtml(body) + '</div>';
+      html += tableHtml;
+      if (items.length > 0) {
+        html += '<div class="memo-qr-box"><div id="memoQrBox"></div><div class="memo-qr-caption">สแกนเพื่อดูผลงานทั้งหมดของ ' + escapeHtml(fresh.name) + ' ทางออนไลน์</div></div>';
+      }
+      html += '<div class="memo-sign-block">' +
+        '<div class="memo-sign-line">ลงชื่อ.................................................</div>' +
+        '<div class="memo-sign-line">(' + escapeHtml(fresh.name) + ')</div>' +
+        '<div class="memo-sign-line">ตำแหน่ง ' + escapeHtml(fresh.position || '.................................................') + '</div>' +
+      '</div>';
+
+      html += '<div class="memo-approval">' +
+        '<div class="memo-approval-title">' + escapeHtml(headTitle) + '</div>' +
+        '<div class="memo-checkbox-line">(&nbsp;&nbsp;&nbsp;) เห็นควรรายงานต่อ &nbsp;&nbsp;&nbsp;(&nbsp;&nbsp;&nbsp;) เห็นควรให้แก้ไขเพิ่มเติม เนื่องจาก<span class="memo-dotted">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></div>' +
+        '<div class="memo-sign-block">' +
+          '<div class="memo-sign-line">ลงชื่อ.................................................</div>' +
+          '<div class="memo-sign-line">(' + escapeHtml(deptSigner.headName || '.................................................') + ')</div>' +
+          '<div class="memo-sign-line">ตำแหน่ง ' + escapeHtml(deptSigner.headPosition || (memoDept ? ('หัวหน้า' + groupLabel(memoDept)) : '.................................................')) + '</div>' +
+        '</div>' +
+      '</div>';
+
+      html += '<div class="memo-approval">' +
+        '<div class="memo-approval-title">' + escapeHtml(deputyTitle) + '</div>' +
+        '<div class="memo-checkbox-line">(&nbsp;&nbsp;&nbsp;) เห็นควรอนุมัติ &nbsp;&nbsp;&nbsp;(&nbsp;&nbsp;&nbsp;) เห็นควรไม่อนุมัติ เนื่องจาก<span class="memo-dotted">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></div>' +
+        '<div class="memo-sign-block">' +
+          '<div class="memo-sign-line">ลงชื่อ.................................................</div>' +
+          '<div class="memo-sign-line">(' + escapeHtml(deptSigner.deputyName || '.................................................') + ')</div>' +
+          '<div class="memo-sign-line">ตำแหน่ง ' + escapeHtml(deptSigner.deputyPosition || (memoDept ? ('รองผู้อำนวยการ' + groupLabel(memoDept)) : '.................................................')) + '</div>' +
+        '</div>' +
+      '</div>';
+
+      html += '<div class="memo-approval">' +
+        '<div class="memo-approval-title">ความเห็นของผู้อำนวยการโรงเรียน</div>' +
+        '<div class="memo-checkbox-line">(&nbsp;&nbsp;&nbsp;) อนุมัติ &nbsp;&nbsp;&nbsp;(&nbsp;&nbsp;&nbsp;) ไม่อนุมัติ เนื่องจาก<span class="memo-dotted">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></div>' +
+        '<div class="memo-sign-block">' +
+          '<div class="memo-sign-line">ลงชื่อ.................................................</div>' +
+          '<div class="memo-sign-line">(' + escapeHtml(settings.memoDirectorName || '.................................................') + ')</div>' +
+          '<div class="memo-sign-line">ตำแหน่ง ' + escapeHtml(settings.memoDirectorPosition || 'ผู้อำนวยการโรงเรียน') + '</div>' +
+        '</div>' +
+      '</div>';
+
+      paper.innerHTML = html;
+      fitMemoPaper();
+      if (items.length > 0) {
+        var qrBox = document.getElementById('memoQrBox');
+        if (qrBox) new QRCode(qrBox, { text: qrUrl, width: 96, height: 96 });
+      }
+    }
+
+    document.getElementById('memoPrintBtn').addEventListener('click', function () { window.print(); });
+
+    async function init() {
+      if (!session) return;
+      document.getElementById('memoDate').value = new Date().toISOString().slice(0, 10);
+      var fresh = await refreshSessionUser();
+      try {
+        mySubmissions = await apiCall('teacherListMine', {});
+      } catch (err) {
+        document.getElementById('memoItemsList').innerHTML = '<div class="error-box">' + escapeHtml(err.message) + '</div>';
+      }
+      var term = await currentAcademicTerm();
+      document.getElementById('memoYear').value = term.year;
+      document.getElementById('memoSemester').value = term.semester;
+      var settings = await getSiteSettings();
+      memoDepartmentsList = settings.departments || [];
+
+      // หัวเรื่องบันทึกข้อความ (ตั้งแต่ 1.28.091026) — เลือกจากรายการเป็นทางหลัก ค่าเริ่มต้น = หัวเรื่องแรกที่มี (ถ้ามี) ไม่งั้น
+      // ค่อยตกไปที่ "พิมพ์เอง" (ไม่มีหัวเรื่องให้เลือกเลยในระบบ) — ดู AskUserQuestion ที่ยืนยันกับผู้ใช้ไว้
+      try {
+        memoSubjectsList = await apiCall('hubListMemoSubjects', {});
+      } catch (err) {
+        memoSubjectsList = [];
+      }
+      var subjSel = document.getElementById('memoSubjectSelect');
+      var subjOptsHtml = memoSubjectsList.map(function (m) {
+        return '<option value="' + m.id + '">' + escapeHtml(m.subject) + ' (' + escapeHtml(groupLabel(m.department)) + ')</option>';
+      }).join('');
+      subjOptsHtml += '<option value="' + CUSTOM_SUBJECT_VALUE + '">พิมพ์เอง (ระบุหัวเรื่องเอง)</option>';
+      subjSel.innerHTML = subjOptsHtml;
+      subjSel.value = memoSubjectsList.length > 0 ? memoSubjectsList[0].id : CUSTOM_SUBJECT_VALUE;
+      document.getElementById('memoCustomDeptWrap').hidden = subjSel.value !== CUSTOM_SUBJECT_VALUE;
+
+      var deptSel = document.getElementById('memoDeptSelect');
+      deptSel.innerHTML = memoDepartmentsList.length > 0
+        ? memoDepartmentsList.map(function (d) { return '<option value="' + escapeHtml(d) + '">' + escapeHtml(groupLabel(d)) + '</option>'; }).join('')
+        : '<option value="">— ยังไม่มีกลุ่มบริหารงานในระบบ —</option>';
+
+      var d = defaultSubjectAndBody();
+      document.getElementById('memoSubject').value = d.subject;
+      document.getElementById('memoBody').value = d.body.replace('{N}', String(selectedSubmissions().length));
+      document.getElementById('memoTo').value = settings.schoolName ? ('ผู้อำนวยการ' + settings.schoolName) : 'ผู้อำนวยการโรงเรียน';
+      renderItemsList();
+    }
+    if (session) init();
+  </script>
+</body>
+</html>

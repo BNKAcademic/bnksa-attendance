@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<!-- 1.80: PWA — ติดตั้งลงหน้าจอหลัก/คอมได้ (manifest + ไอคอน · sw.js ลงทะเบียนใน api.js) -->
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="theme-color" content="#0b6fcc" />
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="BNK Hub" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<script>(function(){try{var t=localStorage.getItem('bnkah_theme');if(t==='dark'||t==='sepia')document.documentElement.setAttribute('data-theme',t);document.documentElement.classList.add('nav-noanim');if(localStorage.getItem('bnkah_memo_off')==='1')document.documentElement.classList.add('memo-off');}catch(e){}})();</script>
+<title>ปฏิทินโรงเรียน — BNKAcademicHub</title>
+<!-- Font Awesome ฝังไฟล์ไว้ในเว็บเอง (ไม่พึ่ง CDN ภายนอก ตามแนวทางเดิมของโปรเจกต์ เหมือนฟอนต์ Sarabun) -->
+<link rel="stylesheet" href="assets/fontawesome/css/fontawesome.min.css" />
+<link rel="stylesheet" href="assets/fontawesome/css/solid.min.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700&family=Sarabun:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/style.css?v=1.98.2.021126" />
+<!-- 1.56: ธีมสีจากค่าที่จำไว้ (ใส่หลัง style.css ให้ทับค่าเริ่มต้น) — ดู applyThemeColor ใน api.js -->
+<script>(function(){try{var c=localStorage.getItem('bnkah_theme_css');if(c){var e=document.createElement('style');e.id='bnkahThemeVars';e.textContent=c;document.head.appendChild(e);}}catch(e){}})();</script>
+</head>
+<body>
+  <div id="app-topbar"></div>
+  <div class="container">
+    <!-- 1.93: ปฏิทินโรงเรียน — ภาพรวม 12 เดือนของปีการศึกษา → กดเดือน = ปฏิทินแบบหน้าแรก + ตาราง วัน / วันที่ / กิจกรรม / ผู้รับผิดชอบ -->
+    <div id="scYear">
+      <div class="page-header sc-head">
+        <div>
+          <h1><i class="fa-solid fa-calendar-week ui-icon" style="color:var(--primary)" aria-hidden="true"></i> ปฏิทินโรงเรียน</h1>
+          <p>กำหนดส่งงานและกิจกรรมทั้งหมดของโรงเรียน — เลือกเดือนเพื่อดูรายละเอียด</p>
+        </div>
+        <div class="sc-yearnav sc-noprint">
+          <button type="button" class="btn btn-secondary" id="scPrevY" aria-label="ปีการศึกษาก่อนหน้า"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>
+          <span class="sc-ylabel" id="scYLabel">ปีการศึกษา</span>
+          <button type="button" class="btn btn-secondary" id="scNextY" aria-label="ปีการศึกษาถัดไป"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
+          <button type="button" class="btn btn-primary" data-sc-export><i class="fa-solid fa-book" aria-hidden="true"></i> ส่งออกภาคเรียน</button>
+        </div>
+      </div>
+      <div class="sc-grid" id="scGrid"><div class="loading">กำลังโหลด...</div></div>
+      <div class="sc-legend"><span><i style="background:var(--primary-light)"></i>มีกำหนดส่งงาน/กิจกรรม</span><span><i style="background:#fde68a"></i>วันนี้</span><span><b style="color:#dc2626">ตัวเลขแดง</b> = วันหยุด (กิจกรรมแบบวันหยุด)</span><span>เรียงตามปีการศึกษา พฤษภาคม – เมษายน</span></div>
+    </div>
+    <div id="scMonth" hidden>
+      <div class="sc-mhead">
+        <div class="l"><button type="button" class="btn btn-secondary sc-noprint" id="scBack"><i class="fa-solid fa-table-cells-large" aria-hidden="true"></i> ทั้ง 12 เดือน</button><h2 id="scMTitle"></h2><span id="scMTerm"></span></div>
+        <div class="r sc-noprint"><button type="button" class="btn btn-secondary" id="scPrevM"></button><button type="button" class="btn btn-secondary" id="scNextM"></button><button type="button" class="cal-today-btn" id="scToday" title="ไปเดือนปัจจุบัน"><i class="fa-solid fa-calendar-day" aria-hidden="true"></i> วันนี้</button><button type="button" class="btn btn-secondary" id="scPrint"><i class="fa-solid fa-file-pdf" aria-hidden="true"></i> ดาวน์โหลด PDF</button><button type="button" class="btn btn-primary" data-sc-export><i class="fa-solid fa-book" aria-hidden="true"></i> ส่งออกภาคเรียน</button></div>
+      </div>
+      <div class="sc-body">
+        <div class="card sc-cal-card" style="margin:0">
+          <div class="calendar-grid" id="scCal"></div>
+          <div class="cal-legend" id="scCalLegend"></div>
+        </div>
+        <div class="card" style="margin:0">
+          <div class="section-title" style="justify-content:space-between; flex-wrap:wrap; gap:8px;">
+            <span><i class="fa-solid fa-list-ul ui-icon" aria-hidden="true"></i> รายการเดือนนี้ <span class="hint" id="scCount" style="margin:0; font-weight:400;"></span></span>
+            <div class="evk-seg sc-noprint" id="scKind" style="margin:0;"><button type="button" data-k="" class="on">ทั้งหมด</button><button type="button" data-k="deadline">กำหนดส่งงาน</button><button type="button" data-k="activity">กิจกรรม</button></div>
+          </div>
+          <div class="sc-tbl-wrap" id="scTable"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- 1.96: ส่งออกรายภาคเรียน (เล่มเดียว: ปก + รายเดือน) -->
+  <div class="modal-backdrop" id="scExpModal" hidden>
+    <div class="modal-box">
+      <button type="button" class="modal-close-x" id="scExpX" aria-label="ปิด">✕</button>
+      <h3><i class="fa-solid fa-book" aria-hidden="true"></i> ส่งออกปฏิทินโรงเรียนรายภาคเรียน</h3>
+      <p class="hint" id="scExpHint" style="margin-top:0;"></p>
+      <div class="sc-exp-opts" id="scExpOpts"></div>
+      <p class="hint">ดาวน์โหลดเป็นไฟล์ PDF เล่มเดียว (A4): หน้าปก (ตราโรงเรียน + สารบัญ) แล้วเดือนละหน้า ตั้งแต่เดือนแรกถึงเดือนสุดท้ายที่มีรายการ (ปฏิทิน + รายการ — รายการเยอะขึ้นหน้าใหม่ต่อ)</p>
+      <div class="modal-actions"><button type="button" class="btn btn-ghost btn-close" id="scExpClose">ปิด</button></div>
+    </div>
+  </div>
+  <div id="app-footer"></div>
+  <script src="assets/api.js?v=1.98.2.021126"></script>
+  <script>
+    var session = requireLogin();
+    if (session) { mountChrome('schoolcal'); if (typeof mountFooter === 'function') mountFooter(); } // 1.96: + footer
+    var DOW = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+    var MS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+    var data = null, catMap = {}, catDept = {}, colorMap = {}, state = { year: 0, ym: '', kind: '', day: '' }, curYear = 0;
+    function pad(n) { return String(n).padStart(2, '0'); }
+    function ymdOf(y, m, d) { return y + '-' + pad(m) + '-' + pad(d); }
+    function lastDay(y, m) { return new Date(y, m, 0).getDate(); }
+    function dowOf(ymd) { var p = ymd.split('-'); return new Date(+p[0], +p[1] - 1, +p[2]).getDay(); }
+    function shortD(ymd) { var p = ymd.split('-'); return +p[2] + ' ' + MS[+p[1] - 1]; }
+    // ปีการศึกษา (พ.ศ.) → เดือน พ.ค. ปีแรก ถึง เม.ย. ปีถัดไป
+    function yearMonths(be) { var y = be - 543, out = []; for (var i = 0; i < 12; i++) { var m = 5 + i; out.push({ y: y + (m > 12 ? 1 : 0), m: ((m - 1) % 12) + 1 }); } return out; }
+    function beYearOfYm(y, m) { return m >= 5 ? y + 543 : y + 542; }
+    // รายการพร้อมช่วงที่แสดงในปฏิทินโรงเรียน
+    function items(from, to) {
+      var evs = expandRepeatEvents(data.events, from, to);
+      var out = [];
+      evs.forEach(function (e) { var sp = schoolCalSpan(e); if (sp.mode === 'ends') { out.push({ e: e, from: sp.from, to: sp.from, mode: 'ends', part: 'first' }); out.push({ e: e, from: sp.to, to: sp.to, mode: 'ends', part: 'last' }); } else out.push({ e: e, from: sp.from, to: sp.to, mode: sp.mode }); });
+      return out
+        .filter(function (x) { return x.from <= to && x.to >= from && (!state.kind || (state.kind === 'activity') === isActivityEv(x.e)); });
+    }
+    function holidayDays(from, to) {
+      var out = {};
+      expandRepeatEvents(data.events, from, to).forEach(function (e) {
+        if (!isActivityEv(e) || e.attMode !== 'holiday') return;
+        for (var d = new Date(e.date + 'T00:00:00'); d <= new Date((e.endDate || e.date) + 'T00:00:00'); d.setDate(d.getDate() + 1)) out[d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())] = 1;
+      });
+      return out;
+    }
+    function renderYear() {
+      document.getElementById('scYear').hidden = false; document.getElementById('scMonth').hidden = true;
+      document.getElementById('scYLabel').textContent = 'ปีการศึกษา ' + state.year;
+      var today = todayYmd(), html = '';
+      yearMonths(state.year).forEach(function (mm) {
+        var from = ymdOf(mm.y, mm.m, 1), to = ymdOf(mm.y, mm.m, lastDay(mm.y, mm.m));
+        var list = items(from, to), hol = holidayDays(from, to), has = {};
+        list.forEach(function (x) { for (var d = new Date((x.from < from ? from : x.from) + 'T00:00:00'); d <= new Date((x.to > to ? to : x.to) + 'T00:00:00'); d.setDate(d.getDate() + 1)) has[d.getDate()] = 1; });
+        var c = '<div class="sc-mini">' + DOW.map(function (d) { return '<span class="h">' + d + '</span>'; }).join('');
+        for (var i = 0, f = new Date(mm.y, mm.m - 1, 1).getDay(); i < f; i++) c += '<span></span>';
+        for (var d = 1; d <= lastDay(mm.y, mm.m); d++) {
+          var ds = ymdOf(mm.y, mm.m, d), cl = [];
+          if (ds === today) cl.push('t'); else if (has[d]) cl.push('e');
+          if (hol[ds]) cl.push('wk');
+          c += '<span class="' + cl.join(' ') + '">' + d + '</span>';
+        }
+        c += '</div>';
+        var cur = today.slice(0, 7) === mm.y + '-' + pad(mm.m);
+        html += '<button type="button" class="sc-month' + (cur ? ' cur' : '') + '" data-ym="' + mm.y + '-' + pad(mm.m) + '"><div class="sc-mt"><b>' + TH_MONTHS_FULL[mm.m - 1] + ' ' + (mm.y + 543) + '</b><span>' + (list.length ? list.length + ' รายการ' : '—') + '</span></div>' + c + '</button>';
+      });
+      document.getElementById('scGrid').innerHTML = html;
+    }
+    function respHtml(e) {
+      var t = responsibleText(e, e.kind === 'activity' ? '' : (e.categoryDepartment || catDept[e.categoryId] || ''));
+      var us = e.responsible && e.responsible.users ? e.responsible.users : [];
+      return escapeHtml(t || (us.length ? '' : '-')) + (us.length ? '<small>' + us.map(function (u) { return escapeHtml(u.name); }).join(', ') + '</small>' : '');
+    }
+    function renderMonth() {
+      document.getElementById('scYear').hidden = true; document.getElementById('scMonth').hidden = false;
+      var y = +state.ym.slice(0, 4), m = +state.ym.slice(5, 7);
+      var from = ymdOf(y, m, 1), to = ymdOf(y, m, lastDay(y, m)), today = todayYmd();
+      document.getElementById('scMTitle').textContent = TH_MONTHS_FULL[m - 1] + ' ' + (y + 543);
+      var be = beYearOfYm(y, m);
+      document.getElementById('scMTerm').innerHTML = '<span class="year-tag" style="font-size:0.85rem">ปีการศึกษา ' + be + '</span>';
+      var pm = m === 1 ? 12 : m - 1, nm = m === 12 ? 1 : m + 1;
+      document.getElementById('scPrevM').innerHTML = '<i class="fa-solid fa-chevron-left" aria-hidden="true"></i> ' + MS[pm - 1];
+      document.getElementById('scNextM').innerHTML = MS[nm - 1] + ' <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>';
+      var list = items(from, to), hol = holidayDays(from, to);
+      // ปฏิทิน: กำหนดส่งงาน = จุดสี · กิจกรรม = แถบ (แบบหน้าแรก)
+      var g = DOW.map(function (d, i) { return '<div class="dow d' + i + '">' + d + '</div>'; }).join('');
+      for (var i = 0, f = new Date(y, m - 1, 1).getDay(); i < f; i++) g += '<div class="calendar-cell empty"></div>';
+      var legend = {}, hasAct = false;
+      for (var d = 1; d <= lastDay(y, m); d++) {
+        var ds = ymdOf(y, m, d), on = list.filter(function (x) { return ds >= x.from && ds <= x.to; });
+        var acts = on.filter(function (x) { return isActivityEv(x.e); }).map(function (x) { return x.e; }), dls = on.filter(function (x) { return !isActivityEv(x.e); }).map(function (x) { return x.e; });
+        if (acts.length) hasAct = true;
+        dls.forEach(function (e) { legend[e.categoryId || '_'] = e.categoryName || e.title; });
+        var dots = dls.slice(0, 4).map(function (e) { return '<i class="cal-dot" style="background:' + (colorMap[e.categoryId] || '#9aa4b8') + '" title="' + escapeHtml(e.title) + '"></i>'; }).join('') + (dls.length > 4 ? '<span class="cal-dot-more">+' + (dls.length - 4) + '</span>' : '');
+        var cc = calCellC(d, ds, acts, { startOf: schoolCalSpanFrom, holiday: !!hol[ds] }); // 1.96.2: แบบ C + วันหยุด
+        g += '<div class="calendar-cell' + (ds === today ? ' is-today' : '') + (on.length ? ' has-event' : '') + cc.cls + (state.day === ds ? ' sc-hl' : '') + '"' + (cc.style ? ' style="' + cc.style + '"' : '') + (on.length ? ' data-day="' + ds + '" role="button" tabindex="0" title="' + escapeHtml(on.map(function (x) { return x.e.title; }).join(', ')) + '"' : '') + '>' +
+          cc.num + (ds === today ? '<span class="cal-today-label">วันนี้</span>' : '') + cc.label + (dots ? '<div class="cal-dots">' + dots + '</div>' : '') + '</div>';
+      }
+      document.getElementById('scCal').innerHTML = g;
+      var lk = Object.keys(legend);
+      document.getElementById('scCalLegend').innerHTML = lk.slice(0, 10).map(function (k) { return '<span><i class="cal-dot" style="background:' + (colorMap[k] || '#9aa4b8') + ';"></i>' + escapeHtml(legend[k]) + '</span>'; }).join('') + (hasAct ? CAL_C_LEGEND : '');
+      // ตาราง
+      list.sort(function (a, b) { return a.from.localeCompare(b.from) || (isActivityEv(a.e) === isActivityEv(b.e) ? 0 : isActivityEv(a.e) ? -1 : 1) || String(a.e.title).localeCompare(String(b.e.title), 'th'); });
+      document.getElementById('scCount').textContent = list.length + ' รายการ';
+      if (!list.length) { document.getElementById('scTable').innerHTML = '<div class="empty-state">ไม่มีกำหนดส่งงานหรือกิจกรรมในเดือนนี้</div>'; return; }
+      document.getElementById('scTable').innerHTML = '<table class="sc-tbl"><thead><tr><th style="width:60px">วัน</th><th style="width:110px">วันที่</th><th>กิจกรรม</th><th style="width:26%">ผู้รับผิดชอบ</th></tr></thead><tbody>' + list.map(function (x) {
+        var e = x.e, act = isActivityEv(e), dw = dowOf(x.from);
+        var dt = x.from === x.to ? shortD(x.from) : (x.from.slice(0, 7) === x.to.slice(0, 7) ? +x.from.slice(8) + '–' + shortD(x.to) : shortD(x.from) + ' – ' + shortD(x.to));
+        var sub = [];
+        if (act) { if (e.timeStart) sub.push(activityTimeText(e)); if (e.location) sub.push(e.location); }
+        var full = e.endDate && e.endDate !== e.date;
+        if (x.part) sub.unshift(x.part === 'first' ? 'วันแรก' : 'วันสุดท้าย');
+        if (full && x.mode !== 'range') sub.push((act ? '' : 'ส่งได้ ') + (e.date.slice(0, 7) === e.endDate.slice(0, 7) ? +e.date.slice(8) + '–' + shortD(e.endDate) : shortD(e.date) + ' – ' + shortD(e.endDate)));
+        if (!act && e.manualCheck) sub.push('ส่งนอกระบบ · เจ้าหน้าที่ตรวจรายคน');
+        var kind = act ? (isHolidayEv(e) ? '<span class="sc-kind hol"><i class="fa-solid fa-umbrella-beach" aria-hidden="true"></i> วันหยุด</span>' : '<span class="sc-kind ac"><i class="fa-solid fa-flag" aria-hidden="true"></i> กิจกรรม</span>') : '<span class="sc-kind dl"><i class="fa-solid fa-file-arrow-up" aria-hidden="true"></i> ' + (e.noSubmission && !e.manualCheck ? 'แจ้งเตือน' : 'ส่งงาน') + '</span>';
+        var dot = act ? '<span class="sc-dot" style="background:' + (isHolidayEv(e) ? '#dc2626' : activityColor(e)) + '"></span>' : '<span class="sc-dot" style="background:' + (colorMap[e.categoryId] || '#9aa4b8') + '"></span>';
+        var hl = state.day && state.day >= x.from && state.day <= x.to;
+        var rc = act ? (isHolidayEv(e) ? ' sc-r-hol' : ' sc-r-act') : '', rs = act && !isHolidayEv(e) ? ' style="--rc:' + activityColor(e) + '"' : ''; // 1.96.3: แถวกิจกรรมปูพื้นสีกิจกรรม · วันหยุดสีแดง
+        return '<tr class="' + (hl ? 'sc-row-hl' : '') + rc + '"' + rs + ' data-from="' + x.from + '"><td><span class="sc-dow d' + dw + '">' + DOW[dw] + '</span></td><td class="sc-date">' + escapeHtml(dt) + '</td>' +
+          '<td>' + kind + dot + '<span class="sc-t">' + escapeHtml(e.title) + '</span>' + (sub.length ? '<span class="sc-small">' + escapeHtml(sub.join(' · ')) + '</span>' : '') + '</td>' +
+          '<td class="sc-resp">' + respHtml(e) + '</td></tr>';
+      }).join('') + '</tbody></table>';
+    }
+    // 1.96: แบบ C — ช่องวันระบายสีของกิจกรรม เลขวันเป็นวงกลมสีเข้ม ชื่อกิจกรรมอยู่วันแรก (หรือวันอาทิตย์ที่ต่อสัปดาห์ใหม่)
+    function schoolCalSpanFrom(e) { return schoolCalSpan(e).from; }
+    // ---------- 1.96.1: ส่งออก PDF (ดาวน์โหลดไฟล์ทันที ไม่เปิดหน้าตัวอย่าง) — รายเดือน / รายภาคเรียน (นับตามแท็กปีการศึกษา + ภาคเรียนของรายการ) ----------
+    // 1.97.4: ฟอนต์ Sarabun จากไฟล์ในเว็บเอง (ไม่พึ่ง Google Fonts — ส่งออกได้แม้เน็ตโรงเรียนบล็อก)
+    var SARABUN_FACES = [400, 600, 700].map(function (w) { var u = new URL('assets/fonts/', location.href).href; return '@font-face{font-family:Sarabun;font-weight:' + w + ';src:url(' + u + 'sarabun-thai-' + w + '-normal.woff2) format("woff2");unicode-range:U+0E00-0E7F}@font-face{font-family:Sarabun;font-weight:' + w + ';src:url(' + u + 'sarabun-latin-' + w + '-normal.woff2) format("woff2")}'; }).join('');
+    var PCSS = '*{box-sizing:border-box}body{margin:0;font-family:Sarabun,sans-serif;color:#0f172a;background:#fff}' +
+      '.pg{position:relative;width:794px;height:1123px;padding:42px 44px 56px;background:#fff;overflow:hidden}.ft{position:absolute;left:44px;right:44px;bottom:22px;display:flex;justify-content:space-between;font-size:10px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:5px}' +
+      '.cover{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}.cover img{width:160px;height:160px;object-fit:contain;margin-bottom:28px}' +
+      '.cover h1{font-size:34px;margin:4px 0}.cover h2{font-size:21px;margin:3px 0;font-weight:600;color:#334155}.cover .sch{margin-top:8px;font-size:18px;font-weight:700;color:#1e3a8a}' +
+      '.toc{margin-top:40px;width:75%;font-size:14px;text-align:left;border-top:1px solid #cbd5e1;padding-top:8px}.toc div{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dotted #cbd5e1}' +
+      '.hd{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #0b6fcc;padding-bottom:5px;margin-bottom:8px}.hd b{font-size:22px}.hd span{font-size:11.5px;color:#475569}' +
+      '.g{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px}.dw{text-align:center;font-size:11px;font-weight:700;padding:2px 0;border-radius:4px}' +
+      '.c{position:relative;height:70px;border-radius:5px;background:#f8fafc;padding:3px 4px;font-size:9.5px;overflow:hidden}.c.hol{background:#f1f5f9;box-shadow:inset 0 0 0 1.5px #cbd5e1}.c.hol .n{color:#dc2626;font-size:14px}.rib{position:absolute;top:6px;right:-19px;transform:rotate(45deg);background:#dc2626;color:#fff;font-size:8px;font-weight:800;padding:1px 20px}.c.hol .lb{margin-top:4px;padding-right:8px}.lg u.hl{background:#f1f5f9;box-shadow:inset 0 0 0 1px #cbd5e1;border-top:2px solid #dc2626}.c.x{background:transparent}' +
+      '.n{font-weight:700;font-size:11.5px;display:inline-flex;min-width:19px;height:19px;align-items:center;justify-content:center;border-radius:50%}.n.h{color:#dc2626}' +
+      '.lb{font-size:9px;line-height:11px;font-weight:700;margin-top:1px;max-height:33px;overflow:hidden}.ds{display:flex;flex-wrap:wrap;gap:2px;margin-top:2px}.ds i{width:6px;height:6px;border-radius:50%;display:inline-block}' +
+      '.d0{background:#fee2e2;color:#b91c1c}.d1{background:#fef9c3;color:#854d0e}.d2{background:#fce7f3;color:#9d174d}.d3{background:#dcfce7;color:#166534}.d4{background:#ffedd5;color:#9a3412}.d5{background:#e0f2fe;color:#075985}.d6{background:#ede9fe;color:#5b21b6}' +
+      '.lg{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:10px;margin:6px 0 8px;color:#475569}.lg i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px}.lg u{display:inline-block;width:11px;height:8px;border-radius:2px;margin-right:3px;background:#e11d4833;box-shadow:inset 0 0 0 1px #e11d48}' +
+      'table{width:100%;border-collapse:collapse;font-size:11px}th{background:#f1f5f9;text-align:left;padding:4px 5px;font-size:10.5px}td{padding:4px 5px;border-bottom:1px solid #e2e8f0;vertical-align:top}' +
+      '.sd{display:inline-block;padding:0 5px;border-radius:4px;font-weight:700;font-size:10px}.k{display:inline-block;font-size:9.5px;padding:0 4px;border-radius:3px;margin-right:3px;font-weight:700}.k.dl{background:#dbeafe;color:#1e40af}.k.ac{background:#f3e8ff;color:#6b21a8}' +
+      '.dt{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:3px}.sm{display:block;color:#64748b;font-size:9.5px}.rs small{display:block;color:#64748b;font-size:9.5px}.em{color:#64748b;font-size:13px;padding:10px 0}' +
+      // 1.97.4: แบบ A — แถบหัวสีน้ำเงิน + โลโก้ในระบบ · ช่องวันมีแถบชื่องานตามสีกลุ่ม · ตารางหัวน้ำเงิน
+      '.band{margin:-42px -44px 14px;background:linear-gradient(120deg,#0b4fa3,#1d7fe0);color:#fff;padding:24px 44px 20px;display:flex;align-items:center;gap:18px}.band img{width:64px;height:64px;object-fit:contain;background:#fff;border-radius:50%;padding:5px;flex:none}' +
+      '.band .t1{font-size:14px;opacity:.92}.band .t2{font-size:38px;font-weight:700;line-height:1.15}.band .t3{font-size:14px;opacity:.92}' +
+      '.hd{border-bottom-color:#0b4fa3}.hd b{color:#0b4fa3}' +
+      '.g{gap:4px}.dw{font-size:13px;padding:3px 0;border-radius:6px;background:#eef4fc;color:#0b4fa3}.dw.d0,.dw.d6{background:#fef2f2;color:#dc2626}' +
+      '.c{border:1px solid #e2e8f0;background:#fff;border-radius:7px;padding:3px 4px}.c.x{background:#f8fafc;border-color:#f1f5f9}.c.hol{background:#fff1f2;border-color:#fecaca;box-shadow:none}.c.td{outline:2px solid #1d7fe0}' +
+      '.c .n{font-size:14px;min-width:0;height:auto;display:block;border-radius:0;line-height:1.2}.c .n.h{color:#dc2626}' +
+      '.bar{display:block;border-radius:4px;padding:0 4px;margin-top:2px;font-size:10px;font-weight:600;line-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#fff}.more{font-size:9.5px;color:#64748b;font-weight:700;margin-top:1px}' +
+      '.lg{font-size:11.5px;gap:5px 14px;margin:10px 0}.lg i{width:11px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:4px}' +
+      'table{font-size:12px}th{background:#0b4fa3;color:#fff;font-size:12px;padding:5px 6px}tbody tr:nth-child(even) td{background-color:#f8fafc}td{padding:4px 6px}' +
+      '.cover .cband{position:absolute;left:0;right:0;top:0;height:150px;background:linear-gradient(120deg,#0b4fa3,#1d7fe0)}.cover .cband2{position:absolute;left:0;right:0;bottom:0;height:40px;background:linear-gradient(120deg,#0b4fa3,#1d7fe0)}' +
+      '.cover img{position:relative;width:170px;height:170px;background:#fff;border-radius:50%;padding:10px;box-shadow:0 6px 24px rgba(15,23,42,.18)}.cover h1{font-size:44px;color:#0b4fa3}.toc{position:relative}.toc b{color:#0b4fa3;font-size:16px}';
+    var THEAD = '<table><thead><tr><th style="width:36px">วัน</th><th style="width:76px">วันที่</th><th>กิจกรรม</th><th style="width:30%">ผู้รับผิดชอบ</th></tr></thead><tbody></tbody></table>';
+    function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+    // รายการ (พร้อมช่วงที่แสดง) ในช่วง from–to — filter(e) = กรองตามแท็กภาคเรียน · null = ทุกรายการ
+    function spanItems(from, to, filter) {
+      var out = [];
+      expandRepeatEvents(data.events, from, to).forEach(function (e) {
+        if (filter && !filter(e)) return;
+        var sp = schoolCalSpan(e); if (sp.mode === 'none') return;
+        if (sp.mode === 'ends') { out.push({ e: e, from: sp.from, to: sp.from, mode: 'ends', part: 'first' }); out.push({ e: e, from: sp.to, to: sp.to, mode: 'ends', part: 'last' }); }
+        else out.push({ e: e, from: sp.from, to: sp.to, mode: sp.mode });
+      });
+      return out.filter(function (x) { return x.from <= to && x.to >= from; });
+    }
+    // แท็กปีการศึกษาของรายการ — กิจกรรม "ทำซ้ำทุกปี" (id = <id>@<ปี>) นับเป็นปีการศึกษาของปีที่ไปโผล่ (ภาคเรียนเดิม)
+    function tagYear(e) {
+      var y = +e.academicYear || 0, at = String(e.id).indexOf('@');
+      if (at > 0) { var o = data.events.filter(function (x) { return x.id === String(e.id).slice(0, at); })[0]; if (o) y += (+String(e.date).slice(0, 4)) - (+String(o.date).slice(0, 4)); }
+      return y;
+    }
+    function semFilter(be, sem) { return function (e) { return tagYear(e) === be && String(e.semester) === String(sem); }; }
+    function monthData(y, m, filter) {
+      var from = ymdOf(y, m, 1), to = ymdOf(y, m, lastDay(y, m));
+      var list = spanItems(from, to, filter).sort(function (a, b) { return a.from.localeCompare(b.from) || (isActivityEv(a.e) === isActivityEv(b.e) ? 0 : isActivityEv(a.e) ? -1 : 1) || String(a.e.title).localeCompare(String(b.e.title), 'th'); });
+      return { y: y, m: m, list: list, hol: holidayDays(from, to) };
+    }
+    // เดือนแรก–เดือนสุดท้ายที่มีรายการของภาคเรียนนี้ (รวมเดือนว่างระหว่างกลาง)
+    function semMonths(be, sem) {
+      var y = be - 543, f = semFilter(be, sem), xs = spanItems((y - 1) + '-01-01', (y + 2) + '-12-31', f);
+      if (!xs.length) return [];
+      var a = xs.reduce(function (m, x) { return x.from < m ? x.from : m; }, '9999'), b = xs.reduce(function (m, x) { return x.to > m ? x.to : m; }, '0000');
+      var out = [], cy = +a.slice(0, 4), cm = +a.slice(5, 7), ey = +b.slice(0, 4), em = +b.slice(5, 7);
+      while (cy < ey || (cy === ey && cm <= em)) { out.push(monthData(cy, cm, f)); cm++; if (cm > 12) { cm = 1; cy++; } if (out.length > 24) break; }
+      return out;
+    }
+    function monthParts(md, termTxt) {
+      var y = md.y, m = md.m, list = md.list, g = DOW.map(function (d, i) { return '<div class="dw d' + i + '">' + d + '</div>'; }).join(''), legend = {};
+      var first = new Date(y, m - 1, 1).getDay(), weeks = Math.ceil((first + lastDay(y, m)) / 7), ch = weeks > 5 ? 74 : 90, maxBars = weeks > 5 ? 3 : 4, nHol = 0;
+      for (var i = 0; i < first; i++) g += '<div class="c x" style="height:' + ch + 'px"></div>';
+      for (var d = 1; d <= lastDay(y, m); d++) {
+        var ds = ymdOf(y, m, d), on = list.filter(function (x) { return ds >= x.from && ds <= x.to; }), dw0 = (first + d - 1) % 7;
+        var hol = !!md.hol[ds]; if (hol) nHol++;
+        on.forEach(function (x) { if (!isActivityEv(x.e)) legend[x.e.categoryId || '_'] = x.e.categoryName || x.e.title; });
+        var ord = on.slice().sort(function (a, b) { var r = function (x) { return isActivityEv(x.e) ? (isHolidayEv(x.e) ? 0 : 1) : 2; }; return r(a) - r(b); });
+        var bars = ord.slice(0, maxBars).map(function (x) {
+          var e = x.e, act = isActivityEv(e), c = act ? (isHolidayEv(e) ? '#dc2626' : activityColor(e)) : (colorMap[e.categoryId] || '#64748b');
+          return '<span class="bar" style="background:' + c + '">' + escapeHtml(e.title) + '</span>';
+        }).join('') + (ord.length > maxBars ? '<div class="more">+' + (ord.length - maxBars) + ' รายการ</div>' : '');
+        g += '<div class="c' + (hol ? ' hol' : '') + '" style="height:' + ch + 'px"><span class="n' + (hol || dw0 === 0 || dw0 === 6 ? ' h' : '') + '">' + d + '</span>' + bars + '</div>';
+      }
+      var pdfSt = window.__scPdfSt || {}, logo = pdfSt.logoDataUrl || pdfSt.iconDataUrl || '';
+      var lk = Object.keys(legend), hasAct = list.some(function (x) { return isActivityEv(x.e); });
+      var title = TH_MONTHS_FULL[m - 1] + ' ' + (y + 543);
+      var hd = function (cont) {
+        if (cont) return '<div class="hd"><b>' + title + ' (ต่อ)</b><span>ปฏิทินโรงเรียน' + (termTxt ? ' · ' + escapeHtml(termTxt) : '') + ' · ' + list.length + ' รายการ</span></div>';
+        return '<div class="band">' + (logo ? '<img src="' + logo + '" alt="">' : '') + '<div><div class="t1">ปฏิทิน' + escapeHtml(pdfSt.schoolName || 'โรงเรียน') + (termTxt ? ' · ' + escapeHtml(termTxt) : '') + '</div><div class="t2">' + title + '</div><div class="t3">' + list.length + ' รายการ' + (nHol ? ' · วันหยุด ' + nHol + ' วัน' : '') + '</div></div></div>';
+      };
+      var rows = list.map(function (x) {
+        var e = x.e, act = isActivityEv(e), dw = dowOf(x.from);
+        var dt = x.from === x.to ? shortD(x.from) : (x.from.slice(0, 7) === x.to.slice(0, 7) ? +x.from.slice(8) + '–' + shortD(x.to) : shortD(x.from) + ' – ' + shortD(x.to));
+        var sub = [];
+        if (x.part) sub.push(x.part === 'first' ? 'วันแรก' : 'วันสุดท้าย');
+        if (act) { if (e.timeStart) sub.push(activityTimeText(e)); if (e.location) sub.push(e.location); if (e.attMode === 'holiday') sub.push('วันหยุด'); }
+        if (e.endDate && e.endDate !== e.date && x.mode !== 'range') sub.push((act ? '' : 'ส่งได้ ') + (e.date.slice(0, 7) === e.endDate.slice(0, 7) ? +e.date.slice(8) + '–' + shortD(e.endDate) : shortD(e.date) + ' – ' + shortD(e.endDate)));
+        return '<tr' + (act ? (isHolidayEv(e) ? ' style="background:#fee2e2"' : ' style="background:' + activityColor(e) + '1a"') : '') + '><td' + (act ? ' style="box-shadow:inset 4px 0 0 ' + (isHolidayEv(e) ? '#dc2626' : activityColor(e)) + '"' : '') + '><span class="sd d' + dw + '">' + DOW[dw] + '</span></td><td><b>' + escapeHtml(dt) + '</b></td><td><span class="k ' + (act ? 'ac">กิจกรรม' : 'dl">' + (e.noSubmission && !e.manualCheck ? 'แจ้งเตือน' : 'ส่งงาน')) + '</span><i class="dt" style="background:' + (act ? activityColor(e) : (colorMap[e.categoryId] || '#9aa4b8')) + '"></i><b>' + escapeHtml(e.title) + '</b>' + (sub.length ? '<span class="sm">' + escapeHtml(sub.join(' · ')) + '</span>' : '') + '</td><td class="rs">' + respHtml(e) + '</td></tr>';
+      });
+      return { title: title, n: list.length, head: hd(false) + '<div class="g">' + g + '</div>' + '<div class="lg">' + lk.slice(0, 14).map(function (k) { return '<span><i style="background:' + (colorMap[k] || '#9aa4b8') + '"></i>' + escapeHtml(legend[k]) + '</span>'; }).join('') + (hasAct ? '<span><i style="background:linear-gradient(90deg,#0891b2,#ea580c,#9333ea)"></i>กิจกรรม (สีตามกิจกรรม)</span>' : '') + (nHol ? '<span><i style="background:#dc2626"></i>วันหยุด</span>' : '') + '</div>', contHead: hd(true), rows: rows };
+    }
+    // สร้างหน้า A4 ใน iframe ซ่อน → แบ่งหน้าตามความสูงจริง → html2canvas ทีละหน้า → jsPDF → ดาวน์โหลด
+    async function exportPdf(months, cover, fileName) {
+      var st = await getSiteSettings().catch(function () { return {}; }) || {};
+      window.__scPdfSt = st; // 1.97.4: โลโก้ + ชื่อโรงเรียนในแถบหัวแต่ละเดือน
+      var termTxt = cover ? cover.term : '', parts = months.map(function (md) { return monthParts(md, termTxt); });
+      var r = await withProgress('กำลังสร้างไฟล์ PDF', async function (p) {
+        await loadScriptOnce('assets/html2canvas.min.js'); await loadScriptOnce('assets/jspdf.umd.min.js');
+        var fr = document.createElement('iframe'); fr.setAttribute('aria-hidden', 'true');
+        fr.style.cssText = 'position:fixed;left:-20000px;top:0;width:820px;height:1200px;border:0;';
+        document.body.appendChild(fr);
+        try {
+          var d = fr.contentWindow.document; d.open();
+          d.write('<!doctype html><html lang="th"><head><meta charset="utf-8"><style>' + SARABUN_FACES + PCSS + '</style></head><body></body></html>'); d.close();
+          await new Promise(function (res) { if (d.readyState === 'complete') res(); else fr.contentWindow.addEventListener('load', res); });
+          if (d.fonts && d.fonts.ready) await d.fonts.ready;
+          var pages = [], newPage = function (html) { var pg = d.createElement('div'); pg.className = 'pg'; pg.innerHTML = html; d.body.appendChild(pg); pages.push(pg); return pg; };
+          if (cover) {
+            var logo = st.logoDataUrl || st.iconDataUrl || '';
+            newPage('').classList.add('cover');
+            pages[0].innerHTML = '<div class="cband"></div>' + (logo ? '<img src="' + logo + '" alt="">' : '') + '<h1>ปฏิทินโรงเรียน</h1><h2>' + escapeHtml(cover.term) + '</h2><h2 style="font-size:16px">' + escapeHtml(cover.range) + '</h2>' +
+              (st.schoolName ? '<div class="sch">' + escapeHtml(st.schoolName) + '</div>' : '') +
+              '<div class="toc"><b>สารบัญ</b>' + parts.map(function (x) { return '<div><span>' + x.title + '</span><span>' + x.n + ' รายการ</span></div>'; }).join('') + '</div>';
+          }
+          parts.forEach(function (x) {
+            var pg = newPage(x.head + (x.rows.length ? THEAD : '<div class="em">ไม่มีรายการในเดือนนี้</div>'));
+            var limit = 1123 - 56, tb = pg.querySelector('tbody');
+            x.rows.forEach(function (rowHtml) {
+              tb.insertAdjacentHTML('beforeend', rowHtml);
+              if (tb.lastElementChild.getBoundingClientRect().bottom - pg.getBoundingClientRect().top > limit && tb.children.length > 1) {
+                tb.lastElementChild.remove();
+                pg = newPage(x.contHead + THEAD); tb = pg.querySelector('tbody'); tb.insertAdjacentHTML('beforeend', rowHtml);
+              }
+            });
+          });
+          var ft = 'BNKAcademicHub · ปฏิทินโรงเรียน' + (termTxt ? ' ' + termTxt : '') + ' · ส่งออกเมื่อ ' + formatDateThai(todayYmd());
+          pages.forEach(function (pg, i) { pg.insertAdjacentHTML('beforeend', '<div class="ft"><span>' + escapeHtml(ft) + '</span><span>' + (i + 1) + ' / ' + pages.length + '</span></div>'); });
+          // 1.97.4: โหลดฟอนต์ Sarabun ให้ครบทุกน้ำหนักก่อนแปลงเป็นรูป (fonts.ready คืนค่าทันทีถ้ายังไม่มีตัวหนังสือ — เดิมได้ฟอนต์สำรอง)
+          if (d.fonts && d.fonts.load) { try { await Promise.all(['400', '600', '700'].map(function (w) { return d.fonts.load(w + ' 16px Sarabun', 'กขค ABC 123'); })); await d.fonts.ready; } catch (fe) { /* ใช้ฟอนต์สำรอง */ } }
+          await Promise.all(Array.prototype.map.call(d.images, function (im) { return im.complete ? 0 : new Promise(function (res) { im.onload = im.onerror = res; }); }));
+          var pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+          try { await html2canvas(pages[0], { scale: 0.3, backgroundColor: '#ffffff', logging: false, useCORS: true, windowWidth: 820 }); } catch (we) { /* 1.97.4: รอบอุ่นเครื่อง — ให้ฟอนต์ในสำเนาของ html2canvas โหลดครบก่อน หน้าแรกจะได้ไม่ใช้ฟอนต์สำรอง */ }
+          for (var i = 0; i < pages.length; i++) {
+            p.setProgress(Math.round(i / pages.length * 95), 'หน้า ' + (i + 1) + '/' + pages.length);
+            var cv = await html2canvas(pages[i], { scale: 2, backgroundColor: '#ffffff', logging: false, useCORS: true, windowWidth: 820 });
+            if (i) pdf.addPage();
+            pdf.addImage(cv.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 210, 297);
+          }
+          downloadBlob(pdf.output('blob'), fileName);
+          return pages.length;
+        } finally { fr.remove(); }
+      }, { successLabel: 'ดาวน์โหลดไฟล์ PDF แล้ว' });
+      return r;
+    }
+    function openExport() {
+      var be = state.ym ? beYearOfYm(+state.ym.slice(0, 4), +state.ym.slice(5, 7)) : state.year;
+      document.getElementById('scExpHint').textContent = 'ปีการศึกษา ' + be + ' — นับตามปีการศึกษาและภาคเรียนที่ใส่ไว้ตอนลงกำหนดการ';
+      var mName = function (x) { return TH_MONTHS_FULL[x.m - 1] + ' ' + (x.y + 543); };
+      var sems = ['1', '2'].concat(summerOn ? ['summer'] : []), cache = {};
+      document.getElementById('scExpOpts').innerHTML = sems.map(function (sem) {
+        var ms = cache[sem] = semMonths(be, sem), n = ms.reduce(function (a, x) { return a + x.list.length; }, 0);
+        if (sem === 'summer' && !n) return '';
+        var lab = sem === 'summer' ? 'ภาคฤดูร้อน ' + be : 'ภาคเรียนที่ ' + sem + '/' + be;
+        return '<button type="button" class="sc-exp-btn" data-sem="' + sem + '"' + (ms.length ? '' : ' disabled') + '><b>' + lab + '</b><span>' + (ms.length ? mName(ms[0]) + ' – ' + mName(ms[ms.length - 1]) + ' · ' + ms.length + ' เดือน · ' + n + ' รายการ' : 'ยังไม่มีรายการ') + '</span></button>';
+      }).join('');
+      document.getElementById('scExpOpts').onclick = function (e) {
+        var b = e.target.closest('[data-sem]'); if (!b || b.disabled) return;
+        var sem = b.getAttribute('data-sem'), ms = cache[sem];
+        hideModalEl(document.getElementById('scExpModal'));
+        var term = sem === 'summer' ? 'ภาคฤดูร้อน ปีการศึกษา ' + be : 'ภาคเรียนที่ ' + sem + ' ปีการศึกษา ' + be;
+        exportPdf(ms, { term: term, range: mName(ms[0]) + ' – ' + mName(ms[ms.length - 1]) }, 'ปฏิทินโรงเรียน_' + (sem === 'summer' ? 'ฤดูร้อน' : 'ภาคเรียน' + sem) + '_' + be + '.pdf');
+      };
+      showModalEl(document.getElementById('scExpModal'));
+    }
+    var summerOn = true;
+    document.querySelectorAll('[data-sc-export]').forEach(function (b) { b.addEventListener('click', function () { if (data) openExport(); }); });
+    ['scExpX', 'scExpClose'].forEach(function (id) { document.getElementById(id).addEventListener('click', function () { hideModalEl(document.getElementById('scExpModal')); }); });
+    function render() { if (!data) return; if (state.ym) renderMonth(); else renderYear(); }
+    function go(hash) { if (location.hash !== hash) location.hash = hash; else fromHash(); }
+    function fromHash() {
+      var h = location.hash.replace(/^#/, ''), mm = /^m=(\d{4})-(\d{2})$/.exec(h), yy = /^y=(\d{4})$/.exec(h);
+      state.day = '';
+      if (mm) { state.ym = mm[1] + '-' + mm[2]; state.year = beYearOfYm(+mm[1], +mm[2]); }
+      else { state.ym = ''; state.year = yy ? +yy[1] : (state.year || curYear); }
+      render(); window.scrollTo(0, 0);
+    }
+    window.addEventListener('hashchange', fromHash);
+    document.getElementById('scGrid').addEventListener('click', function (e) { var b = e.target.closest('[data-ym]'); if (b) go('#m=' + b.getAttribute('data-ym')); });
+    document.getElementById('scPrevY').addEventListener('click', function () { go('#y=' + (state.year - 1)); });
+    document.getElementById('scNextY').addEventListener('click', function () { go('#y=' + (state.year + 1)); });
+    document.getElementById('scBack').addEventListener('click', function () { go('#y=' + state.year); });
+    function shiftM(n) { var y = +state.ym.slice(0, 4), m = +state.ym.slice(5, 7) + n; if (m < 1) { m = 12; y--; } if (m > 12) { m = 1; y++; } go('#m=' + y + '-' + pad(m)); }
+    document.getElementById('scPrevM').addEventListener('click', function () { shiftM(-1); });
+    document.getElementById('scNextM').addEventListener('click', function () { shiftM(1); });
+    document.getElementById('scToday').addEventListener('click', function () { var t = todayYmd(); go('#m=' + t.slice(0, 7)); }); // 1.96.4
+    document.getElementById('scPrint').addEventListener('click', function () { var y = +state.ym.slice(0, 4), m = +state.ym.slice(5, 7); exportPdf([monthData(y, m, null)], null, 'ปฏิทินโรงเรียน_' + (y + 543) + '-' + (m < 10 ? '0' : '') + m + '.pdf'); }); // 1.96.1: ดาวน์โหลด PDF ทันที
+    document.getElementById('scKind').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-k]'); if (!b) return; state.kind = b.getAttribute('data-k');
+      document.querySelectorAll('#scKind [data-k]').forEach(function (x) { x.classList.toggle('on', x === b); }); render();
+    });
+    function pickDay(ds) {
+      state.day = state.day === ds ? '' : ds; renderMonth();
+      var r = document.querySelector('#scTable tr.sc-row-hl'); if (r) r.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+    document.getElementById('scCal').addEventListener('click', function (e) { var c = e.target.closest('[data-day]'); if (c) pickDay(c.getAttribute('data-day')); });
+    document.getElementById('scCal').addEventListener('keydown', function (e) { if (e.key !== 'Enter' && e.key !== ' ') return; var c = e.target.closest('[data-day]'); if (c) { e.preventDefault(); pickDay(c.getAttribute('data-day')); } });
+    (async function load() {
+      if (!session) return;
+      try {
+        var r = await Promise.all([apiCall('schoolCalendar', {}), currentAcademicTerm().catch(function () { return null; }), getSiteSettings().catch(function () { return null; })]);
+        data = r[0]; setActPool(data.events); // 1.96.4
+        colorMap = buildCategoryColorMap(data.categories || []);
+        (data.categories || []).forEach(function (c) { catDept[c.id] = c.department || ''; });
+        summerOn = !r[2] || r[2].summerEnabled !== false; // 1.96.1
+        curYear = r[1] && r[1].year ? +r[1].year : beYearOfYm(new Date().getFullYear(), new Date().getMonth() + 1);
+        state.year = curYear;
+        fromHash();
+      } catch (err) {
+        document.getElementById('scGrid').innerHTML = '<div class="error-box">' + escapeHtml(err.message) + '</div>';
+      }
+    })();
+  </script>
+</body>
+</html>
