@@ -1632,8 +1632,16 @@
                 else { const h = getHolidayForDate(localDateStr()); dayIndex = (h && h.type === 'makeup') ? today : 1; } // เสาร์-อาทิตย์: ถ้าวันนี้มีสอนชดเชยพอดี ให้เปิดแท็บนั้นเลย ไม่งั้น default ไปจันทร์
             }
             // ===== [ใหม่] แอบโหลดข้อมูลเช็คชื่อของห้องนี้ไว้ล่วงหน้าเงียบๆ (ไม่บล็อกการแสดงผลหน้านี้) เผื่อผู้ใช้กด "เช็คชื่อ"/"สรุป" ต่อ จะได้ไม่ต้องรอโหลดซ้ำ =====
+            // [v1.75.4] โหลดตามภาคเรียน/ปีของวิชาที่แสดงจริง + โหลดเสร็จแล้ววาดหน้านี้ใหม่ (เดิมรีเฟรชแล้วปุ่มค้าง "ยังไม่เช็ค" เพราะวาดก่อนข้อมูลมาถึงและไม่วาดซ้ำ)
+            //   ไม่เพิ่มคำขอ — โหลดห้องนี้อยู่แล้วทุกครั้งที่เปิด · วาดใหม่เฉพาะเมื่อมีห้อง/ภาคเรียนที่เพิ่งโหลดครั้งแรก และยังอยู่หน้าห้องเดิม
+            const renderId = window.__classroomRenderId = (window.__classroomRenderId || 0) + 1;
             const preloadTerm = adminTerm ? adminTerm() : settings.term, preloadYear = adminYear ? adminYear() : settings.year;
-            ensureAttendanceLoadedForRoom(preloadTerm, preloadYear, roomId);
+            const preTY = [...new Set(getRoomSubjects(roomId).map(s => `${s.term}|${s.year}`))];
+            if (!preTY.length) preTY.push(`${preloadTerm}|${preloadYear}`);
+            const notYet = preTY.filter(k => !(roomAttKey_(k.split('|')[0], k.split('|')[1], roomId) in (window.__loadedRoomLastModified || {})));
+            Promise.all(preTY.map(k => ensureAttendanceLoadedForRoom(k.split('|')[0], k.split('|')[1], roomId))).then(() => {
+                if (notYet.length && window.__classroomRenderId === renderId && currentRoomId === roomId && ((history.state || {}).view || 'classroom') === 'classroom') openClassroom(roomId, dayIndex);
+            }).catch(() => {});
             
             const roomNameStr = formatRoomName(roomId);
             const advData = getRoomAdvisors(roomId);
@@ -4125,7 +4133,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '1.75.3.011126';
+        const APP_VERSION = '1.75.4.021126';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
