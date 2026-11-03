@@ -4484,7 +4484,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '2.00.3.031126';
+        const APP_VERSION = '2.00.4.031126';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
@@ -5513,37 +5513,130 @@ content.innerHTML = html;
             });
         };
 
-        window.handleImportStudents = function(e) {
-            const file = e.target.files[0];
-            if (!file) return; showProgressModal("กำลังนำเข้ารายชื่อนักเรียน", "กำลังอ่านไฟล์..."); const reader = new FileReader();
+        // ===== [v2.00.4] นำเข้ารายชื่อนักเรียน: จับคู่ "เลขประจำตัว" ก่อน → "ชื่อ" (ไม่สนคำนำหน้า/ช่องว่าง) → ไม่พบ = เพิ่มใหม่ · ดูตัวอย่างก่อนบันทึกทุกครั้ง
+        // เดิมจับคู่ด้วย ห้อง + เลขที่ — เลขที่เปลี่ยน = ชื่อไปทับนักเรียนคนอื่น (ประวัติเช็คชื่อผูกกับนักเรียนคนเดิม) จึงเลิกใช้เลขที่จับคู่
+        const STU_PREFIX = ['เด็กชาย', 'เด็กหญิง', 'ด.ช.', 'ด.ญ.', 'ดช.', 'ดญ.', 'นางสาว', 'น.ส.', 'นส.', 'นาย', 'นาง'];
+        function stuNormName(n) {
+            let x = String(n || '').replace(/[​-‍﻿]/g, '').replace(/\s+/g, '');
+            for (let g = 0; g < 2; g++) { const pre = STU_PREFIX.find(pf => x.indexOf(pf) === 0); if (!pre) break; x = x.slice(pre.length); }
+            return x;
+        }
+        function stuRealCode(c) { c = String(c || '').trim(); return c && !/^0+$/.test(c) ? c : ''; }
+        function stuImportPlan(rows) {
+            const yr = String(settings.year), pool = students.filter(st => st.year === undefined || st.year === null || st.year === '' || String(st.year) === yr), used = new Set(), out = [];
+            const byCode = {}; pool.forEach(st => { const c = stuRealCode(st.code); if (c) (byCode[c] = byCode[c] || []).push(st); });
+            rows.forEach(r => {
+                const nn = stuNormName(r.name), code = stuRealCode(r.code); let st = null, how = '';
+                if (code) { st = (byCode[code] || []).find(x => !used.has(x.id)) || null; if (st) how = 'เลขประจำตัว'; }
+                if (!st) {
+                    const same = pool.filter(x => x.roomId === r.roomId && !used.has(x.id) && stuNormName(x.name) === nn && (!code || !stuRealCode(x.code) || stuRealCode(x.code) === code));
+                    st = same.find(x => x.number === r.number) || same[0] || null; if (st) how = 'ชื่อ';
+                }
+                if (!st && nn) { const other = pool.filter(x => x.roomId !== r.roomId && !used.has(x.id) && stuNormName(x.name) === nn && (!code || !stuRealCode(x.code) || stuRealCode(x.code) === code)); if (other.length === 1) { st = other[0]; how = 'ชื่อ (ห้องอื่น)'; } }
+                if (st) {
+                    used.add(st.id);
+                    const ch = [];
+                    if (st.roomId !== r.roomId) ch.push(`ห้อง ${formatRoomName(st.roomId)} → ${formatRoomName(r.roomId)}`);
+                    if (String(st.number) !== String(r.number)) ch.push(`เลขที่ ${st.number} → ${r.number}`);
+                    if (code && stuRealCode(st.code) !== code) ch.push(stuRealCode(st.code) ? `เลขประจำตัว ${st.code} → ${code}` : `ใส่เลขประจำตัว ${code}`);
+                    if (st.name !== r.name) ch.push(`ชื่อ "${st.name}" → "${r.name}"`);
+                    out.push({ type: st.roomId !== r.roomId ? 'move' : (ch.length ? 'update' : 'same'), row: r, st, how, ch });
+                } else {
+                    const clash = code && (byCode[code] || []).length ? (byCode[code][0]) : null;
+                    out.push({ type: 'new', row: r, ch: clash ? [`เลขประจำตัว ${code} ซ้ำกับ ${clash.name} (${formatRoomName(clash.roomId)}) — ไม่ใส่เลขประจำตัวให้`] : [], noCode: !!clash });
+                }
+            });
+            const rooms = new Set(rows.map(r => r.roomId));
+            const missing = pool.filter(x => rooms.has(x.roomId) && !used.has(x.id) && x.status !== 'resigned');
+            return { items: out, missing };
+        }
+        function stuApplyPlan(plan) {
+            let n = 0;
+            plan.items.forEach(it => {
+                const r = it.row, code = stuRealCode(r.code);
+                if (it.type === 'new') { students.push(Object.assign({ id: generateId(), roomId: r.roomId, number: r.number, name: r.name, status: 'active' }, code && !it.noCode ? { code } : (String(r.code || '').trim() ? { code: String(r.code).trim() } : {}))); n++; return; }
+                if (it.type === 'same') return;
+                const st = students.find(x => x.id === it.st.id); if (!st) return; // หาใหม่จากข้อมูลล่าสุด (เผื่อมีการซิงก์ระหว่างดูตัวอย่าง)
+                st.roomId = r.roomId; st.number = r.number; st.name = r.name; if (code) st.code = code; n++;
+            });
+            return n;
+        }
+        // ตัวอย่างก่อนบันทึก · onOk(plan) = บันทึก
+        function stuShowPlan(plan, roomsLabel, onOk) {
+            const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+            const cnt = { update: 0, move: 0, new: 0, same: 0 }; plan.items.forEach(it => cnt[it.type]++);
+            const cats = [['all', 'ทั้งหมด', plan.items.length, '#334155'], ['update', 'ตรงกัน · อัปเดต', cnt.update, '#4f46e5'], ['same', 'ตรงกัน · ไม่เปลี่ยน', cnt.same, '#64748b'], ['move', 'ย้ายห้อง', cnt.move, '#d97706'], ['new', 'เพิ่มใหม่', cnt.new, '#059669'], ['missing', 'ในระบบแต่ไม่มีในไฟล์', plan.missing.length, '#dc2626']];
+            const TAG = { update: ['#eef2ff', '#4338ca', 'อัปเดต'], same: ['#f1f5f9', '#64748b', 'ไม่เปลี่ยน'], move: ['#fffbeb', '#b45309', 'ย้ายห้อง'], new: ['#ecfdf5', '#047857', 'เพิ่มใหม่'] };
+            let el = document.getElementById('stuPlanModal'); if (el) el.remove();
+            el = document.createElement('div'); el.id = 'stuPlanModal';
+            el.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:12px';
+            let cat = cnt.update || cnt.move || cnt.new ? 'all' : 'all';
+            const draw = () => {
+                const list = cat === 'missing' ? plan.missing.map(st => ({ type: 'missing', st })) : plan.items.filter(it => cat === 'all' || it.type === cat);
+                const rows = list.slice(0, 400).map(it => {
+                    if (it.type === 'missing') return `<tr><td style="padding:6px 8px;border-top:1px solid #f1f5f9">${esc(formatRoomName(it.st.roomId))}</td><td style="padding:6px 8px;border-top:1px solid #f1f5f9">${esc(it.st.number)}</td><td style="padding:6px 8px;border-top:1px solid #f1f5f9">${esc(it.st.code || '-')}</td><td style="padding:6px 8px;border-top:1px solid #f1f5f9">${esc(it.st.name)}</td><td style="padding:6px 8px;border-top:1px solid #f1f5f9"><span style="background:#fef2f2;color:#b91c1c;border-radius:99px;padding:1px 8px;font-weight:800;font-size:11px">ไม่มีในไฟล์</span> <span style="color:#64748b;font-size:12px">คงไว้เหมือนเดิม (ไม่ลบ)</span></td></tr>`;
+                    const t = TAG[it.type], r = it.row;
+                    return `<tr><td style="padding:6px 8px;border-top:1px solid #f1f5f9">${esc(formatRoomName(r.roomId))}</td><td style="padding:6px 8px;border-top:1px solid #f1f5f9">${esc(r.number)}</td><td style="padding:6px 8px;border-top:1px solid #f1f5f9">${esc(r.code || '-')}</td><td style="padding:6px 8px;border-top:1px solid #f1f5f9">${esc(r.name)}</td><td style="padding:6px 8px;border-top:1px solid #f1f5f9"><span style="background:${t[0]};color:${t[1]};border-radius:99px;padding:1px 8px;font-weight:800;font-size:11px">${t[2]}</span>${it.how ? ` <span style="color:#64748b;font-size:11px">ตรงกันด้วย${esc(it.how)}</span>` : ''}${it.ch.length ? `<div style="color:#475569;font-size:12px;margin-top:2px">${it.ch.map(esc).join(' · ')}</div>` : ''}</td></tr>`;
+                }).join('');
+                el.innerHTML = `<div style="background:#fff;border-radius:22px;max-width:980px;width:100%;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.25);overflow:hidden">
+                  <div style="padding:16px 20px 8px"><div style="font-size:19px;font-weight:800;color:#0f172a"><i class="fas fa-user-check" style="color:#4f46e5"></i> ตรวจรายชื่อก่อนนำเข้า · ${esc(roomsLabel)}</div>
+                  <div style="color:#64748b;font-size:13px;margin-top:2px">จับคู่ด้วย <b>เลขประจำตัว</b> ก่อน แล้วจึงใช้ <b>ชื่อ</b> (ไม่สนคำนำหน้า ด.ช. / เด็กชาย / นาย และช่องว่าง) · ตรงกัน = แก้ข้อมูลคนเดิม (ประวัติเช็คชื่อยังอยู่) · ไม่พบ = เพิ่มใหม่ · นักเรียนที่ไม่มีในไฟล์จะไม่ถูกลบ</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">${cats.map(c => `<button type="button" data-stp-cat="${c[0]}" style="border:2px solid ${cat === c[0] ? c[3] : '#e2e8f0'};background:${cat === c[0] ? c[3] : '#fff'};color:${cat === c[0] ? '#fff' : c[3]};border-radius:99px;padding:4px 12px;font-weight:800;font-size:13px;cursor:pointer">${c[1]} ${c[2]}</button>`).join('')}</div></div>
+                  <div style="overflow:auto;padding:0 20px;flex:1"><table style="width:100%;border-collapse:collapse;font-size:13.5px"><thead><tr style="background:#f8fafc;color:#475569;text-align:left"><th style="padding:7px 8px">ห้อง</th><th style="padding:7px 8px">เลขที่</th><th style="padding:7px 8px">เลขประจำตัว</th><th style="padding:7px 8px">ชื่อ (ในไฟล์)</th><th style="padding:7px 8px">ผล</th></tr></thead><tbody>${rows || '<tr><td colspan="5" style="padding:14px;color:#94a3b8;text-align:center">ไม่มีรายการ</td></tr>'}</tbody></table>${list.length > 400 ? `<p style="color:#64748b;font-size:12px">แสดง 400 รายการแรก</p>` : ''}</div>
+                  <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;padding:12px 20px;border-top:1px solid #f1f5f9;flex-wrap:wrap"><span style="margin-right:auto;color:#334155;font-size:13px;font-weight:700">จะบันทึก: อัปเดต ${cnt.update} · ย้ายห้อง ${cnt.move} · เพิ่มใหม่ ${cnt.new} คน</span><button type="button" data-stp-no style="border:0;background:#fef2f2;color:#dc2626;font-weight:800;border-radius:12px;padding:9px 16px;cursor:pointer">ยกเลิก</button><button type="button" data-stp-ok ${cnt.update + cnt.move + cnt.new ? '' : 'disabled'} style="border:0;background:#059669;color:#fff;font-weight:800;border-radius:12px;padding:9px 16px;cursor:pointer;opacity:${cnt.update + cnt.move + cnt.new ? 1 : .5}"><i class="fas fa-check"></i> ยืนยันนำเข้า</button></div></div>`;
+            };
+            draw(); document.body.appendChild(el);
+            el.addEventListener('click', (ev) => {
+                const c = ev.target.closest('[data-stp-cat]'); if (c) { cat = c.getAttribute('data-stp-cat'); draw(); return; }
+                if (ev.target.closest('[data-stp-no]')) { el.remove(); return; }
+                if (ev.target.closest('[data-stp-ok]')) { el.remove(); onOk(plan); }
+            });
+        }
+        function stuReadRows(file, parse, done) {
+            showProgressModal('กำลังอ่านไฟล์รายชื่อนักเรียน', 'กำลังอ่านไฟล์...'); const reader = new FileReader();
             reader.onload = async function(evt) {
                 try {
-                    updateProgressModal(25, "กำลังตรวจสอบข้อมูลในไฟล์...");
-                    const data = new Uint8Array(evt.target.result);
-                    const workbook = XLSX.read(data, {type: 'array'}); const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
-                    let startIndex = (jsonData.length > 0 && String(jsonData[0][0]).includes("เลขที่")) ? 1 : 0; let imported = 0;
-                    updateProgressModal(55, "กำลังนำเข้ารายชื่อนักเรียน...");
-                    for(let i = startIndex; i < jsonData.length; i++) {
-                        const row = jsonData[i];
-                        if(row && row.length >= 2 && row[0] && row[1]) {
-                            // [v1.76] 3 คอลัมน์ = เลขที่ | เลขประจำตัว | ชื่อ · 2 คอลัมน์ (ไฟล์เดิม) = เลขที่ | ชื่อ
-                            const has3 = row.length >= 3 && String(row[2] || '').trim();
-                            const number = String(row[0]).trim(), name = String(has3 ? row[2] : row[1]).trim(), code = has3 ? String(row[1] || '').trim().slice(0, 20) : '';
-                            const exists = students.find(s => s.roomId === window.adminSelectedRoom && s.number === number);
-                            if(exists) { exists.name = name; if (code) exists.code = code;
-                            } else { students.push(Object.assign({ id: generateId(), roomId: window.adminSelectedRoom, number, name, status: 'active' }, code ? { code } : {})); } imported++;
-                        }
-                    }
-                    if (imported > 0) { updateProgressModal(85, "กำลังบันทึกขึ้นเซิร์ฟเวอร์..."); await saveData('full'); logAction('นำเข้ารายชื่อนักเรียนจาก Excel', `นำเข้า ${imported} คน ห้อง ${formatRoomName(window.adminSelectedRoom)}`);
-                        completeProgressModal("นำเข้าสำเร็จ", `นำเข้า ${imported} คน สำเร็จ!`); renderAdminTab(); } else { errorProgressModal("ไม่พบข้อมูลที่ถูกต้องในไฟล์");
-                    }
-                } catch (err) { errorProgressModal("เกิดข้อผิดพลาดในการอ่านไฟล์ กรุณาตรวจสอบรูปแบบไฟล์");
-                } e.target.value = '';
-            }; reader.readAsArrayBuffer(file);
+                    updateProgressModal(30, 'กำลังดึงข้อมูลล่าสุดจากเซิร์ฟเวอร์...');
+                    const prefetch = await refreshBeforeEdit(['students']);
+                    const wb = XLSX.read(new Uint8Array(evt.target.result), { type: 'array' }), json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
+                    const res = parse(json);
+                    if (!res.rows.length) { errorProgressModal(res.err || 'ไม่พบข้อมูลที่ถูกต้องในไฟล์'); return; }
+                    updateProgressModal(70, 'กำลังจับคู่รายชื่อ...');
+                    const plan = stuImportPlan(res.rows); closeProgressModal();
+                    done(plan, res, prefetch);
+                } catch (err) { errorProgressModal('เกิดข้อผิดพลาดในการอ่านไฟล์ กรุณาตรวจสอบรูปแบบไฟล์'); }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+        async function stuSavePlan(plan, prefetch, logLabel) {
+            showProgressModal('กำลังนำเข้ารายชื่อนักเรียน', 'กำลังบันทึก...');
+            try {
+                const cnt = { update: 0, move: 0, new: 0 }; plan.items.forEach(it => { if (cnt[it.type] !== undefined) cnt[it.type]++; });
+                const n = stuApplyPlan(plan); updateProgressModal(70, 'กำลังบันทึกขึ้นเซิร์ฟเวอร์...');
+                await saveData('full', null, prefetch);
+                logAction('นำเข้ารายชื่อนักเรียนจาก Excel', `${logLabel}: อัปเดต ${cnt.update} · ย้ายห้อง ${cnt.move} · เพิ่มใหม่ ${cnt.new}`);
+                completeProgressModal('นำเข้าสำเร็จ', `อัปเดต ${cnt.update} คน · ย้ายห้อง ${cnt.move} คน · เพิ่มใหม่ ${cnt.new} คน`); renderAdminTab();
+                return n;
+            } catch (e) { errorProgressModal('บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'); }
+        }
+        window.handleImportStudents = function(e) {
+            const file = e.target.files[0]; e.target.value = ''; if (!file) return;
+            const roomId = window.adminSelectedRoom;
+            stuReadRows(file, (json) => {
+                const startIndex = (json.length > 0 && String(json[0][0]).includes('เลขที่')) ? 1 : 0, rows = [];
+                for (let i = startIndex; i < json.length; i++) {
+                    const row = json[i]; if (!row || row.length < 2 || !row[0] || !(String(row[2] || '').trim() || String(row[1] || '').trim())) continue; // [v2.00.4] เลขประจำตัวว่างได้ (เดิมข้ามทั้งแถว)
+                    if (String(row[0]).trim().startsWith('หมายเหตุ')) continue;
+                    // [v1.76] 3 คอลัมน์ = เลขที่ | เลขประจำตัว | ชื่อ · 2 คอลัมน์ (ไฟล์เดิม) = เลขที่ | ชื่อ
+                    const has3 = row.length >= 3 && String(row[2] || '').trim();
+                    rows.push({ roomId, number: String(row[0]).trim(), name: String(has3 ? row[2] : row[1]).trim(), code: has3 ? String(row[1] || '').trim().slice(0, 20) : '' });
+                }
+                return { rows };
+            }, (plan, res, prefetch) => stuShowPlan(plan, 'ห้อง ' + formatRoomName(roomId), (pl) => stuSavePlan(pl, prefetch, 'ห้อง ' + formatRoomName(roomId))));
         };
 
         window.downloadStudentTemplate = function() {
-            const ws_data = [ ["เลขที่", "เลขประจำตัว", "คำนำหน้า+ชื่อ-นามสกุล"], ["1", "34512", "ด.ช.รักเรียน เพียรศึกษา"], ["2", "34513", "ด.ญ.ใจดี มีเมตตา"] ];
+            const ws_data = [ ["เลขที่", "เลขประจำตัว", "คำนำหน้า+ชื่อ-นามสกุล"], ["1", "34512", "ด.ช.รักเรียน เพียรศึกษา"], ["2", "34513", "ด.ญ.ใจดี มีเมตตา"], [], ["หมายเหตุ: ระบบจับคู่นักเรียนเดิมด้วยเลขประจำตัวก่อน แล้วจึงใช้ชื่อ — ตรงกัน = อัปเดตคนเดิม (ประวัติเช็คชื่อยังอยู่) · ไม่พบ = เพิ่มใหม่ · มีหน้าตรวจก่อนบันทึก"] ];
             const ws = XLSX.utils.aoa_to_sheet(ws_data); ws['!cols'] = [{wch: 10}, {wch: 14}, {wch: 35}];
             const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Template");
             XLSX.writeFile(wb, "แบบฟอร์มนำเข้านักเรียน.xlsx");
@@ -5564,7 +5657,7 @@ content.innerHTML = html;
             const ws_data = [ ["ห้อง", "เลขที่", "เลขประจำตัว", "คำนำหน้า+ชื่อ-นามสกุล"] ];
             if (sampleRooms[0]) ws_data.push([formatRoomName(sampleRooms[0]), "1", "34512", "ด.ช.รักเรียน เพียรศึกษา"], [formatRoomName(sampleRooms[0]), "2", "34513", "ด.ญ.ใจดี มีเมตตา"]);
             if (sampleRooms[1]) ws_data.push([formatRoomName(sampleRooms[1]), "1", "34600", "ด.ช.ขยัน ตั้งใจดี"]);
-            ws_data.push([], ["หมายเหตุ: คอลัมน์ \"ห้อง\" ต้องเป็นรูปแบบ ม.X/Y เช่น ม.1/1, ม.4/2 ให้ตรงกับห้องที่มีอยู่ในระบบ"], ["สามารถใส่นักเรียนได้หลายห้องในไฟล์เดียว โดยเรียงแถวสลับห้องกันได้ตามสะดวก"]);
+            ws_data.push([], ["หมายเหตุ: คอลัมน์ \"ห้อง\" ต้องเป็นรูปแบบ ม.X/Y เช่น ม.1/1, ม.4/2 ให้ตรงกับห้องที่มีอยู่ในระบบ"], ["สามารถใส่นักเรียนได้หลายห้องในไฟล์เดียว โดยเรียงแถวสลับห้องกันได้ตามสะดวก"], ["หมายเหตุ: ระบบจับคู่นักเรียนเดิมด้วยเลขประจำตัวก่อน แล้วจึงใช้ชื่อ (ย้ายห้องได้) — ตรงกัน = อัปเดตคนเดิม · ไม่พบ = เพิ่มใหม่ · มีหน้าตรวจก่อนบันทึก"]);
             const ws = XLSX.utils.aoa_to_sheet(ws_data); ws['!cols'] = [{wch: 12}, {wch: 10}, {wch: 14}, {wch: 35}];
             const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Template");
             XLSX.writeFile(wb, "แบบฟอร์มนำเข้านักเรียนทุกห้อง.xlsx");
@@ -5572,37 +5665,22 @@ content.innerHTML = html;
         };
 
         window.handleImportStudentsAllRooms = function(e) {
-            const file = e.target.files[0];
-            if (!file) return; showProgressModal("กำลังนำเข้ารายชื่อนักเรียนทุกห้อง", "กำลังอ่านไฟล์..."); const reader = new FileReader();
-            reader.onload = async function(evt) {
-                try {
-                    updateProgressModal(15, "กำลังตรวจสอบข้อมูลในไฟล์...");
-                    const data = new Uint8Array(evt.target.result);
-                    const workbook = XLSX.read(data, {type: 'array'}); const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
-                    let startIndex = (jsonData.length > 0 && String(jsonData[0][0] || '').includes("ห้อง")) ? 1 : 0;
-                    let imported = 0, skippedRoom = 0;
-                    const roomsTouched = new Set();
-                    updateProgressModal(35, "กำลังดึงข้อมูลล่าสุดจากเซิร์ฟเวอร์...");
-                    const __prefetch8 = await refreshBeforeEdit(['students']);
-                    updateProgressModal(55, "กำลังนำเข้ารายชื่อนักเรียน...");
-                    for (let i = startIndex; i < jsonData.length; i++) {
-                        const row = jsonData[i];
-                        if (!row || row.length < 3 || !row[0] || !row[1] || !row[2]) continue;
-                        if (String(row[0]).trim().startsWith('หมายเหตุ') || String(row[0]).trim().startsWith('สามารถ')) continue;
-                        const roomId = parseRoomLabel_(row[0]);
-                        if (!roomId) { skippedRoom++; continue; }
-                        const has4 = row.length >= 4 && String(row[3] || '').trim(); // [v1.76] ห้อง | เลขที่ | เลขประจำตัว | ชื่อ (ไฟล์เดิม 3 คอลัมน์ยังใช้ได้)
-                        const number = String(row[1]).trim(), name = String(has4 ? row[3] : row[2]).trim(), code = has4 ? String(row[2] || '').trim().slice(0, 20) : '';
-                        const exists = students.find(s => s.roomId === roomId && s.number === number);
-                        if (exists) { exists.name = name; if (code) exists.code = code; } else { students.push(Object.assign({ id: generateId(), roomId, number, name, status: 'active' }, code ? { code } : {})); }
-                        roomsTouched.add(roomId); imported++;
-                    }
-                    if (imported > 0) { updateProgressModal(85, "กำลังบันทึกขึ้นเซิร์ฟเวอร์..."); await saveData('full', null, __prefetch8); logAction('นำเข้ารายชื่อนักเรียนทุกห้องจาก Excel', `นำเข้า ${imported} คน ใน ${roomsTouched.size} ห้อง`);
-                        completeProgressModal("นำเข้าสำเร็จ", `นำเข้า ${imported} คน ใน ${roomsTouched.size} ห้อง สำเร็จ!${skippedRoom > 0 ? ' (ข้าม ' + skippedRoom + ' แถวที่ระบุห้องไม่ถูกต้อง)' : ''}`); renderAdminTab();
-                    } else { errorProgressModal("ไม่พบข้อมูลที่ถูกต้อง หรือชื่อห้องในไฟล์ไม่ตรงกับห้องในระบบ"); }
-                } catch (err) { errorProgressModal("เกิดข้อผิดพลาดในการอ่านไฟล์ กรุณาตรวจสอบรูปแบบไฟล์");
-                } e.target.value = '';
-            }; reader.readAsArrayBuffer(file);
+            const file = e.target.files[0]; e.target.value = ''; if (!file) return;
+            stuReadRows(file, (json) => {
+                const startIndex = (json.length > 0 && String(json[0][0] || '').includes('ห้อง')) ? 1 : 0, rows = []; let skippedRoom = 0;
+                for (let i = startIndex; i < json.length; i++) {
+                    const row = json[i];
+                    if (!row || row.length < 3 || !row[0] || !row[1] || !(String(row[3] || '').trim() || String(row[2] || '').trim())) continue; // [v2.00.4] เลขประจำตัวว่างได้
+                    if (String(row[0]).trim().startsWith('หมายเหตุ') || String(row[0]).trim().startsWith('สามารถ')) continue;
+                    const roomId = parseRoomLabel_(row[0]); if (!roomId) { skippedRoom++; continue; }
+                    const has4 = row.length >= 4 && String(row[3] || '').trim(); // [v1.76] ห้อง | เลขที่ | เลขประจำตัว | ชื่อ (ไฟล์เดิม 3 คอลัมน์ยังใช้ได้)
+                    rows.push({ roomId, number: String(row[1]).trim(), name: String(has4 ? row[3] : row[2]).trim(), code: has4 ? String(row[2] || '').trim().slice(0, 20) : '' });
+                }
+                return { rows, skippedRoom, err: skippedRoom ? 'ชื่อห้องในไฟล์ไม่ตรงกับห้องในระบบ' : '' };
+            }, (plan, res, prefetch) => {
+                const nRooms = new Set(res.rows.map(r => r.roomId)).size;
+                stuShowPlan(plan, nRooms + ' ห้อง' + (res.skippedRoom ? ' (ข้าม ' + res.skippedRoom + ' แถวที่ระบุห้องไม่ถูกต้อง)' : ''), (pl) => stuSavePlan(pl, prefetch, nRooms + ' ห้อง'));
+            });
         };
 
         window.exportAllStudentsExcel = function(roomId) {
