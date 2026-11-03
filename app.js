@@ -3485,7 +3485,7 @@ content.innerHTML = html;
 
                 // ===== 4. กู้คืนฐานข้อมูลจาก Snapshot (สำรองอัตโนมัติรายสัปดาห์) - เฉพาะ Super Admin เท่านั้น เพราะเป็นการเขียนทับข้อมูลปัจจุบันทั้งหมด =====
                 if (isSuperAdminBk) {
-                    html += `<div class="mb-6 bg-rose-50/60 p-4 sm:p-6 rounded-2xl border-2 border-rose-300"><div class="flex flex-wrap items-center justify-between gap-2 mb-2"><h4 class="text-base sm:text-lg font-extrabold text-rose-800 flex items-center gap-2"><i class="fas fa-history text-rose-500"></i> กู้คืนฐานข้อมูลจาก Snapshot</h4><button onclick="window.loadSnapshotList()" class="bg-white border border-rose-300 hover:bg-rose-100 text-rose-700 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-sync-alt"></i> โหลดรายชื่อไฟล์สำรอง</button></div><p class="text-[10px] sm:text-xs text-rose-600 font-bold mb-3"><i class="fas fa-exclamation-triangle"></i> ใช้เฉพาะกรณีฉุกเฉินเท่านั้น เช่น ข้อมูลถูกล้าง/เขียนทับผิดพลาด — การกู้คืนจะ<u>เขียนทับข้อมูลปัจจุบันทั้งหมด</u>ด้วยข้อมูล ณ เวลาที่สำรองไว้ (ระบบจะสำรองสถานะปัจจุบันไว้ก่อนกู้คืนให้อัตโนมัติเผื่อกู้คืนผิดไฟล์)</p><div id="snapshotListContainer" class="space-y-1.5"><div class="text-center text-slate-400 py-4 text-xs sm:text-sm font-medium">กดปุ่ม "โหลดรายชื่อไฟล์สำรอง" ด้านบนเพื่อเริ่มต้น</div></div></div>`;
+                    html += `<div class="mb-6 bg-rose-50/60 p-4 sm:p-6 rounded-2xl border-2 border-rose-300"><div class="flex flex-wrap items-center justify-between gap-2 mb-2"><h4 class="text-base sm:text-lg font-extrabold text-rose-800 flex items-center gap-2"><i class="fas fa-history text-rose-500"></i> สำรอง / กู้คืนฐานข้อมูล (Snapshot)</h4><div class="flex flex-wrap gap-1.5"><button onclick="window.snapshotNow()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-save"></i> สำรองตอนนี้</button><button onclick="window.loadSnapshotList()" class="bg-white border border-rose-300 hover:bg-rose-100 text-rose-700 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-sync-alt"></i> โหลดรายชื่อไฟล์สำรอง</button></div></div><p class="text-[10px] sm:text-xs text-slate-600 font-medium mb-2"><i class="fas fa-info-circle"></i> ไฟล์สำรองเก็บ ห้อง / วิชา / ครู / นักเรียน / ตั้งค่า (ไม่รวมการเช็คชื่อ — การเช็คชื่อมีสำรองแยกรายห้อง) · ระบบสำรองให้อัตโนมัติรายสัปดาห์ + ทุกครั้งก่อนนำเข้ารายชื่อนักเรียน · "กู้คืนเฉพาะรายชื่อนักเรียน" = เปลี่ยนแค่รายชื่อ (ห้อง/วิชา/ครู/ตั้งค่า คงเดิม)</p><p class="text-[10px] sm:text-xs text-rose-600 font-bold mb-3"><i class="fas fa-exclamation-triangle"></i> ใช้เฉพาะกรณีฉุกเฉินเท่านั้น เช่น ข้อมูลถูกล้าง/เขียนทับผิดพลาด — การกู้คืนจะ<u>เขียนทับข้อมูลปัจจุบันทั้งหมด</u>ด้วยข้อมูล ณ เวลาที่สำรองไว้ (ระบบจะสำรองสถานะปัจจุบันไว้ก่อนกู้คืนให้อัตโนมัติเผื่อกู้คืนผิดไฟล์)</p><div id="snapshotListContainer" class="space-y-1.5"><div class="text-center text-slate-400 py-4 text-xs sm:text-sm font-medium">กดปุ่ม "โหลดรายชื่อไฟล์สำรอง" ด้านบนเพื่อเริ่มต้น</div></div></div>`;
                 }
 
                 content.innerHTML = html;
@@ -4485,7 +4485,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '2.00.6.031126';
+        const APP_VERSION = '2.00.7.031126';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
@@ -4898,14 +4898,46 @@ content.innerHTML = html;
                     return;
                 }
                 const fmtSize = (b) => b < 1024 ? `${b} B` : (b < 1024*1024 ? `${(b/1024).toFixed(1)} KB` : `${(b/1024/1024).toFixed(2)} MB`);
-                listEl.innerHTML = data.snapshots.map(f => {
+                const mains = data.snapshots.filter(f => !f.type || f.type === 'main'); // [v2.00.7] เฉพาะไฟล์สำรองข้อมูลหลัก (การเช็คชื่อรายห้องกู้คืนที่ห้องนั้น)
+                if (!mains.length) { listEl.innerHTML = `<div class="text-center text-slate-400 py-6 text-xs sm:text-sm font-medium">ยังไม่พบไฟล์สำรองข้อมูลหลัก — กด "สำรองตอนนี้" เพื่อสร้าง</div>`; return; }
+                const kindOf = (n) => /^ก่อนนำเข้ารายชื่อ/.test(n) ? ['ก่อนนำเข้ารายชื่อ', 'bg-indigo-100 text-indigo-700'] : /^สำรองเอง/.test(n) ? ['สำรองเอง', 'bg-emerald-100 text-emerald-700'] : /^ก่อนกู้คืน/.test(n) ? ['ก่อนกู้คืน', 'bg-amber-100 text-amber-700'] : ['อัตโนมัติ', 'bg-slate-100 text-slate-600'];
+                listEl.innerHTML = mains.map(f => {
                     const d = new Date(f.dateCreated);
                     const dateStr = isNaN(d) ? '' : d.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-                    return `<div class="flex items-center justify-between gap-2 bg-white border ${f.corrupted ? 'border-rose-400' : 'border-rose-200'} rounded-lg px-3 py-2.5"><div class="min-w-0"><div class="font-bold text-slate-700 text-xs sm:text-sm truncate">${f.name}${f.corrupted ? ' <span class="text-rose-500 text-[9px] font-black">(ไฟล์นี้ข้อมูลเสีย ห้ามกู้คืน)</span>' : ''}</div><div class="text-[10px] sm:text-xs text-slate-400 font-medium">สำรองเมื่อ ${dateStr} · ${fmtSize(f.sizeBytes)}</div></div>${f.corrupted ? '' : `<button onclick="window.restoreSnapshot('${f.name}')" class="shrink-0 bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-undo"></i> กู้คืนไฟล์นี้</button>`}</div>`;
+                    const k = kindOf(f.name), who = (/^(?:ก่อนนำเข้ารายชื่อนักเรียน|สำรองเอง)_(.+)_\d{4}-\d{2}-\d{2}T/.exec(f.name) || [])[1] || '';
+                    return `<div class="flex flex-wrap items-center justify-between gap-2 bg-white border ${f.corrupted ? 'border-rose-400' : 'border-rose-200'} rounded-lg px-3 py-2.5"><div class="min-w-0"><div class="font-bold text-slate-700 text-xs sm:text-sm flex flex-wrap items-center gap-1.5"><span class="${k[1]} px-2 py-0.5 rounded-full text-[10px] font-black">${k[0]}</span> ${dateStr}${who ? ` <span class="text-slate-400 font-medium">· ${hrEsc(who)}</span>` : ''}${f.corrupted ? ' <span class="text-rose-500 text-[9px] font-black">(ไฟล์นี้ข้อมูลเสีย ห้ามกู้คืน)</span>' : ''}</div><div class="text-[10px] sm:text-xs text-slate-400 font-medium">${fmtSize(f.sizeBytes)}</div></div>${f.corrupted ? '' : `<div class="flex flex-wrap gap-1.5 shrink-0"><button onclick="window.restoreSnapshotStudents('${f.id}', '${dateStr}')" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-user-graduate"></i> กู้คืนเฉพาะรายชื่อนักเรียน</button><button onclick="window.restoreSnapshot('${f.id}')" class="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-xs shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-undo"></i> กู้คืนทั้งหมด</button></div>`}</div>`;
                 }).join('<div class="h-1.5"></div>');
             } catch (err) {
                 listEl.innerHTML = `<div class="text-center text-rose-400 py-6 text-xs sm:text-sm font-bold"><i class="fas fa-exclamation-circle"></i> โหลดรายชื่อไฟล์ไม่สำเร็จ ลองใหม่อีกครั้ง</div>`;
             }
+        };
+        // [v2.00.7] สำรองข้อมูลหลักตอนนี้ · กู้คืนเฉพาะรายชื่อนักเรียน
+        async function snapshotNowReq(reason) {
+            const res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'snapshot_now', reason }) });
+            const j = await res.json().catch(() => null);
+            if (!res.ok || !j || j.status !== 'success') throw new Error((j && j.message) || 'สำรองข้อมูลไม่สำเร็จ');
+            return j.id;
+        }
+        window.snapshotNow = async function() {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้น", "error"); return; }
+            showLoadingSpinnerModal('กำลังสำรองข้อมูล', 'กรุณารอสักครู่...');
+            try { await snapshotNowReq('manual'); closeProgressModal(); showToast('สำรองข้อมูลเรียบร้อย', 'success'); window.loadSnapshotList(); }
+            catch (e) { errorProgressModal(e.message || 'สำรองข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'); }
+        };
+        window.restoreSnapshotStudents = function(id, dateStr) {
+            if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่กู้คืนข้อมูลได้", "error"); return; }
+            showConfirm("กู้คืนเฉพาะรายชื่อนักเรียน", `จะเปลี่ยนรายชื่อนักเรียนทั้งหมดกลับเป็นรายชื่อ ณ ${dateStr || 'เวลาที่สำรอง'} — ห้อง วิชา ครู ตั้งค่า และการเช็คชื่อไม่เปลี่ยน · นักเรียนที่เพิ่ม/แก้หลังเวลานั้นจะหายไป (ระบบสำรองรายชื่อปัจจุบันไว้ให้ก่อนกู้คืน)`, async () => {
+                showProgressModal("กำลังกู้คืนรายชื่อนักเรียน", "กรุณารอสักครู่ ห้ามปิดหน้านี้...");
+                try {
+                    updateProgressModal(40, "กำลังกู้คืน...");
+                    const res = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'restore_snapshot_students', id }) });
+                    const r = await res.json().catch(() => null);
+                    if (!res.ok || !r || r.status !== 'success') { errorProgressModal(r && r.message ? r.message : 'กู้คืนไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'); return; }
+                    logAction('กู้คืนรายชื่อนักเรียนจากไฟล์สำรอง', `${dateStr || id} (${r.students} คน)`);
+                    completeProgressModal("กู้คืนสำเร็จ", `กู้คืนรายชื่อนักเรียน ${r.students} คน · ระบบจะโหลดหน้าเว็บใหม่`);
+                    setTimeout(() => { location.reload(); }, 1500);
+                } catch (e) { errorProgressModal("เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง"); }
+            }, 'กู้คืนรายชื่อ');
         };
         window.restoreSnapshot = function(fileName) {
             if (!currentUser || currentUser.role !== 'super_admin') { showToast("เฉพาะ Super Admin เท่านั้นที่กู้คืนข้อมูลได้", "error"); return; }
@@ -5636,7 +5668,9 @@ content.innerHTML = html;
             reader.readAsArrayBuffer(file);
         }
         async function stuSavePlan(plan, prefetch, logLabel) {
-            showProgressModal('กำลังนำเข้ารายชื่อนักเรียน', 'กำลังบันทึก...');
+            showProgressModal('กำลังนำเข้ารายชื่อนักเรียน', 'กำลังสำรองข้อมูลก่อนนำเข้า...');
+            try { await snapshotNowReq('before_import'); } catch (e) { errorProgressModal('สำรองข้อมูลก่อนนำเข้าไม่สำเร็จ — ยังไม่ได้บันทึกอะไร กรุณาลองใหม่อีกครั้ง'); return; } // [v2.00.7] สำรองก่อนทุกครั้ง
+            updateProgressModal(30, 'กำลังบันทึก...');
             try {
                 const cnt = { update: 0, move: 0, new: 0 }; plan.items.forEach(it => { if (cnt[it.type] !== undefined) cnt[it.type]++; });
                 const ma = { hidden: 0, resigned: 0, delete: 0 }; Object.values(plan.missAct || {}).forEach(a => { if (ma[a] !== undefined) ma[a]++; });
