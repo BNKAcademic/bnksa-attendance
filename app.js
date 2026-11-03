@@ -3114,7 +3114,30 @@
         function wrState() { if (!window.__wr) window.__wr = { monday: wrDefaultMonday(), grades: [], sum: true, rooms: true }; return window.__wr; }
         function wrWeekDates(monday) { const out = []; for (let i = 0; i < 7; i++) { const ds = wrAdd(monday, i); if (i < 5) out.push(ds); else { const h = getHolidayForDate(ds); if (h && h.type === 'makeup') out.push(ds); } } return out; }
         function wrRooms(term, year, grades) { const has = new Set(activeSubjects(term, year).map(s => s.roomId)); return getRoomList().filter(r => has.has(r) && (!grades.length || grades.includes((/^m(\d)_/.exec(r) || [])[1]))); }
+        // [v2.00.1] ครูที่แจ้งไปราชการ / ลา (AcademicHub) — คาบที่ไม่ได้เช็คในวันนั้นเป็นสีเทา ไม่นับ
+        window.__wrLeaves = window.__wrLeaves || {};
+        function wrLeavesFor(monday) { return window.__wrLeaves[monday] || null; }
+        window.__wrLeavesP = window.__wrLeavesP || {};
+        function wrLoadLeaves(monday) {
+            if (window.__wrLeaves[monday]) return Promise.resolve();
+            if (window.__wrLeavesP[monday]) return window.__wrLeavesP[monday];
+            return (window.__wrLeavesP[monday] = (async () => {
+                let items = [];
+                try { const r = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'hub_leaves', from: monday, to: wrAdd(monday, 6) }) }); const j = await r.json(); if (j && j.status === 'success') items = j.items || []; } catch (e) { items = []; }
+                window.__wrLeaves[monday] = items; delete window.__wrLeavesP[monday];
+                if (items.length && document.querySelector('[onclick="window.exportWeeklyReport()"]')) renderAdminTab();
+            })());
+        }
+        function wrLeaveOf(lv, s, ds, p) {
+            if (!lv || !lv.length || !s) return null;
+            const hubOf = {}; (teachers || []).forEach(t => { if (t.hubId) hubOf[String(t.name || '').trim()] = t.hubId; });
+            const ids = (s.systemType ? getRoomAdvisors(s.roomId) : [s.teacher, s.teacher2]).map(n => hubOf[String(n || '').trim()]).filter(Boolean);
+            if (!ids.length) return null;
+            const hits = ids.map(id => lv.find(l => l.hubId === id && l.date === ds && (!l.periods || !l.periods.length || l.periods.includes(Number(p)))));
+            return hits.every(Boolean) ? hits[0] : null; // ครูทุกคนของคาบนั้นไปราชการ / ลา
+        }
         function wrCompute(term, year, monday, grades) {
+            const lv = wrLeavesFor(monday);
             const done = new Set((attendanceData || []).map(a => a.subjectId + '|' + a.date + '|' + String(a.period)));
             const now = new Date(), today = localDateStr(now), hm = String(now.getHours()).padStart(2, '0') + '.' + String(now.getMinutes()).padStart(2, '0');
             const dates = wrWeekDates(monday), rooms = wrRooms(term, year, grades);
@@ -3135,6 +3158,7 @@
                         if ((half === 'morning' && sl.period <= 4) || (half === 'afternoon' && sl.period >= 5)) st = 'off';
                         else { const hp = hubPeriodFor(roomId, ds, sl.period); if (hp) st = hp.mode === 'noclass' ? 'off' : (checked ? 'ok' : 'act'); }
                         if (!st) st = checked ? 'ok' : ((ds > today || (ds === today && hm < sl.time.split('-')[1])) ? 'future' : 'no');
+                        if (st === 'no') { const l = wrLeaveOf(lv, s, ds, sl.period); if (l) return { p: sl.period, st: 'leave', s, lv: (l.label || 'ไปราชการ') + ' (ไม่นับ)' }; }
                         if (st === 'ok') { ok++; tot++; } else if (st === 'no') tot++;
                         return { p: sl.period, st, s };
                     });
@@ -3152,7 +3176,8 @@
         // หน้าสรุป: ตารางห้อง 28 แถว/หน้า · คาบที่ยังไม่เช็คต่อท้ายหน้าสุดท้าย (เหลือที่ 30 − จำนวนห้องในหน้านั้น) แล้วหน้าละ 38 แถว
         function wrSumLayout(nRooms, nMiss) { const chunks = Math.max(1, Math.ceil(nRooms / 28)), last = nRooms - (chunks - 1) * 28, room0 = 30 - last, cap = room0 > 2 ? room0 : 0; return { chunks, cap, pages: chunks + Math.ceil(Math.max(0, nMiss - cap) / 38) }; }
         function wrTabHtml() {
-            const w = wrState(), term = adminTerm(), year = adminYear(), R = wrCompute(term, year, w.monday, w.grades);
+            const w = wrState(); wrLoadLeaves(w.monday);
+            const term = adminTerm(), year = adminYear(), R = wrCompute(term, year, w.monday, w.grades);
             const grades = [1, 2, 3, 4, 5, 6].filter(g => (settings.roomCounts || {})['m' + g]);
             const chip = (on, label, attr) => `<button type="button" onclick="${attr}" class="${on ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'} border-2 px-3 py-1 rounded-full text-xs sm:text-sm font-bold">${label}</button>`;
             const chk = (on, label, desc, key) => `<label class="flex items-start gap-3 border-2 ${on ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 bg-white'} rounded-xl p-3 cursor-pointer"><input type="checkbox" ${on ? 'checked' : ''} onchange="window.wrSet('${key}', this.checked)" class="mt-1 w-4 h-4 accent-indigo-600"><span><span class="block font-extrabold text-slate-800 text-sm">${label}</span><span class="block text-xs text-slate-500 font-semibold">${desc}</span></span></label>`;
@@ -3175,11 +3200,12 @@
         function wrSlotHtml(x, multiDay) {
             const lab = periodLabel(x.p);
             if (x.st === 'lunch') return `<div style="background:#fffbeb;color:#b45309;font-size:9px;font-weight:700;text-align:center;padding:1px 0;border-top:1px solid #f1f5f9">พักกลางวัน</div>`;
-            const C = { ok: ['#ecfdf5', '#10b981', 'เช็คแล้ว', '#059669'], no: ['#fef2f2', '#ef4444', 'ยังไม่เช็ค', '#dc2626'], off: ['#f8fafc', '#cbd5e1', 'หยุดเรียน', '#94a3b8'], act: ['#f0f9ff', '#7dd3fc', 'กิจกรรม', '#0284c7'], future: ['#f8fafc', '#cbd5e1', 'ยังไม่ถึง', '#94a3b8'], club: ['#fefce8', '#facc15', 'ชุมนุม · เช็คแยก (ไม่นับ)', '#a16207'], empty: ['#fff', '#e2e8f0', '', '#94a3b8'] }[x.st];
+            const C = { ok: ['#ecfdf5', '#10b981', 'เช็คแล้ว', '#059669'], no: ['#fef2f2', '#ef4444', 'ยังไม่เช็ค', '#dc2626'], off: ['#f8fafc', '#cbd5e1', 'หยุดเรียน', '#94a3b8'], act: ['#f0f9ff', '#7dd3fc', 'กิจกรรม', '#0284c7'], future: ['#f8fafc', '#cbd5e1', 'ยังไม่ถึง', '#94a3b8'], club: ['#fefce8', '#facc15', 'ชุมนุม · เช็คแยก (ไม่นับ)', '#a16207'], leave: ['#f1f5f9', '#94a3b8', 'ครู' + (x.lv || 'ไปราชการ (ไม่นับ)'), '#64748b'], empty: ['#fff', '#e2e8f0', '', '#94a3b8'] }[x.st];
             const s = x.s, nm = s ? (s.code ? s.code + ' ' : '') + (s.name || '') : 'ว่าง', tc = s ? [s.teacher, s.teacher2].filter(Boolean).join(', ') : '';
             return `<div style="display:flex;gap:4px;align-items:center;background:${C[0]};border-top:1px solid #f1f5f9;padding:3px 5px;height:${multiDay ? 76 : 76}px;box-sizing:border-box"><span style="flex:none;width:17px;height:17px;border-radius:50%;background:${C[1]};color:#fff;font-size:9px;font-weight:800;display:flex;align-items:center;justify-content:center">${lab}</span><span style="flex:1;min-width:0;font-size:9.5px;line-height:1.35"><b style="display:block;overflow:hidden;max-height:26px;color:${s ? '#0f172a' : '#94a3b8'}">${wrEsc(nm)}</b>${tc ? `<span style="display:block;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${wrEsc(tc)}</span>` : ''}${C[2] ? `<span style="display:block;font-weight:800;color:${C[3]}">${C[2]}</span>` : ''}</span></div>`;
         }
         window.exportWeeklyReport = async function () {
+            await wrLoadLeaves(wrState().monday); // [v2.00.1] ครูไปราชการ / ลา
             if (!currentUser || currentUser.role !== 'super_admin') { showToast('เฉพาะ Super Admin เท่านั้น', 'error'); return; }
             const w = wrState(), term = adminTerm(), year = adminYear(), R = wrCompute(term, year, w.monday, w.grades);
             const weekTxt = `${wrThai(w.monday)} – ${wrThai(wrAdd(w.monday, 4), true)}`, now = new Date(), stamp = `${now.getDate()} ${WR_TH_M[now.getMonth()]} ${now.getFullYear() + 543} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} น.`;
@@ -4422,7 +4448,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '2.00.1.031126';
+        const APP_VERSION = '2.00.2.031126';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
