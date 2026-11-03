@@ -1631,6 +1631,31 @@
             document.getElementById('mainContent').innerHTML = html;
         }
 
+        // [v2.00.3] ป้าย "ไปราชการ / ลา" ในตารางห้องเรียน (ข้อมูลจาก AcademicHub · โหลดครั้งเดียวต่อสัปดาห์ที่ดู)
+        function lvCellHtml(s, ds, p) {
+            const lv = wrLeavesFor(lvMonday(ds)); if (!lv) { wrLoadLeaves(lvMonday(ds)); return ''; }
+            const w = lvWho(lv, s, ds, p); if (!w.length) return '';
+            const multi = lvTeachersOf(s).length > 1 || s.systemType;
+            return `<span class="flex flex-wrap gap-1 mt-0.5">${w.map(x => (multi ? `<span class="text-[8px] sm:text-xs font-bold text-slate-500 truncate">${x.name}</span>` : '') + lvBadge(x)).join('')}</span>`;
+        }
+        // [v2.00.3] หน้าเช็คชื่อ: แถบแจ้งเมื่อครูของคาบนี้แจ้งไปราชการ / ลา
+        function lvAttBanner(subject, ds) {
+            const draw = () => {
+                const old = document.getElementById('lvAttBanner'); if (old) old.remove();
+                const lv = wrLeavesFor(lvMonday(ds)); if (!lv) return;
+                const pEl = document.getElementById('attPeriod'), p = pEl ? pEl.value : '';
+                const w = lvWho(lv, subject, ds, p); if (!w.length) return;
+                const all = lvTeachersOf(subject), rest = all.filter(n => !w.some(x => x.name === n));
+                const main = document.getElementById('mainContent'); if (!main) return;
+                const box = rest.length
+                    ? `<div class="flex gap-2.5 items-start bg-slate-50 border border-slate-300 text-slate-700 rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3 mb-3 sm:mb-4 text-xs sm:text-sm font-semibold"><i class="fas fa-users mt-0.5"></i><div>คาบที่มีครูร่วม: ${w.map(x => `<b>${x.name}</b> ${x.label}${lvPeriodsTxt(x.periods)}`).join(' · ')} · <b>${rest.join(', ')}</b> เช็คชื่อได้ตามปกติ</div></div>`
+                    : `<div class="flex gap-2.5 items-start bg-amber-50 border border-amber-300 text-amber-900 rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3 mb-3 sm:mb-4 text-xs sm:text-sm font-bold"><i class="fas fa-user-clock mt-0.5"></i><div>วันนี้ ${w.map(x => `<b>${x.name}</b> แจ้ง${x.label}${lvPeriodsTxt(x.periods)}`).join(' · ')} (แจ้งจาก AcademicHub)<span class="block font-medium mt-0.5">ครูที่สอนแทนเช็คชื่อได้ตามปกติ — เลือก "มีการสอนแทน" แล้วเลือกชื่อครูที่สอนแทน</span></div></div>`;
+                main.insertAdjacentHTML('afterbegin', box.replace('<div class="flex', '<div id="lvAttBanner" class="flex'));
+            };
+            window.__lvAttRefresh = draw;
+            const pEl = document.getElementById('attPeriod'); if (pEl && !pEl.__lv) { pEl.__lv = true; pEl.addEventListener('change', draw); }
+            if (wrLeavesFor(lvMonday(ds))) draw(); else wrLoadLeaves(lvMonday(ds));
+        }
         function openClassroom(roomId, dayIndex = null) {
             const isDarkNow = document.documentElement.classList.contains('dark');
             currentRoomId = roomId;
@@ -1702,7 +1727,7 @@
                 if (slot.period === -1) { html += `<tr class="bg-amber-50/70 border-y border-amber-100"><td class="p-1.5 sm:p-3 lg:p-5 text-center font-bold text-amber-600 bg-amber-100/50 text-[9px] sm:text-base"><i class="fas fa-utensils"></i></td><td class="p-1.5 sm:p-3 lg:p-5 font-black text-amber-700 text-center tracking-widest text-[11px] sm:text-lg" colspan="3">${slot.name}</td></tr>`; } else {
                     const subjectInSlot = daySubjects.find(s => s.currentPeriod === slot.period);
                     const periodCellHtml = (dim) => `<td class="p-1.5 sm:p-3 lg:p-5 text-center bg-slate-50/50"><div class="font-black ${dim ? 'text-slate-400' : 'text-slate-700'} text-sm sm:text-lg leading-none">${periodLabel(slot.period)}</div><div class="font-bold ${dim ? 'text-slate-300' : 'text-slate-400'} font-mono text-[8px] sm:text-xs mt-0.5">${slot.time.split('-')[0]}</div></td>`;
-                    if (subjectInSlot && isClubSubject(subjectInSlot)) { html += clubRowHtml(slot, subjectInSlot); } else if (subjectInSlot) { const isSlotLocked = isAttendanceEntryLocked(subjectInSlot.term, subjectInSlot.year); const replacedSys = !subjectInSlot.systemType ? roomSubjects.find(rs => rs.systemType && (rs.schedules || []).some(sc => parseInt(sc.day) === effectiveDayForSchedule && parseInt(sc.period) === slot.period)) : null; const isSlotChecked = attendanceData.some(a => a.subjectId === subjectInSlot.id && a.date === dateToPass && String(a.period) === String(slot.period)); html += `<tr data-att-key="${subjectInSlot.id}|${slot.period}|${dateToPass}" class="${isSlotChecked ? 'bg-emerald-50 hover:bg-emerald-100/60' : 'hover:bg-indigo-50/40'} transition-colors group">${isSlotChecked ? `<td class="p-1.5 sm:p-3 lg:p-5 text-center"><div class="w-6 h-6 sm:w-8 sm:h-8 mx-auto rounded-full bg-emerald-500 text-white flex items-center justify-center text-[10px] sm:text-sm"><i class="fas fa-check"></i></div><div class="font-extrabold text-emerald-700 text-[8px] sm:text-xs mt-0.5">คาบ ${periodLabel(slot.period)}</div></td>` : periodCellHtml(false)}<td class="p-1.5 sm:p-3 lg:p-5 min-w-0"><div class="font-extrabold ${isSlotChecked ? 'text-emerald-800' : 'text-blue-700'} text-[11px] sm:text-lg leading-tight break-words">${subjectInSlot.name}</div>${replacedSys ? `<div class="text-[8px] sm:text-xs font-bold text-amber-700 mt-0.5">สอนแทน${replacedSys.name}</div>` : ''}${subjectInSlot.code ? `<div class="text-[8px] sm:text-xs font-bold text-slate-400 mt-1 uppercase bg-slate-100 inline-block px-1 sm:px-1.5 py-0.5 rounded border border-slate-200 truncate max-w-full">${subjectInSlot.code}</div>` : ''}</td><td class="p-1.5 sm:p-3 lg:p-5 font-bold text-slate-600 text-[9px] sm:text-base min-w-0"><span class="flex flex-col min-w-0">${subjectInSlot.teacher ? `<span class="truncate block" title="${subjectInSlot.teacher}">${subjectInSlot.teacher}</span>` : '<span>-</span>'}${subjectInSlot.teacher2 ? `<span class="truncate block" title="${subjectInSlot.teacher2}">${subjectInSlot.teacher2}</span>` : ''}</span></td><td class="p-1 sm:p-3 lg:p-5">${isSlotLocked ? `<button disabled title="ไม่สามารถเช็คชื่อได้ในขณะนี้" class="w-full bg-slate-100 text-slate-400 py-1 sm:py-1.5 rounded-full text-[9px] sm:text-sm font-bold cursor-not-allowed whitespace-nowrap"><i class="fas fa-lock"></i> <span>ล็อคแล้ว</span></button>` : (isSlotChecked ? `<button onclick="window.navigate('attendance', {subjectId: '${subjectInSlot.id}', period: ${slot.period}, date: '${dateToPass}'})" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-1 sm:py-1.5 px-1 rounded-xl sm:rounded-2xl shadow-sm transition-all flex flex-col items-center justify-center leading-tight"><span class="flex items-center gap-1 text-[9px] sm:text-sm font-extrabold whitespace-nowrap"><i class="fas fa-check"></i> เช็คแล้ว</span><span class="flex items-center gap-1 text-[8px] sm:text-[11px] font-bold text-emerald-100 whitespace-nowrap"><i class="fas fa-pen text-[7px] sm:text-[9px]"></i> แตะเพื่อแก้ไข</span></button>` : `<button onclick="window.navigate('attendance', {subjectId: '${subjectInSlot.id}', period: ${slot.period}, date: '${dateToPass}'})" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-1 sm:py-1.5 pl-1 sm:pl-1.5 pr-2.5 sm:pr-3.5 rounded-full text-[9px] sm:text-sm font-bold transition-all shadow-sm whitespace-nowrap flex items-center justify-center gap-1 sm:gap-1.5"><span class="w-4 h-4 sm:w-5 sm:h-5 bg-white text-indigo-600 rounded-full flex items-center justify-center shrink-0 text-[8px] sm:text-xs"><i class="fas fa-check"></i></span><span>เริ่มเช็คชื่อ</span></button>`)}</td></tr>`;
+                    if (subjectInSlot && isClubSubject(subjectInSlot)) { html += clubRowHtml(slot, subjectInSlot); } else if (subjectInSlot) { const isSlotLocked = isAttendanceEntryLocked(subjectInSlot.term, subjectInSlot.year); const replacedSys = !subjectInSlot.systemType ? roomSubjects.find(rs => rs.systemType && (rs.schedules || []).some(sc => parseInt(sc.day) === effectiveDayForSchedule && parseInt(sc.period) === slot.period)) : null; const isSlotChecked = attendanceData.some(a => a.subjectId === subjectInSlot.id && a.date === dateToPass && String(a.period) === String(slot.period)); html += `<tr data-att-key="${subjectInSlot.id}|${slot.period}|${dateToPass}" class="${isSlotChecked ? 'bg-emerald-50 hover:bg-emerald-100/60' : 'hover:bg-indigo-50/40'} transition-colors group">${isSlotChecked ? `<td class="p-1.5 sm:p-3 lg:p-5 text-center"><div class="w-6 h-6 sm:w-8 sm:h-8 mx-auto rounded-full bg-emerald-500 text-white flex items-center justify-center text-[10px] sm:text-sm"><i class="fas fa-check"></i></div><div class="font-extrabold text-emerald-700 text-[8px] sm:text-xs mt-0.5">คาบ ${periodLabel(slot.period)}</div></td>` : periodCellHtml(false)}<td class="p-1.5 sm:p-3 lg:p-5 min-w-0"><div class="font-extrabold ${isSlotChecked ? 'text-emerald-800' : 'text-blue-700'} text-[11px] sm:text-lg leading-tight break-words">${subjectInSlot.name}</div>${replacedSys ? `<div class="text-[8px] sm:text-xs font-bold text-amber-700 mt-0.5">สอนแทน${replacedSys.name}</div>` : ''}${subjectInSlot.code ? `<div class="text-[8px] sm:text-xs font-bold text-slate-400 mt-1 uppercase bg-slate-100 inline-block px-1 sm:px-1.5 py-0.5 rounded border border-slate-200 truncate max-w-full">${subjectInSlot.code}</div>` : ''}</td><td class="p-1.5 sm:p-3 lg:p-5 font-bold text-slate-600 text-[9px] sm:text-base min-w-0"><span class="flex flex-col min-w-0">${subjectInSlot.teacher ? `<span class="truncate block" title="${subjectInSlot.teacher}">${subjectInSlot.teacher}</span>` : (subjectInSlot.systemType ? '' : '<span>-</span>')}${subjectInSlot.teacher2 ? `<span class="truncate block" title="${subjectInSlot.teacher2}">${subjectInSlot.teacher2}</span>` : ''}${lvCellHtml(subjectInSlot, dateToPass, slot.period)}</span></td><td class="p-1 sm:p-3 lg:p-5">${isSlotLocked ? `<button disabled title="ไม่สามารถเช็คชื่อได้ในขณะนี้" class="w-full bg-slate-100 text-slate-400 py-1 sm:py-1.5 rounded-full text-[9px] sm:text-sm font-bold cursor-not-allowed whitespace-nowrap"><i class="fas fa-lock"></i> <span>ล็อคแล้ว</span></button>` : (isSlotChecked ? `<button onclick="window.navigate('attendance', {subjectId: '${subjectInSlot.id}', period: ${slot.period}, date: '${dateToPass}'})" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-1 sm:py-1.5 px-1 rounded-xl sm:rounded-2xl shadow-sm transition-all flex flex-col items-center justify-center leading-tight"><span class="flex items-center gap-1 text-[9px] sm:text-sm font-extrabold whitespace-nowrap"><i class="fas fa-check"></i> เช็คแล้ว</span><span class="flex items-center gap-1 text-[8px] sm:text-[11px] font-bold text-emerald-100 whitespace-nowrap"><i class="fas fa-pen text-[7px] sm:text-[9px]"></i> แตะเพื่อแก้ไข</span></button>` : `<button onclick="window.navigate('attendance', {subjectId: '${subjectInSlot.id}', period: ${slot.period}, date: '${dateToPass}'})" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-1 sm:py-1.5 pl-1 sm:pl-1.5 pr-2.5 sm:pr-3.5 rounded-full text-[9px] sm:text-sm font-bold transition-all shadow-sm whitespace-nowrap flex items-center justify-center gap-1 sm:gap-1.5"><span class="w-4 h-4 sm:w-5 sm:h-5 bg-white text-indigo-600 rounded-full flex items-center justify-center shrink-0 text-[8px] sm:text-xs"><i class="fas fa-check"></i></span><span>เริ่มเช็คชื่อ</span></button>`)}</td></tr>`;
                     } 
                     else { html += `<tr>${periodCellHtml(true)}<td class="p-1.5 sm:p-3 lg:p-5 text-slate-300 font-medium italic text-[9px] sm:text-sm" colspan="3">- ว่าง -</td></tr>`;
                     }
@@ -1849,6 +1874,7 @@
             window.updatePeriodDropdown();
             window.updateAttendanceHolidayNote();
             document.getElementById('attPeriod').addEventListener('change', (e) => { loadExistingAttendance(subjectId, document.getElementById('attDate').value, e.target.value); });
+            try { lvAttBanner(subject, today); } catch (e) { /* [v2.00.3] ข้าม */ }
         }
         
         window.syncRadio = function(stId, val) {
@@ -3116,26 +3142,35 @@
         function wrRooms(term, year, grades) { const has = new Set(activeSubjects(term, year).map(s => s.roomId)); return getRoomList().filter(r => has.has(r) && (!grades.length || grades.includes((/^m(\d)_/.exec(r) || [])[1]))); }
         // [v2.00.1] ครูที่แจ้งไปราชการ / ลา (AcademicHub) — คาบที่ไม่ได้เช็คในวันนั้นเป็นสีเทา ไม่นับ
         window.__wrLeaves = window.__wrLeaves || {};
-        function wrLeavesFor(monday) { return window.__wrLeaves[monday] || null; }
+        window.__wrLeavesAt = window.__wrLeavesAt || {};
+        function wrLeavesFor(monday) { if (window.__wrLeaves[monday] && Date.now() - (window.__wrLeavesAt[monday] || 0) > 600000) { delete window.__wrLeaves[monday]; return null; } return window.__wrLeaves[monday] || null; } // [v2.00.3] เก่ากว่า 10 นาที = โหลดใหม่
         window.__wrLeavesP = window.__wrLeavesP || {};
         function wrLoadLeaves(monday) {
-            if (window.__wrLeaves[monday]) return Promise.resolve();
+            if (wrLeavesFor(monday)) return Promise.resolve();
             if (window.__wrLeavesP[monday]) return window.__wrLeavesP[monday];
             return (window.__wrLeavesP[monday] = (async () => {
                 let items = [];
                 try { const r = await fetch(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'hub_leaves', from: monday, to: wrAdd(monday, 6) }) }); const j = await r.json(); if (j && j.status === 'success') items = j.items || []; } catch (e) { items = []; }
-                window.__wrLeaves[monday] = items; delete window.__wrLeavesP[monday];
-                if (items.length && document.querySelector('[onclick="window.exportWeeklyReport()"]')) renderAdminTab();
+                window.__wrLeaves[monday] = items; window.__wrLeavesAt[monday] = Date.now(); delete window.__wrLeavesP[monday];
+                if (!items.length) return;
+                const v = (history.state || {}).view;
+                if (document.querySelector('[onclick="window.exportWeeklyReport()"]')) renderAdminTab();
+                else if (v === 'classroom' && history.state.roomId === currentRoomId) openClassroom(history.state.roomId, history.state.dayIndex); // [v2.00.3] ป้ายไปราชการ / ลา
+                else if (v === 'attendance' && typeof window.__lvAttRefresh === 'function') window.__lvAttRefresh();
             })());
         }
-        function wrLeaveOf(lv, s, ds, p) {
-            if (!lv || !lv.length || !s) return null;
-            const hubOf = {}; (teachers || []).forEach(t => { if (t.hubId) hubOf[String(t.name || '').trim()] = t.hubId; });
-            const ids = (s.systemType ? getRoomAdvisors(s.roomId) : [s.teacher, s.teacher2]).map(n => hubOf[String(n || '').trim()]).filter(Boolean);
-            if (!ids.length) return null;
-            const hits = ids.map(id => lv.find(l => l.hubId === id && l.date === ds && (!l.periods || !l.periods.length || l.periods.includes(Number(p)))));
-            return hits.every(Boolean) ? hits[0] : null; // ครูทุกคนของคาบนั้นไปราชการ / ลา
+        // [v2.00.3] ครูของคาบ (วิชา = ครูผู้สอน 1–2 คน · คาบระบบ = ครูที่ปรึกษา) + ใครแจ้งไปราชการ / ลา
+        function lvTeachersOf(s) { return (s.systemType ? getRoomAdvisors(s.roomId, s.term, s.year) : [s.teacher, s.teacher2]).map(n => String(n || '').trim()).filter(Boolean); }
+        function lvHubOf() { const m = {}; (teachers || []).forEach(t => { if (t.hubId) m[String(t.name || '').trim()] = t.hubId; }); return m; }
+        function lvWho(lv, s, ds, p) { // [{ name, label, periods }] ของครูในคาบนี้ที่แจ้งไว้
+            if (!lv || !lv.length || !s) return [];
+            const hub = lvHubOf();
+            return lvTeachersOf(s).map(n => { const l = hub[n] && lv.find(x => x.hubId === hub[n] && x.date === ds && (!x.periods || !x.periods.length || x.periods.includes(Number(p)))); return l ? { name: n, label: l.label || 'ไปราชการ', periods: l.periods || [] } : null; }).filter(Boolean);
         }
+        function wrLeaveOf(lv, s, ds, p) { const w = lvWho(lv, s, ds, p), all = lvTeachersOf(s); return w.length && w.length === all.length ? w[0] : null; } // ครูทุกคนของคาบนั้นแจ้งไว้
+        function lvMonday(ds) { const d = wrD(ds), dw = d.getDay() || 7; return wrAdd(ds, 1 - dw); }
+        function lvPeriodsTxt(ps) { if (!ps || !ps.length) return ''; const L = ps.map(periodLabel); return ' (คาบ ' + L.join(', ') + ')'; }
+        function lvBadge(w) { const sick = /ป่วย/.test(w.label), per = /กิจ/.test(w.label); return `<span class="inline-flex items-center gap-1 ${sick ? 'bg-blue-50 border-blue-200 text-blue-700' : per ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-slate-100 border-slate-300 text-slate-600'} border rounded-full px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-xs font-extrabold whitespace-nowrap"><i class="fas fa-user-clock"></i> ${w.label}${lvPeriodsTxt(w.periods)}</span>`; }
         function wrCompute(term, year, monday, grades) {
             const lv = wrLeavesFor(monday);
             const done = new Set((attendanceData || []).map(a => a.subjectId + '|' + a.date + '|' + String(a.period)));
@@ -3158,9 +3193,10 @@
                         if ((half === 'morning' && sl.period <= 4) || (half === 'afternoon' && sl.period >= 5)) st = 'off';
                         else { const hp = hubPeriodFor(roomId, ds, sl.period); if (hp) st = hp.mode === 'noclass' ? 'off' : (checked ? 'ok' : 'act'); }
                         if (!st) st = checked ? 'ok' : ((ds > today || (ds === today && hm < sl.time.split('-')[1])) ? 'future' : 'no');
-                        if (st === 'no') { const l = wrLeaveOf(lv, s, ds, sl.period); if (l) return { p: sl.period, st: 'leave', s, lv: (l.label || 'ไปราชการ') + ' (ไม่นับ)' }; }
+                        let lvNote = '';
+                        if (st === 'no') { const l = wrLeaveOf(lv, s, ds, sl.period); if (l) return { p: sl.period, st: 'leave', s, lv: (l.label || 'ไปราชการ') + ' (ไม่นับ)' }; lvNote = lvWho(lv, s, ds, sl.period).map(w => w.name + ' ' + w.label).join(', '); } // [v2.00.3] ครูร่วม: คนหนึ่งแจ้ง = ยังนับ (อีกคนเช็คได้) + บอกเหตุผล
                         if (st === 'ok') { ok++; tot++; } else if (st === 'no') tot++;
-                        return { p: sl.period, st, s };
+                        return { p: sl.period, st, s, lvNote };
                     });
                     return { ds, slots, ok, tot, makeup: hol && hol.type === 'makeup' ? (hol.label || 'สอนชดเชย') : '' };
                 });
@@ -3168,7 +3204,7 @@
                 return { roomId, days, ok, tot, pct: tot ? Math.round(ok / tot * 100) : null };
             });
             const ok = res.reduce((a, r) => a + r.ok, 0), tot = res.reduce((a, r) => a + r.tot, 0);
-            const missing = []; res.forEach(r => r.days.forEach(d => d.slots.forEach(x => { if (x.st === 'no') missing.push({ ds: d.ds, roomId: r.roomId, p: x.p, s: x.s }); })));
+            const missing = []; res.forEach(r => r.days.forEach(d => d.slots.forEach(x => { if (x.st === 'no') missing.push({ ds: d.ds, roomId: r.roomId, p: x.p, s: x.s, lvNote: x.lvNote || '' }); })));
             missing.sort((a, b) => a.ds.localeCompare(b.ds) || a.roomId.localeCompare(b.roomId, undefined, { numeric: true }) || a.p - b.p);
             return { dates, rooms: res, ok, tot, pct: tot ? Math.round(ok / tot * 1000) / 10 : null, missing };
         }
@@ -3202,7 +3238,7 @@
             if (x.st === 'lunch') return `<div style="background:#fffbeb;color:#b45309;font-size:9px;font-weight:700;text-align:center;padding:1px 0;border-top:1px solid #f1f5f9">พักกลางวัน</div>`;
             const C = { ok: ['#ecfdf5', '#10b981', 'เช็คแล้ว', '#059669'], no: ['#fef2f2', '#ef4444', 'ยังไม่เช็ค', '#dc2626'], off: ['#f8fafc', '#cbd5e1', 'หยุดเรียน', '#94a3b8'], act: ['#f0f9ff', '#7dd3fc', 'กิจกรรม', '#0284c7'], future: ['#f8fafc', '#cbd5e1', 'ยังไม่ถึง', '#94a3b8'], club: ['#fefce8', '#facc15', 'ชุมนุม · เช็คแยก (ไม่นับ)', '#a16207'], leave: ['#f1f5f9', '#94a3b8', 'ครู' + (x.lv || 'ไปราชการ (ไม่นับ)'), '#64748b'], empty: ['#fff', '#e2e8f0', '', '#94a3b8'] }[x.st];
             const s = x.s, nm = s ? (s.code ? s.code + ' ' : '') + (s.name || '') : 'ว่าง', tc = s ? [s.teacher, s.teacher2].filter(Boolean).join(', ') : '';
-            return `<div style="display:flex;gap:4px;align-items:center;background:${C[0]};border-top:1px solid #f1f5f9;padding:3px 5px;height:${multiDay ? 76 : 76}px;box-sizing:border-box"><span style="flex:none;width:17px;height:17px;border-radius:50%;background:${C[1]};color:#fff;font-size:9px;font-weight:800;display:flex;align-items:center;justify-content:center">${lab}</span><span style="flex:1;min-width:0;font-size:9.5px;line-height:1.35"><b style="display:block;overflow:hidden;max-height:26px;color:${s ? '#0f172a' : '#94a3b8'}">${wrEsc(nm)}</b>${tc ? `<span style="display:block;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${wrEsc(tc)}</span>` : ''}${C[2] ? `<span style="display:block;font-weight:800;color:${C[3]}">${C[2]}</span>` : ''}</span></div>`;
+            return `<div style="display:flex;gap:4px;align-items:center;background:${C[0]};border-top:1px solid #f1f5f9;padding:3px 5px;height:${multiDay ? 76 : 76}px;box-sizing:border-box"><span style="flex:none;width:17px;height:17px;border-radius:50%;background:${C[1]};color:#fff;font-size:9px;font-weight:800;display:flex;align-items:center;justify-content:center">${lab}</span><span style="flex:1;min-width:0;font-size:9.5px;line-height:1.35"><b style="display:block;overflow:hidden;max-height:26px;color:${s ? '#0f172a' : '#94a3b8'}">${wrEsc(nm)}</b>${tc ? `<span style="display:block;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${wrEsc(tc)}</span>` : ''}${x.lvNote ? `<span style="display:block;color:#475569;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${wrEsc(x.lvNote)}</span>` : ''}${C[2] ? `<span style="display:block;font-weight:800;color:${C[3]}">${C[2]}</span>` : ''}</span></div>`;
         }
         window.exportWeeklyReport = async function () {
             await wrLoadLeaves(wrState().monday); // [v2.00.1] ครูไปราชการ / ลา
@@ -3216,7 +3252,7 @@
                 const th = 'border:1px solid #e2e8f0;padding:3px 5px;background:#f1f5f9;font-size:11px', td = 'border:1px solid #e2e8f0;padding:2px 5px;text-align:center;font-size:11px';
                 const MAXR = 28, rowsAll = R.rooms, roomChunks = []; for (let i = 0; i < rowsAll.length; i += MAXR) roomChunks.push(rowsAll.slice(i, i + MAXR)); if (!roomChunks.length) roomChunks.push([]);
                 const roomTbl = (rows) => `<table style="border-collapse:collapse;width:100%"><thead><tr><th style="${th}">ห้อง</th>${R.dates.map(ds => `<th style="${th}">${WR_TH_DS[wrD(ds).getDay()]} ${wrD(ds).getDate()}</th>`).join('')}<th style="${th}">รวม</th><th style="${th};width:150px">%</th></tr></thead><tbody>${rows.map(r => `<tr><td style="${td};text-align:left;font-weight:800">${formatRoomName(r.roomId)}</td>${r.days.map(d => `<td style="${td};${d.off ? 'color:#94a3b8' : ''}">${d.off ? 'หยุด' : (d.tot ? d.ok + '/' + d.tot : '-')}</td>`).join('')}<td style="${td}">${r.ok}/${r.tot}</td><td style="${td};text-align:left;white-space:nowrap">${wrBar(r.pct)}</td></tr>`).join('')}</tbody></table>`;
-                const missRow = (m) => `<tr><td style="${td}">${WR_TH_DS[wrD(m.ds).getDay()]} ${wrThai(m.ds)}</td><td style="${td}">${formatRoomName(m.roomId)}</td><td style="${td}">${periodLabel(m.p)}</td><td style="${td};text-align:left">${wrEsc((m.s.code ? m.s.code + ' ' : '') + (m.s.name || ''))}</td><td style="${td};text-align:left">${wrEsc([m.s.teacher, m.s.teacher2].filter(Boolean).join(', ') || '-')}</td></tr>`;
+                const missRow = (m) => `<tr><td style="${td}">${WR_TH_DS[wrD(m.ds).getDay()]} ${wrThai(m.ds)}</td><td style="${td}">${formatRoomName(m.roomId)}</td><td style="${td}">${periodLabel(m.p)}</td><td style="${td};text-align:left">${wrEsc((m.s.code ? m.s.code + ' ' : '') + (m.s.name || ''))}</td><td style="${td};text-align:left">${wrEsc([m.s.teacher, m.s.teacher2].filter(Boolean).join(', ') || '-')}${m.lvNote ? `<span style="color:#64748b"> (${wrEsc(m.lvNote)})</span>` : ''}</td></tr>`;
                 const missHead = `<tr><th style="${th}">วันที่</th><th style="${th}">ห้อง</th><th style="${th}">คาบ</th><th style="${th}">วิชา</th><th style="${th}">ครูผู้สอน</th></tr>`;
                 const missTitle = (cont) => `<div style="font-size:14px;font-weight:800;margin:12px 0 6px;color:#b91c1c">คาบที่ยังไม่เช็คชื่อ (${R.missing.length} คาบ)${cont ? ' ต่อ' : ''}</div>`;
                 const LAY = wrSumLayout(R.rooms.length, R.missing.length);
@@ -4448,7 +4484,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '2.00.2.031126';
+        const APP_VERSION = '2.00.3.031126';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
