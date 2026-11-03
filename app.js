@@ -297,7 +297,8 @@
         const stuCodePdf = (st) => st && st.code ? ` <span style="font-weight:400; color:#64748b; font-size:0.85em;">(${hrEsc(st.code)})</span>` : '';
         // [v1.76] รายชื่อครูให้เลือก: เรียงตามตัวอักษร · ไม่รวมย้ายออก และหมวด "ระบบ/อื่นๆ"
         const pickableTeachers = () => teachers.filter(t => !t.inactive && (t.department || '') !== 'ระบบ/อื่นๆ').slice().sort((a, b) => String(a.name).localeCompare(String(b.name), 'th'));
-        function getRoomStudents(roomId, year) { year = year ?? settings.year; return students.filter(s => s.roomId === roomId && (s.year === undefined || s.year === null || String(s.year) === String(year))); }
+        // [v2.00.6] status 'hidden' = ซ่อน (เช่น นักเรียนแขวนลอย) — ไม่ขึ้นหน้าเช็คชื่อ/รายงาน · หลังบ้านเห็น (withHidden = true)
+        function getRoomStudents(roomId, year, withHidden) { year = year ?? settings.year; return students.filter(s => s.roomId === roomId && (withHidden || s.status !== 'hidden') && (s.year === undefined || s.year === null || String(s.year) === String(year))); }
         // ครูที่ปรึกษา/เจ้าหน้าที่ประจำห้อง แยกเก็บตามเทอม - รองรับข้อมูลเก่า (ก่อนแยกเทอม) เป็นค่าสำรอง
         // หาข้อมูล (ครูที่ปรึกษา/เจ้าหน้าที่) ของห้องนี้จากเทอม/ปีอื่นที่มีอยู่ ใกล้เคียงเป้าหมายที่สุดตามเวลา (ปีเดียวกันก่อน แล้วค่อยปีก่อนหน้า)
         // ใช้สำหรับ "คัดลอกข้อมูลเดิมมาก่อน" เวลาเปลี่ยนเทอม/ปีที่ยังไม่เคยมีการตั้งค่าไว้ แอดมินจะได้ไม่ต้องเริ่มกรอกใหม่จากศูนย์
@@ -1525,7 +1526,7 @@
             if (!selectedMonth) { let month = (currentDate.getMonth() + 1).toString().padStart(2, '0'); selectedMonth = `${currentDate.getFullYear()}-${month}`; }
             const monthNames = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
             const displayMonthYear = `${monthNames[parseInt(selectedMonth.split('-')[1])-1]} ${parseInt(selectedMonth.split('-')[0])+543}`;
-            const activeStudents = students.filter(s => s.status !== 'resigned');
+            const activeStudents = students.filter(s => s.status !== 'resigned' && s.status !== 'hidden');
             const resignedCount = students.length - activeStudents.length;
             const levelCounts = computeLevelCounts();
             const totals = computeSchoolMonthlyStats(selectedMonth);
@@ -3807,15 +3808,15 @@ content.innerHTML = html;
                 let html = `<div class="mb-4 bg-purple-50/60 p-3 sm:p-4 rounded-xl border border-purple-200"><h4 class="font-extrabold text-purple-800 text-sm sm:text-base mb-1.5 flex items-center gap-2"><i class="fas fa-graduation-cap"></i> เลื่อนชั้นนักเรียนไปปีการศึกษาใหม่</h4><p class="text-[9px] sm:text-[11px] text-purple-600 font-medium mb-3">คัดลอกรายชื่อนักเรียนที่ยังเรียนอยู่จากปีการศึกษาต้นทาง ไปเป็นรายชื่อของชั้นถัดไปในปีการศึกษาปลายทางให้อัตโนมัติ (ม.3 และ ม.6 ถือว่าจบการศึกษาแล้ว จะไม่ถูกเลื่อนชั้นต่อ / นักเรียนที่ออก-ย้ายแล้วจะไม่ถูกเลื่อนชั้นไปด้วย) หลังเลื่อนชั้นแล้ว ต้องเพิ่มรายชื่อนักเรียน ม.1 และ ม.4 ใหม่เองด้วย เนื่องจากเป็นชั้นรับเข้าใหม่ ไม่มีรุ่นพี่เลื่อนชั้นขึ้นมา ไม่กระทบรายชื่อเดิมของปีต้นทาง สามารถแก้ไขรายชื่อในปีปลายทางเพิ่มเติมได้ตามปกติหลังเลื่อนชั้นแล้ว</p><div class="flex flex-wrap items-end gap-2"><div class="min-w-[150px]"><label class="block text-[10px] sm:text-xs font-bold text-purple-700 mb-1">จากปีการศึกษา</label><select id="promoteFromYear" class="w-full bg-white border border-purple-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-purple-400 outline-none">${sortedAcademicYears().map(y => `<option value="${y.year}" ${String(y.year) === String(settings.year) ? 'selected' : ''}>ปีการศึกษา ${y.year}</option>`).join('')}</select></div><div class="min-w-[150px]"><label class="block text-[10px] sm:text-xs font-bold text-purple-700 mb-1">ไปยังปีการศึกษา</label><select id="promoteToYear" class="w-full bg-white border border-purple-200 rounded-lg px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-purple-400 outline-none">${sortedAcademicYears().map(y => `<option value="${y.year}" ${String(y.year) !== String(settings.year) ? 'selected' : ''} ${y.status === 'archived' ? 'disabled' : ''}>ปีการศึกษา ${y.year}${y.status === 'archived' ? ' (ถูกจัดเก็บแล้ว)' : ''}</option>`).join('')}</select></div><button onclick="window.promoteStudents()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-1.5"><i class="fas fa-arrow-up"></i> เลื่อนชั้น</button></div>${settings.academicYears && settings.academicYears.length < 2 ? `<p class="text-[9px] sm:text-[11px] text-purple-500 font-bold mt-2"><i class="fas fa-info-circle"></i> ต้องมีปีการศึกษาอย่างน้อย 2 ปีในระบบก่อนจึงจะเลื่อนชั้นได้ (ไปเพิ่มปีที่แท็บ "ตั้งค่าภาคเรียน")</p>` : ''}</div>`;
                 html += `<div class="flex flex-col lg:flex-row justify-between lg:items-center mb-3 gap-2"><div class="flex items-center gap-1 w-full lg:w-auto"><div class="flex flex-col shrink-0"><button onclick="window.stepAdminRoom(-1)" title="ห้องก่อนหน้า" class="bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-500 rounded-t-lg px-2 py-1 text-xs leading-none"><i class="fas fa-chevron-up"></i></button><button onclick="window.stepAdminRoom(1)" title="ห้องถัดไป" class="bg-white border-2 border-t-0 border-slate-200 hover:bg-slate-50 text-slate-500 rounded-b-lg px-2 py-1 text-xs leading-none"><i class="fas fa-chevron-down"></i></button></div><select id="adminRoomSelect" onchange="window.adminSelectedRoom = this.value; window.renderAdminTab();" class="bg-white border-2 border-slate-200 rounded-lg px-3 py-1.5 font-bold text-sm w-full lg:w-auto outline-none focus:border-indigo-400 shadow-sm">${roomList.map(r => `<option value="${r}" ${window.adminSelectedRoom === r ? 'selected' : ''}>ห้อง ${formatRoomName(r)}</option>`).join('')}</select></div><div class="flex flex-wrap gap-1.5"><button onclick="window.openRenumber(window.adminSelectedRoom)" class="bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-sort-numeric-down"></i> จัดเลขที่</button><button onclick="window.openStudentModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-plus"></i> เพิ่ม 1 คน</button><button onclick="window.downloadStudentTemplate()" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-download"></i> โหลดฟอร์ม</button><label class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm cursor-pointer flex-1 sm:flex-none text-center shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-import"></i> นำเข้า Excel<input type="file" accept=".xlsx, .xls" class="hidden" onchange="window.handleImportStudents(event)"></label><button onclick="window.exportAllStudentsExcel('${window.adminSelectedRoom}')" class="bg-teal-600 hover:bg-teal-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-download"></i> โหลดสรุป</button><button onclick="window.deleteAllStudentsInRoom(window.adminSelectedRoom)" class="bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-600 px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm flex-1 sm:flex-none shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-user-times"></i> ลบนักเรียนทุกคน</button></div></div>`;
                 html += `<div class="mb-4 bg-indigo-50/60 p-3 sm:p-4 rounded-xl border border-indigo-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2"><div><h4 class="font-extrabold text-indigo-800 text-xs sm:text-sm flex items-center gap-1.5"><i class="fas fa-layer-group"></i> นำเข้ารายชื่อนักเรียนทุกห้องพร้อมกัน</h4><p class="text-[9px] sm:text-[11px] text-indigo-500 font-medium mt-0.5">ไฟล์เดียวใส่ได้หลายห้อง มีคอลัมน์ระบุห้องเรียนในตัวเอง เหมาะสำหรับตอนเริ่มต้นภาคเรียนที่ต้องลงรายชื่อทีเดียวหลายห้อง</p></div><div class="flex flex-wrap gap-1.5"><button onclick="window.downloadStudentTemplateAllRooms()" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-download"></i> โหลดฟอร์ม (ทุกห้อง)</button><label class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-bold text-[10px] sm:text-sm cursor-pointer text-center shadow-sm transition-colors flex justify-center items-center gap-1"><i class="fas fa-file-import"></i> นำเข้าทุกห้อง<input type="file" accept=".xlsx, .xls" class="hidden" onchange="window.handleImportStudentsAllRooms(event)"></label></div></div>`;
-                const roomStudentsForCount = getRoomStudents(window.adminSelectedRoom, adminYear());
-                const activeCountSm = roomStudentsForCount.filter(s => s.status !== 'resigned').length;
+                const roomStudentsForCount = getRoomStudents(window.adminSelectedRoom, adminYear(), true);
+                const activeCountSm = roomStudentsForCount.filter(s => s.status !== 'resigned' && s.status !== 'hidden').length, hiddenCountSm = roomStudentsForCount.filter(s => s.status === 'hidden').length;
                 const resignedCountSm = roomStudentsForCount.filter(s => s.status === 'resigned').length;
-                html += `<div class="flex flex-wrap gap-2 mb-4"><span class="bg-slate-100 border border-slate-200 text-slate-700 text-[10px] sm:text-xs font-black px-2.5 py-1.5 rounded-full flex items-center gap-1.5"><i class="fas fa-users"></i> ทั้งหมด ${roomStudentsForCount.length} คน</span><span class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] sm:text-xs font-bold px-2.5 py-1.5 rounded-full flex items-center gap-1.5"><i class="fas fa-user-check"></i> เรียนอยู่ ${activeCountSm} คน</span><span class="bg-rose-50 border border-rose-200 text-rose-600 text-[10px] sm:text-xs font-bold px-2.5 py-1.5 rounded-full flex items-center gap-1.5"><i class="fas fa-user-minus"></i> ออก/ย้าย ${resignedCountSm} คน</span></div>`;
+                html += `<div class="flex flex-wrap gap-2 mb-4"><span class="bg-slate-100 border border-slate-200 text-slate-700 text-[10px] sm:text-xs font-black px-2.5 py-1.5 rounded-full flex items-center gap-1.5"><i class="fas fa-users"></i> ทั้งหมด ${roomStudentsForCount.length} คน</span><span class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] sm:text-xs font-bold px-2.5 py-1.5 rounded-full flex items-center gap-1.5"><i class="fas fa-user-check"></i> เรียนอยู่ ${activeCountSm} คน</span><span class="bg-rose-50 border border-rose-200 text-rose-600 text-[10px] sm:text-xs font-bold px-2.5 py-1.5 rounded-full flex items-center gap-1.5"><i class="fas fa-user-minus"></i> ออก/ย้าย ${resignedCountSm} คน</span>${hiddenCountSm ? `<span class="bg-slate-100 border border-slate-300 text-slate-600 text-[10px] sm:text-xs font-bold px-2.5 py-1.5 rounded-full flex items-center gap-1.5" title="ไม่ขึ้นในหน้าเช็คชื่อ / รายงาน"><i class="fas fa-eye-slash"></i> ซ่อน ${hiddenCountSm} คน</span>` : ''}</div>`;
                 html += `<div class="mb-4 bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-sm"><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><i class="fas fa-search text-slate-400"></i></div><input type="text" id="searchStudentInput" onkeyup="window.filterAdminStudents()" class="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-400 shadow-inner" placeholder="ค้นหา เลขที่, เลขประจำตัว, ชื่อ-นามสกุล..."></div></div>`;
-                html += `<div id="studentModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-3 transition-opacity"><div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto transform scale-95 opacity-0 transition-all duration-300" id="studentModalBox"><div class="p-4 sm:p-6"><div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-extrabold text-lg" id="studentModalTitle">เพิ่ม</h4><button onclick="window.closeStudentModal()" class="text-slate-400 text-xl hover:text-rose-500 transition-colors"><i class="fas fa-times"></i></button></div><div class="grid grid-cols-2 gap-2.5 mb-4"><div><label class="block text-[10px] sm:text-xs font-bold mb-1">เลขที่</label><input type="number" id="newStuNum" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm outline-none focus:ring-1 focus:ring-indigo-400"></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">สถานะ</label><select id="newStuStatus" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm outline-none"><option value="active">เรียนอยู่</option><option value="resigned">ออก/ย้าย</option></select></div><div class="col-span-2"><label class="block text-[10px] sm:text-xs font-bold mb-1">เลขประจำตัวนักเรียน <span class="font-medium text-slate-400">(ไม่บังคับ)</span></label><input type="text" id="newStuCode" inputmode="numeric" maxlength="20" placeholder="เช่น 34512" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm outline-none focus:ring-1 focus:ring-indigo-400"></div><div class="col-span-2"><label class="block text-[10px] sm:text-xs font-bold mb-1">คำนำหน้า + ชื่อ-นามสกุล</label><input type="text" id="newStuName" placeholder="เช่น นาย สมชาย ใจดี" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm outline-none focus:ring-1 focus:ring-indigo-400"></div></div><div class="flex justify-end gap-2"><button onclick="window.closeStudentModal()" class="bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded font-bold text-sm transition-colors">ยกเลิก</button><button onclick="window.saveStudentForm()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded font-bold text-sm shadow-sm transition-colors"><i class="fas fa-save"></i> บันทึก</button></div></div></div></div><div class="overflow-x-auto rounded-xl border border-slate-200 max-h-[500px] w-full"><table class="w-full text-left text-[10px] sm:text-sm min-w-[300px] sm:min-w-[400px]"><thead class="bg-slate-100 sticky top-0 z-10 border-b"><tr><th class="p-2 w-12 sm:w-16 text-center sticky left-0 bg-slate-100 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">เลขที่</th><th class="p-2 w-20 sm:w-28">เลขประจำตัว</th><th class="p-2">ชื่อ-นามสกุล</th><th class="p-2 text-center w-20">จัดการ</th></tr></thead><tbody class="divide-y divide-slate-100" id="adminStudentTableBody">`;
-                const roomStudents = getRoomStudents(window.adminSelectedRoom, adminYear()).sort((a,b) => parseInt(a.number) - parseInt(b.number));
+                html += `<div id="studentModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-3 transition-opacity"><div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto transform scale-95 opacity-0 transition-all duration-300" id="studentModalBox"><div class="p-4 sm:p-6"><div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-extrabold text-lg" id="studentModalTitle">เพิ่ม</h4><button onclick="window.closeStudentModal()" class="text-slate-400 text-xl hover:text-rose-500 transition-colors"><i class="fas fa-times"></i></button></div><div class="grid grid-cols-2 gap-2.5 mb-4"><div><label class="block text-[10px] sm:text-xs font-bold mb-1">เลขที่</label><input type="number" id="newStuNum" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm outline-none focus:ring-1 focus:ring-indigo-400"></div><div><label class="block text-[10px] sm:text-xs font-bold mb-1">สถานะ</label><select id="newStuStatus" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm outline-none"><option value="active">เรียนอยู่</option><option value="resigned">ออก/ย้าย</option><option value="hidden">ซ่อน (ไม่ขึ้นหน้าเช็คชื่อ เช่น แขวนลอย)</option></select></div><div class="col-span-2"><label class="block text-[10px] sm:text-xs font-bold mb-1">เลขประจำตัวนักเรียน <span class="font-medium text-slate-400">(ไม่บังคับ)</span></label><input type="text" id="newStuCode" inputmode="numeric" maxlength="20" placeholder="เช่น 34512" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm outline-none focus:ring-1 focus:ring-indigo-400"></div><div class="col-span-2"><label class="block text-[10px] sm:text-xs font-bold mb-1">คำนำหน้า + ชื่อ-นามสกุล</label><input type="text" id="newStuName" placeholder="เช่น นาย สมชาย ใจดี" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-base sm:text-sm outline-none focus:ring-1 focus:ring-indigo-400"></div></div><div class="flex justify-end gap-2"><button onclick="window.closeStudentModal()" class="bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded font-bold text-sm transition-colors">ยกเลิก</button><button onclick="window.saveStudentForm()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded font-bold text-sm shadow-sm transition-colors"><i class="fas fa-save"></i> บันทึก</button></div></div></div></div><div class="overflow-x-auto rounded-xl border border-slate-200 max-h-[500px] w-full"><table class="w-full text-left text-[10px] sm:text-sm min-w-[300px] sm:min-w-[400px]"><thead class="bg-slate-100 sticky top-0 z-10 border-b"><tr><th class="p-2 w-12 sm:w-16 text-center sticky left-0 bg-slate-100 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">เลขที่</th><th class="p-2 w-20 sm:w-28">เลขประจำตัว</th><th class="p-2">ชื่อ-นามสกุล</th><th class="p-2 text-center w-20">จัดการ</th></tr></thead><tbody class="divide-y divide-slate-100" id="adminStudentTableBody">`;
+                const roomStudents = getRoomStudents(window.adminSelectedRoom, adminYear(), true).sort((a,b) => parseInt(a.number) - parseInt(b.number));
                 if(roomStudents.length === 0) { html += `<tr><td colspan="4" class="p-8 text-center text-slate-400 font-medium">ยังไม่มีข้อมูลนักเรียน</td></tr>`;
-                } else { roomStudents.forEach(st => { const badge = st.status === 'resigned' ? `<span class="bg-rose-100 text-rose-700 px-1 py-0.5 rounded text-[8px] sm:text-[10px] ml-1 border border-rose-200 font-bold">ออก/ย้าย</span>` : ''; html += `<tr class="hover:bg-slate-50 transition-colors" data-search="${st.number} ${st.code || ''} ${st.name}"><td class="p-2 text-center font-bold text-slate-500 sticky left-0 bg-white shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">${st.number}</td><td class="p-2 font-mono text-slate-500 text-[10px] sm:text-sm">${st.code ? hrEsc(st.code) : '<span class="text-slate-300">-</span>'}</td><td class="p-2 font-bold ${st.status==='resigned'?'text-slate-400':''} text-[11px] sm:text-sm">${st.name} ${badge}</td><td class="p-2 text-center flex justify-center gap-1"><button onclick="window.prepareEditStudent('${st.id}')" class="text-amber-500 bg-amber-50 hover:bg-amber-100 p-1.5 rounded transition-colors"><i class="fas fa-edit"></i></button><button onclick="window.deleteStudent('${st.id}')" class="text-rose-500 bg-rose-50 hover:bg-rose-100 p-1.5 rounded transition-colors"><i class="fas fa-trash"></i></button></td></tr>`;
+                } else { roomStudents.forEach(st => { const badge = st.status === 'resigned' ? `<span class="bg-rose-100 text-rose-700 px-1 py-0.5 rounded text-[8px] sm:text-[10px] ml-1 border border-rose-200 font-bold">ออก/ย้าย</span>` : (st.status === 'hidden' ? `<span class="bg-slate-100 text-slate-600 px-1 py-0.5 rounded text-[8px] sm:text-[10px] ml-1 border border-slate-300 font-bold" title="ไม่ขึ้นในหน้าเช็คชื่อ / รายงาน"><i class="fas fa-eye-slash"></i> ซ่อน</span>` : ''); html += `<tr class="hover:bg-slate-50 transition-colors" data-search="${st.number} ${st.code || ''} ${st.name}"><td class="p-2 text-center font-bold text-slate-500 sticky left-0 bg-white shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">${st.number}</td><td class="p-2 font-mono text-slate-500 text-[10px] sm:text-sm">${st.code ? hrEsc(st.code) : '<span class="text-slate-300">-</span>'}</td><td class="p-2 font-bold ${st.status==='resigned' || st.status==='hidden'?'text-slate-400':''} text-[11px] sm:text-sm">${st.name} ${badge}</td><td class="p-2 text-center flex justify-center gap-1"><button onclick="window.prepareEditStudent('${st.id}')" class="text-amber-500 bg-amber-50 hover:bg-amber-100 p-1.5 rounded transition-colors"><i class="fas fa-edit"></i></button><button onclick="window.deleteStudent('${st.id}')" class="text-rose-500 bg-rose-50 hover:bg-rose-100 p-1.5 rounded transition-colors"><i class="fas fa-trash"></i></button></td></tr>`;
                 }); }
                 html += `</tbody></table></div>`;
                 content.innerHTML = html;
@@ -4484,7 +4485,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '2.00.5.031126';
+        const APP_VERSION = '2.00.6.031126';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
@@ -5265,13 +5266,13 @@ content.innerHTML = html;
                 roomList.forEach(r => {
                     const level = parseInt(r.split('_')[0].replace('m', ''));
                     if (GRADUATING_LEVELS.includes(level)) return; // ม.3 และ ม.6 จบการศึกษาแล้ว ไม่เลื่อนชั้นต่อ
-                    const roomStu = getRoomStudents(r, fromYear).filter(s => s.status !== 'resigned');
+                    const roomStu = getRoomStudents(r, fromYear, true).filter(s => s.status !== 'resigned');
                     if (roomStu.length === 0) return;
                     const newRoomId = `m${level + 1}_${r.split('_')[1]}`;
                     roomStu.forEach(s => {
                         const dup = students.find(x => x.roomId === newRoomId && String(x.year) === String(toYear) && x.number === s.number && x.name === s.name);
                         if (dup) return;
-                        students.push(Object.assign({ id: generateId(), roomId: newRoomId, number: s.number, name: s.name, status: 'active', year: toYear }, s.code ? { code: s.code } : {}));
+                        students.push(Object.assign({ id: generateId(), roomId: newRoomId, number: s.number, name: s.name, status: s.status === 'hidden' ? 'hidden' : 'active', year: toYear }, s.code ? { code: s.code } : {}));
                         added++;
                     });
                 });
@@ -5400,13 +5401,13 @@ content.innerHTML = html;
         }
         window.deleteAllStudentsInRoom = function(roomId) {
             if (!roomId || roomId === 'all') { showToast("กรุณาเลือกห้องก่อน", "error"); return; }
-            const targets = getRoomStudents(roomId, adminYear());
+            const targets = getRoomStudents(roomId, adminYear(), true);
             if (targets.length === 0) { showToast("ห้องนี้ยังไม่มีรายชื่อนักเรียน", "error"); return; }
             showConfirm("ลบนักเรียนทุกคนในห้องนี้", `จะลบรายชื่อนักเรียนทั้งหมด ${targets.length} คน ของห้อง ${formatRoomName(roomId)} ออกจากระบบ (ประวัติการเช็คชื่อเก่าของนักเรียนกลุ่มนี้จะยังคงอยู่ในไฟล์แต่จะไม่ผูกกับชื่อใครแล้ว) การกระทำนี้ไม่สามารถยกเลิกได้ แน่ใจหรือไม่?`, async () => {
                 showToast("กำลังลบนักเรียน...", "info");
                 document.body.style.pointerEvents = 'none';
                 const __prefetch9 = await refreshBeforeEdit(['students']);
-                const freshTargets = getRoomStudents(roomId, adminYear());
+                const freshTargets = getRoomStudents(roomId, adminYear(), true);
                 const ids = new Set(freshTargets.map(s => s.id));
                 students = students.filter(s => !ids.has(s.id));
                 logAction('ลบนักเรียนทุกคนในห้อง', `${formatRoomName(roomId)} (${freshTargets.length} คน)`);
@@ -5517,15 +5518,17 @@ content.innerHTML = html;
         // เดิมจับคู่ด้วย ห้อง + เลขที่ — เลขที่เปลี่ยน = ชื่อไปทับนักเรียนคนอื่น (ประวัติเช็คชื่อผูกกับนักเรียนคนเดิม) จึงเลิกใช้เลขที่จับคู่
         const STU_PREFIX = ['เด็กชาย', 'เด็กหญิง', 'ด.ช.', 'ด.ญ.', 'ดช.', 'ดญ.', 'นางสาว', 'น.ส.', 'นส.', 'นาย', 'นาง'];
         function stuNormName(n) {
-            let x = String(n || '').replace(/[​-‍﻿]/g, '').replace(/\s+/g, '');
+            let x = String(n || '').replace(/[​-‍﻿*]/g, '').replace(/\s+/g, ''); // [v2.00.6] ตัด * (เครื่องหมายในไฟล์รายชื่อ)
             for (let g = 0; g < 2; g++) { const pre = STU_PREFIX.find(pf => x.indexOf(pf) === 0); if (!pre) break; x = x.slice(pre.length); }
             return x;
         }
+        function stuCleanName(n) { return String(n || '').replace(/[​-‍﻿]/g, '').replace(/\s*\*+\s*$/, '').replace(/\s+/g, ' ').trim(); } // [v2.00.6] ชื่อที่บันทึก: ตัด * ท้ายชื่อ + ช่องว่างซ้ำ
         function stuRealCode(c) { c = String(c || '').trim(); return c && !/^0+$/.test(c) ? c : ''; }
         function stuImportPlan(rows) {
             const yr = String(settings.year), pool = students.filter(st => st.year === undefined || st.year === null || st.year === '' || String(st.year) === yr), used = new Set(), out = [];
             const byCode = {}; pool.forEach(st => { const c = stuRealCode(st.code); if (c) (byCode[c] = byCode[c] || []).push(st); });
             rows.forEach(r => {
+                r.name = stuCleanName(r.name);
                 const nn = stuNormName(r.name), code = stuRealCode(r.code); let st = null, how = '';
                 if (code) { st = (byCode[code] || []).find(x => !used.has(x.id)) || null; if (st) how = 'เลขประจำตัว'; }
                 if (!st) {
@@ -5540,6 +5543,8 @@ content.innerHTML = html;
                     if (String(st.number) !== String(r.number)) ch.push(`เลขที่ ${st.number} → ${r.number}`);
                     if (code && stuRealCode(st.code) !== code) ch.push(stuRealCode(st.code) ? `เลขประจำตัว ${st.code} → ${code}` : `ใส่เลขประจำตัว ${code}`);
                     if (st.name !== r.name) ch.push(`ชื่อ "${st.name}" → "${r.name}"`);
+                    const want = r.left ? 'resigned' : 'active', had = st.status || 'active';
+                    if (had !== want) ch.push(`สถานะ ${STU_ST[had] || had} → ${STU_ST[want]}`);
                     out.push({ type: st.roomId !== r.roomId ? 'move' : (ch.length ? 'update' : 'same'), row: r, st, how, ch });
                 } else {
                     const clash = code && (byCode[code] || []).length ? (byCode[code][0]) : null;
@@ -5547,18 +5552,23 @@ content.innerHTML = html;
                 }
             });
             const rooms = new Set(rows.map(r => r.roomId));
-            const missing = pool.filter(x => rooms.has(x.roomId) && !used.has(x.id) && x.status !== 'resigned');
-            return { items: out, missing };
+            const missing = pool.filter(x => rooms.has(x.roomId) && !used.has(x.id) && x.status !== 'resigned' && x.status !== 'hidden');
+            return { items: out, missing, missAct: {} }; // missAct[id] = keep | hidden | resigned | delete
         }
+        const STU_ST = { active: 'เรียนอยู่', resigned: 'ออก/ย้าย', hidden: 'ซ่อน' };
         function stuApplyPlan(plan) {
             let n = 0;
             plan.items.forEach(it => {
                 const r = it.row, code = stuRealCode(r.code);
-                if (it.type === 'new') { students.push(Object.assign({ id: generateId(), roomId: r.roomId, number: r.number, name: r.name, status: 'active' }, code && !it.noCode ? { code } : (String(r.code || '').trim() ? { code: String(r.code).trim() } : {}))); n++; return; }
+                if (it.type === 'new') { students.push(Object.assign({ id: generateId(), roomId: r.roomId, number: r.number, name: r.name, status: r.left ? 'resigned' : 'active' }, code && !it.noCode ? { code } : (String(r.code || '').trim() ? { code: String(r.code).trim() } : {}))); n++; return; }
                 if (it.type === 'same') return;
                 const st = students.find(x => x.id === it.st.id); if (!st) return; // หาใหม่จากข้อมูลล่าสุด (เผื่อมีการซิงก์ระหว่างดูตัวอย่าง)
-                st.roomId = r.roomId; st.number = r.number; st.name = r.name; if (code) st.code = code; n++;
+                st.roomId = r.roomId; st.number = r.number; st.name = r.name; if (code) st.code = code; st.status = r.left ? 'resigned' : 'active'; n++;
             });
+            // [v2.00.6] นักเรียนในระบบที่ไม่มีในไฟล์: ซ่อน / ออก-ย้าย / ลบ (ค่าเริ่มต้น = คงไว้)
+            const del = new Set();
+            Object.keys(plan.missAct || {}).forEach(id => { const a = plan.missAct[id], st = students.find(x => x.id === id); if (!st) return; if (a === 'hidden' || a === 'resigned') { st.status = a; n++; } else if (a === 'delete') del.add(id); });
+            if (del.size) { students = students.filter(x => !del.has(x.id)); n += del.size; }
             return n;
         }
         // ตัวอย่างก่อนบันทึก · onOk(plan) = บันทึก
@@ -5569,7 +5579,7 @@ content.innerHTML = html;
             const P = dk ? { bg: '#141e33', text: '#e2e8f0', sub: '#94a3b8', line: '#26324d', head: '#1c2843', headT: '#cbd5e1', foot: '#e2e8f0', noBg: 'rgba(244,63,94,.18)', noT: '#fda4af', chipOff: '#1c2843', chipLine: '#334155' }
                        : { bg: '#ffffff', text: '#0f172a', sub: '#64748b', line: '#f1f5f9', head: '#f8fafc', headT: '#475569', foot: '#334155', noBg: '#fef2f2', noT: '#dc2626', chipOff: '#ffffff', chipLine: '#e2e8f0' };
             const cnt = { update: 0, move: 0, new: 0, same: 0 }; plan.items.forEach(it => cnt[it.type]++);
-            const cats = [['all', 'ทั้งหมด', plan.items.length, dk ? '#cbd5e1' : '#334155'], ['update', 'ตรงกัน · อัปเดต', cnt.update, dk ? '#a5b4fc' : '#4f46e5'], ['same', 'ตรงกัน · ไม่เปลี่ยน', cnt.same, dk ? '#94a3b8' : '#64748b'], ['move', 'ย้ายห้อง', cnt.move, dk ? '#fbbf24' : '#d97706'], ['new', 'เพิ่มใหม่', cnt.new, dk ? '#34d399' : '#059669'], ['missing', 'ในระบบแต่ไม่มีในไฟล์', plan.missing.length, dk ? '#fb7185' : '#dc2626']];
+            const cats = [['all', 'ทั้งหมด', plan.items.length, dk ? '#cbd5e1' : '#334155'], ['update', 'ตรงกัน · อัปเดต', cnt.update, dk ? '#a5b4fc' : '#4f46e5'], ['same', 'ตรงกัน · ไม่เปลี่ยน', cnt.same, dk ? '#94a3b8' : '#64748b'], ['move', 'ย้ายห้อง', cnt.move, dk ? '#fbbf24' : '#d97706'], ['new', 'เพิ่มใหม่', cnt.new, dk ? '#34d399' : '#059669'], ['missing', 'ในระบบแต่ไม่มีในไฟล์ (เลือก ซ่อน / ออก / ลบ)', plan.missing.length, dk ? '#fb7185' : '#dc2626']];
             const TAG = dk ? { update: ['rgba(99,102,241,.22)', '#c7d2fe', 'อัปเดต'], same: ['rgba(148,163,184,.18)', '#cbd5e1', 'ไม่เปลี่ยน'], move: ['rgba(245,158,11,.2)', '#fcd34d', 'ย้ายห้อง'], new: ['rgba(16,185,129,.2)', '#6ee7b7', 'เพิ่มใหม่'] }
                            : { update: ['#eef2ff', '#4338ca', 'อัปเดต'], same: ['#f1f5f9', '#64748b', 'ไม่เปลี่ยน'], move: ['#fffbeb', '#b45309', 'ย้ายห้อง'], new: ['#ecfdf5', '#047857', 'เพิ่มใหม่'] };
             const td = `padding:7px 8px;border-top:1px solid ${P.line};color:${P.text};background:${P.bg}`;
@@ -5577,28 +5587,37 @@ content.innerHTML = html;
             let el = document.getElementById('stuPlanModal'); if (el) el.remove();
             el = document.createElement('div'); el.id = 'stuPlanModal';
             el.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(2,6,23,.6);display:flex;align-items:center;justify-content:center;padding:12px';
-            let cat = 'all';
+            let cat = 'all', askDel = false;
+            const MISS_OPT = [['keep', 'คงไว้'], ['hidden', 'ซ่อน'], ['resigned', 'ออก/ย้าย'], ['delete', 'ลบ']];
             const draw = () => {
                 const list = cat === 'missing' ? plan.missing.map(st => ({ type: 'missing', st })) : plan.items.filter(it => cat === 'all' || it.type === cat);
                 const rows = list.slice(0, 400).map(it => {
-                    if (it.type === 'missing') return `<tr><td style="${td}">${esc(formatRoomName(it.st.roomId))}</td><td style="${td}">${esc(it.st.number)}</td><td style="${td}">${esc(it.st.code || '-')}</td><td style="${td}">${esc(it.st.name)}</td><td style="${td}">${chip([P.noBg, P.noT, 'ไม่มีในไฟล์'])} <span style="color:${P.sub};font-size:12px">คงไว้เหมือนเดิม (ไม่ลบ)</span></td></tr>`;
+                    if (it.type === 'missing') { const a = plan.missAct[it.st.id] || 'keep'; return `<tr><td style="${td}">${esc(formatRoomName(it.st.roomId))}</td><td style="${td}">${esc(it.st.number)}</td><td style="${td}">${esc(it.st.code || '-')}</td><td style="${td}">${esc(it.st.name)}</td><td style="${td}"><select data-stp-act="${esc(it.st.id)}" style="background:${P.bg};color:${a === 'delete' ? P.noT : P.text};border:1px solid ${P.chipLine};border-radius:8px;padding:4px 6px;font-size:13px;font-weight:700">${MISS_OPT.map(o => `<option value="${o[0]}"${a === o[0] ? ' selected' : ''}>${o[1]}</option>`).join('')}</select></td></tr>`; }
                     const r = it.row;
                     return `<tr><td style="${td}">${esc(formatRoomName(r.roomId))}</td><td style="${td}">${esc(r.number)}</td><td style="${td}">${esc(r.code || '-')}</td><td style="${td}">${esc(r.name)}</td><td style="${td}">${chip(TAG[it.type])}${it.how ? ` <span style="color:${P.sub};font-size:11px">ตรงกันด้วย${esc(it.how)}</span>` : ''}${it.ch.length ? `<div style="color:${P.sub};font-size:12px;margin-top:2px">${it.ch.map(esc).join(' · ')}</div>` : ''}</td></tr>`;
                 }).join('');
-                const can = cnt.update + cnt.move + cnt.new;
+                const ma = { hidden: 0, resigned: 0, delete: 0 }; Object.values(plan.missAct).forEach(a => { if (ma[a] !== undefined) ma[a]++; });
+                const can = cnt.update + cnt.move + cnt.new + ma.hidden + ma.resigned + ma.delete;
                 el.innerHTML = `<div style="background:${P.bg};color:${P.text};border:1px solid ${P.chipLine};border-radius:22px;max-width:980px;width:100%;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.35);overflow:hidden">
                   <div style="padding:16px 20px 8px;background:${P.bg}"><div style="font-size:19px;font-weight:800;color:${P.text}"><i class="fas fa-user-check" style="color:${dk ? '#a5b4fc' : '#4f46e5'}"></i> ตรวจรายชื่อก่อนนำเข้า · ${esc(roomsLabel)}</div>
                   <div style="color:${P.sub};font-size:13px;margin-top:2px">จับคู่ด้วย <b style="color:${P.text}">เลขประจำตัว</b> ก่อน แล้วจึงใช้ <b style="color:${P.text}">ชื่อ</b> (ไม่สนคำนำหน้า ด.ช. / เด็กชาย / นาย และช่องว่าง) · ตรงกัน = แก้ข้อมูลคนเดิม (ประวัติเช็คชื่อยังอยู่) · ไม่พบ = เพิ่มใหม่ · นักเรียนที่ไม่มีในไฟล์จะไม่ถูกลบ</div>
                   <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">${cats.map(c => `<button type="button" data-stp-cat="${c[0]}" style="border:2px solid ${cat === c[0] ? c[3] : P.chipLine};background:${cat === c[0] ? c[3] : P.chipOff};color:${cat === c[0] ? (dk ? '#0b1222' : '#fff') : c[3]};border-radius:99px;padding:4px 12px;font-weight:800;font-size:13px;cursor:pointer">${c[1]} ${c[2]}</button>`).join('')}</div></div>
+                  ${cat === 'missing' && plan.missing.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:4px 20px 8px;background:${P.bg};color:${P.sub};font-size:13px;font-weight:700">ทั้งหมดในกลุ่มนี้: ${MISS_OPT.map(o => `<button type="button" data-stp-all="${o[0]}" style="border:1px solid ${P.chipLine};background:${P.chipOff};color:${o[0] === 'delete' ? P.noT : P.text};border-radius:99px;padding:3px 11px;font-weight:800;font-size:12.5px;cursor:pointer">${o[1]}</button>`).join('')}<span style="font-weight:500">· แนะนำ "ซ่อน" สำหรับนักเรียนแขวนลอย / "ออก/ย้าย" สำหรับคนที่ย้ายออก — ประวัติยังอยู่ทั้งคู่</span></div>` : ''}
                   <div style="overflow:auto;padding:0 20px;flex:1;background:${P.bg}"><table style="width:100%;border-collapse:collapse;font-size:13.5px;background:${P.bg}"><thead><tr style="text-align:left">${['ห้อง', 'เลขที่', 'เลขประจำตัว', 'ชื่อ (ในไฟล์)', 'ผล'].map(h => `<th style="padding:8px;background:${P.head};color:${P.headT};font-weight:800;position:sticky;top:0">${h}</th>`).join('')}</tr></thead><tbody>${rows || `<tr><td colspan="5" style="${td};text-align:center;color:${P.sub}">ไม่มีรายการ</td></tr>`}</tbody></table>${list.length > 400 ? `<p style="color:${P.sub};font-size:12px">แสดง 400 รายการแรก</p>` : ''}</div>
-                  <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;padding:12px 20px;border-top:1px solid ${P.line};flex-wrap:wrap;background:${P.bg}"><span style="margin-right:auto;color:${P.foot};font-size:13px;font-weight:700">จะบันทึก: อัปเดต ${cnt.update} · ย้ายห้อง ${cnt.move} · เพิ่มใหม่ ${cnt.new} คน</span><button type="button" data-stp-no style="border:0;background:${P.noBg};color:${P.noT};font-weight:800;border-radius:12px;padding:9px 16px;cursor:pointer">ยกเลิก</button><button type="button" data-stp-ok ${can ? '' : 'disabled'} style="border:0;background:#059669;color:#fff;font-weight:800;border-radius:12px;padding:9px 16px;cursor:pointer;opacity:${can ? 1 : .5}"><i class="fas fa-check"></i> ยืนยันนำเข้า</button></div></div>`;
+                  <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;padding:12px 20px;border-top:1px solid ${P.line};flex-wrap:wrap;background:${P.bg}"><span style="margin-right:auto;color:${P.foot};font-size:13px;font-weight:700">จะบันทึก: อัปเดต ${cnt.update} · ย้ายห้อง ${cnt.move} · เพิ่มใหม่ ${cnt.new} คน${ma.hidden ? ` · ซ่อน ${ma.hidden}` : ''}${ma.resigned ? ` · ออก/ย้าย ${ma.resigned}` : ''}${ma.delete ? ` · <span style="color:${P.noT}">ลบ ${ma.delete}</span>` : ''}</span><button type="button" data-stp-no style="border:0;background:${P.noBg};color:${P.noT};font-weight:800;border-radius:12px;padding:9px 16px;cursor:pointer">ยกเลิก</button><button type="button" data-stp-ok ${can ? '' : 'disabled'} style="border:0;background:${askDel ? '#dc2626' : '#059669'};color:#fff;font-weight:800;border-radius:12px;padding:9px 16px;cursor:pointer;opacity:${can ? 1 : .5}"><i class="fas fa-${askDel ? 'trash' : 'check'}"></i> ${askDel ? 'ยืนยันลบ ' + ma.delete + ' คน และนำเข้า' : 'ยืนยันนำเข้า'}</button></div>${askDel ? `<div style="padding:10px 20px;background:${P.noBg};color:${P.noT};font-size:13px;font-weight:700"><i class="fas fa-exclamation-triangle"></i> จะลบนักเรียน ${ma.delete} คนออกจากระบบ — ประวัติการเช็คชื่อของคนที่ลบจะดูไม่ได้อีก (กู้ได้จากไฟล์สำรองเท่านั้น) · ถ้าไม่แน่ใจ ให้เลือก "ซ่อน" แทน · กดปุ่มแดงอีกครั้งเพื่อยืนยัน</div>` : ''}</div>`;
             };
             draw(); document.body.appendChild(el);
             el.addEventListener('click', (ev) => {
                 const c = ev.target.closest('[data-stp-cat]'); if (c) { cat = c.getAttribute('data-stp-cat'); draw(); return; }
+                const all = ev.target.closest('[data-stp-all]'); if (all) { const v = all.getAttribute('data-stp-all'); plan.missing.forEach(st => { if (v === 'keep') delete plan.missAct[st.id]; else plan.missAct[st.id] = v; }); askDel = false; draw(); return; }
                 if (ev.target.closest('[data-stp-no]')) { el.remove(); return; }
-                if (ev.target.closest('[data-stp-ok]')) { el.remove(); onOk(plan); }
+                if (ev.target.closest('[data-stp-ok]')) {
+                    const nDel = Object.values(plan.missAct).filter(a => a === 'delete').length;
+                    if (nDel && !askDel) { askDel = true; draw(); return; } // ลบ = ต้องกดยืนยันอีกครั้ง
+                    el.remove(); onOk(plan);
+                }
             });
+            el.addEventListener('change', (ev) => { const sl = ev.target.closest('[data-stp-act]'); if (!sl) return; const id = sl.getAttribute('data-stp-act'); if (sl.value === 'keep') delete plan.missAct[id]; else plan.missAct[id] = sl.value; askDel = false; const y = el.querySelector('[style*="overflow:auto"]'), top = y ? y.scrollTop : 0; draw(); const y2 = el.querySelector('[style*="overflow:auto"]'); if (y2) y2.scrollTop = top; });
         }
         function stuReadRows(file, parse, done) {
             showProgressModal('กำลังอ่านไฟล์รายชื่อนักเรียน', 'กำลังอ่านไฟล์...'); const reader = new FileReader();
@@ -5607,7 +5626,7 @@ content.innerHTML = html;
                     updateProgressModal(30, 'กำลังดึงข้อมูลล่าสุดจากเซิร์ฟเวอร์...');
                     const prefetch = await refreshBeforeEdit(['students']);
                     const wb = XLSX.read(new Uint8Array(evt.target.result), { type: 'array' }), json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
-                    const res = parse(json);
+                    const res = parse(json, wb);
                     if (!res.rows.length) { errorProgressModal(res.err || 'ไม่พบข้อมูลที่ถูกต้องในไฟล์'); return; }
                     updateProgressModal(70, 'กำลังจับคู่รายชื่อ...');
                     const plan = stuImportPlan(res.rows); closeProgressModal();
@@ -5620,17 +5639,24 @@ content.innerHTML = html;
             showProgressModal('กำลังนำเข้ารายชื่อนักเรียน', 'กำลังบันทึก...');
             try {
                 const cnt = { update: 0, move: 0, new: 0 }; plan.items.forEach(it => { if (cnt[it.type] !== undefined) cnt[it.type]++; });
+                const ma = { hidden: 0, resigned: 0, delete: 0 }; Object.values(plan.missAct || {}).forEach(a => { if (ma[a] !== undefined) ma[a]++; });
                 const n = stuApplyPlan(plan); updateProgressModal(70, 'กำลังบันทึกขึ้นเซิร์ฟเวอร์...');
                 await saveData('full', null, prefetch);
-                logAction('นำเข้ารายชื่อนักเรียนจาก Excel', `${logLabel}: อัปเดต ${cnt.update} · ย้ายห้อง ${cnt.move} · เพิ่มใหม่ ${cnt.new}`);
-                completeProgressModal('นำเข้าสำเร็จ', `อัปเดต ${cnt.update} คน · ย้ายห้อง ${cnt.move} คน · เพิ่มใหม่ ${cnt.new} คน`); renderAdminTab();
+                const extra = (ma.hidden ? ` · ซ่อน ${ma.hidden}` : '') + (ma.resigned ? ` · ออก/ย้าย ${ma.resigned}` : '') + (ma.delete ? ` · ลบ ${ma.delete}` : '');
+                logAction('นำเข้ารายชื่อนักเรียนจาก Excel', `${logLabel}: อัปเดต ${cnt.update} · ย้ายห้อง ${cnt.move} · เพิ่มใหม่ ${cnt.new}${extra}`);
+                completeProgressModal('นำเข้าสำเร็จ', `อัปเดต ${cnt.update} คน · ย้ายห้อง ${cnt.move} คน · เพิ่มใหม่ ${cnt.new} คน${extra}`); renderAdminTab();
                 return n;
             } catch (e) { errorProgressModal('บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'); }
         }
         window.handleImportStudents = function(e) {
             const file = e.target.files[0]; e.target.value = ''; if (!file) return;
             const roomId = window.adminSelectedRoom;
-            stuReadRows(file, (json) => {
+            stuReadRows(file, (json, wb) => {
+                if (wb && stuIsSchoolFile(wb)) { // [v2.00.6] ไฟล์แบบของโรงเรียน: ใช้เฉพาะห้องที่เลือก (แผ่นแรกที่มีห้องนี้ · แนะนำใช้ "นำเข้าทุกห้อง" เพื่อเลือกแผ่นงาน)
+                    const names = wb.SheetNames.filter(n => /มีต[ัั]?วตน/.test(n)).concat(wb.SheetNames.filter(n => !/มีต[ัั]?วตน/.test(n)));
+                    for (const n of names) { const b = stuSchoolBlocks(wb.Sheets[n]); if (b[roomId] && b[roomId].length) return { rows: b[roomId], sheet: n.trim() }; }
+                    return { rows: [], err: 'ไม่พบห้อง ' + formatRoomName(roomId) + ' ในไฟล์นี้' };
+                }
                 const startIndex = (json.length > 0 && String(json[0][0]).includes('เลขที่')) ? 1 : 0, rows = [];
                 for (let i = startIndex; i < json.length; i++) {
                     const row = json[i]; if (!row || row.length < 2 || !row[0] || !(String(row[2] || '').trim() || String(row[1] || '').trim())) continue; // [v2.00.4] เลขประจำตัวว่างได้ (เดิมข้ามทั้งแถว)
@@ -5640,7 +5666,7 @@ content.innerHTML = html;
                     rows.push({ roomId, number: String(row[0]).trim(), name: String(has3 ? row[2] : row[1]).trim(), code: has3 ? String(row[1] || '').trim().slice(0, 20) : '' });
                 }
                 return { rows };
-            }, (plan, res, prefetch) => stuShowPlan(plan, 'ห้อง ' + formatRoomName(roomId), (pl) => stuSavePlan(pl, prefetch, 'ห้อง ' + formatRoomName(roomId))));
+            }, (plan, res, prefetch) => stuShowPlan(plan, 'ห้อง ' + formatRoomName(roomId) + (res.sheet ? ' · แผ่น ' + res.sheet : ''), (pl) => stuSavePlan(pl, prefetch, 'ห้อง ' + formatRoomName(roomId))));
         };
 
         window.downloadStudentTemplate = function() {
@@ -5672,9 +5698,72 @@ content.innerHTML = html;
             showToast("ดาวน์โหลดแบบฟอร์ม (ทุกห้อง) สำเร็จ", "success");
         };
 
+        // ===== [v2.00.6] ไฟล์รายชื่อแบบของโรงเรียน: 1 แผ่นงาน = หลายห้องเรียงต่อกัน ("รายชื่อนักเรียนชั้นมัธยมศึกษาปีที่ 1/1 …" → ลำดับที่ | เลขประจำตัว | ชื่อ - สกุล)
+        // เลือกแผ่นงานที่จะใช้ได้ (เช่น "มีตัวตน") · คอลัมน์ท้ายแถวมีคำว่า "ออก" = ออก/ย้าย
+        function stuSchoolBlocks(ws) {
+            const json = XLSX.utils.sheet_to_json(ws, { header: 1 }), out = {}; let cur = null;
+            json.forEach(row => {
+                const a = String((row && row[0]) ?? '').trim();
+                const m = /ปีที่\s*(\d)\s*\/\s*(\d+)/.exec(a);
+                if (m && /รายชื่อ/.test(a)) { cur = `m${m[1]}_${m[2]}`; out[cur] = out[cur] || []; return; }
+                if (!cur || !/^\d+$/.test(a) || !String(row[2] ?? '').trim()) return;
+                const rest = row.slice(3).map(x => String(x ?? '').trim()).filter(Boolean).join(' ');
+                out[cur].push({ roomId: cur, number: a, code: String(row[1] ?? '').trim().slice(0, 20), name: String(row[2]).trim(), left: /ออก/.test(rest) });
+            });
+            return out;
+        }
+        function stuIsSchoolFile(wb) { return wb.SheetNames.some(n => { const j = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1 }).slice(0, 6); return j.some(r => /รายชื่อนักเรียน.*ปีที่\s*\d\s*\/\s*\d+/.test(String((r && r[0]) ?? ''))); }); }
+        function stuPickSheets(wb, onPick) {
+            const info = wb.SheetNames.map(n => { const b = stuSchoolBlocks(wb.Sheets[n]), rooms = Object.keys(b).filter(r => b[r].length); return { n, rooms, cnt: rooms.reduce((a, r) => a + b[r].length, 0), left: rooms.reduce((a, r) => a + b[r].filter(x => x.left).length, 0) }; }).filter(x => x.rooms.length);
+            const pref = info.filter(x => /มีต[ัั]?วตน/.test(x.n));
+            const sel = new Set((pref.length ? pref : info).map(x => x.n));
+            const dk = document.documentElement.classList.contains('dark'), P = dk ? { bg: '#141e33', text: '#e2e8f0', sub: '#94a3b8', line: '#26324d' } : { bg: '#fff', text: '#0f172a', sub: '#64748b', line: '#e2e8f0' };
+            const esc = (t) => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+            const el = document.createElement('div'); el.id = 'stuPickModal';
+            el.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(2,6,23,.6);display:flex;align-items:center;justify-content:center;padding:12px';
+            const draw = () => {
+                const dupRooms = {}; info.filter(x => sel.has(x.n)).forEach(x => x.rooms.forEach(r => { (dupRooms[r] = dupRooms[r] || []).push(x.n); }));
+                const dup = Object.keys(dupRooms).filter(r => dupRooms[r].length > 1);
+                el.innerHTML = `<div style="background:${P.bg};color:${P.text};border:1px solid ${P.line};border-radius:22px;max-width:640px;width:100%;max-height:92vh;overflow:auto;padding:18px 20px;box-shadow:0 20px 50px rgba(0,0,0,.35)">
+                  <div style="font-size:19px;font-weight:800;color:${P.text}"><i class="fas fa-layer-group" style="color:${dk ? '#a5b4fc' : '#4f46e5'}"></i> เลือกแผ่นงานที่จะนำเข้า</div>
+                  <div style="color:${P.sub};font-size:13px;margin:4px 0 10px">ไฟล์นี้เป็นรายชื่อแบบของโรงเรียน (หลายห้องในแผ่นเดียว) · ห้องเดียวกันเลือกได้แผ่นเดียว · แนะนำแผ่น "มีตัวตน" (นักเรียนที่มาเรียนจริง) — คนที่อยู่ในระบบแต่ไม่มีในแผ่นที่เลือก ไปจัดการได้ในหน้าถัดไป (ซ่อน / ออก/ย้าย / ลบ)</div>
+                  ${info.map(x => `<label style="display:flex;gap:10px;align-items:flex-start;border:2px solid ${sel.has(x.n) ? (dk ? '#818cf8' : '#4f46e5') : P.line};border-radius:14px;padding:9px 12px;margin-bottom:6px;cursor:pointer;color:${P.text}"><input type="checkbox" data-pk="${esc(x.n)}" ${sel.has(x.n) ? 'checked' : ''} style="margin-top:4px;width:16px;height:16px"><span><b style="color:${P.text}">${esc(x.n.trim())}</b><span style="display:block;color:${P.sub};font-size:12.5px">${x.rooms.length} ห้อง (${x.rooms.map(formatRoomName).join(', ')}) · ${x.cnt} คน${x.left ? ` · มีเครื่องหมาย "ออก" ${x.left} คน (จะตั้งเป็น ออก/ย้าย)` : ''}</span></span></label>`).join('')}
+                  ${dup.length ? `<div style="color:#dc2626;font-weight:700;font-size:13px;margin-top:6px"><i class="fas fa-exclamation-triangle"></i> ห้องซ้ำกันหลายแผ่น: ${dup.map(r => formatRoomName(r) + ' (' + dupRooms[r].map(n => n.trim()).join(' / ') + ')').join(' · ')} — เลือกแผ่นเดียวต่อห้อง</div>` : ''}
+                  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button type="button" data-pk-no style="border:0;background:${dk ? 'rgba(244,63,94,.18)' : '#fef2f2'};color:${dk ? '#fda4af' : '#dc2626'};font-weight:800;border-radius:12px;padding:9px 16px;cursor:pointer">ยกเลิก</button><button type="button" data-pk-ok ${sel.size && !dup.length ? '' : 'disabled'} style="border:0;background:#4f46e5;color:#fff;font-weight:800;border-radius:12px;padding:9px 16px;cursor:pointer;opacity:${sel.size && !dup.length ? 1 : .5}">ถัดไป <i class="fas fa-arrow-right"></i></button></div></div>`;
+            };
+            draw(); document.body.appendChild(el);
+            el.addEventListener('change', (ev) => { const c = ev.target.closest('[data-pk]'); if (!c) return; const n = c.getAttribute('data-pk'); if (c.checked) sel.add(n); else sel.delete(n); draw(); });
+            el.addEventListener('click', (ev) => {
+                if (ev.target.closest('[data-pk-no]')) { el.remove(); return; }
+                if (ev.target.closest('[data-pk-ok]')) { el.remove(); onPick(Array.from(sel)); }
+            });
+        }
         window.handleImportStudentsAllRooms = function(e) {
             const file = e.target.files[0]; e.target.value = ''; if (!file) return;
-            stuReadRows(file, (json) => {
+            showProgressModal('กำลังอ่านไฟล์รายชื่อนักเรียน', 'กำลังอ่านไฟล์...'); const reader = new FileReader();
+            reader.onload = async function(evt) {
+                let wb, prefetch;
+                try {
+                    updateProgressModal(30, 'กำลังดึงข้อมูลล่าสุดจากเซิร์ฟเวอร์...');
+                    prefetch = await refreshBeforeEdit(['students']);
+                    wb = XLSX.read(new Uint8Array(evt.target.result), { type: 'array' });
+                } catch (err) { errorProgressModal('เกิดข้อผิดพลาดในการอ่านไฟล์ กรุณาตรวจสอบรูปแบบไฟล์'); return; }
+                const go = (rows, label, skipped) => {
+                    if (!rows.length) { errorProgressModal('ไม่พบข้อมูลที่ถูกต้อง หรือชื่อห้องในไฟล์ไม่ตรงกับห้องในระบบ'); return; }
+                    const plan = stuImportPlan(rows); closeProgressModal();
+                    const nRooms = new Set(rows.map(r => r.roomId)).size;
+                    stuShowPlan(plan, nRooms + ' ห้อง' + (label ? ' · ' + label : '') + (skipped ? ' (ข้าม ' + skipped + ' ห้อง/แถวที่ไม่มีในระบบ)' : ''), (pl) => stuSavePlan(pl, prefetch, nRooms + ' ห้อง'));
+                };
+                if (stuIsSchoolFile(wb)) {
+                    closeProgressModal();
+                    stuPickSheets(wb, (names) => {
+                        const rooms = getRoomList(), rows = []; let skipped = 0;
+                        names.forEach(n => { const b = stuSchoolBlocks(wb.Sheets[n]); Object.keys(b).forEach(r => { if (!rooms.includes(r)) { skipped++; return; } b[r].forEach(x => rows.push(x)); }); });
+                        go(rows, names.map(n => n.trim()).join(', '), skipped);
+                    });
+                    return;
+                }
+                const json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
                 const startIndex = (json.length > 0 && String(json[0][0] || '').includes('ห้อง')) ? 1 : 0, rows = []; let skippedRoom = 0;
                 for (let i = startIndex; i < json.length; i++) {
                     const row = json[i];
@@ -5684,11 +5773,9 @@ content.innerHTML = html;
                     const has4 = row.length >= 4 && String(row[3] || '').trim(); // [v1.76] ห้อง | เลขที่ | เลขประจำตัว | ชื่อ (ไฟล์เดิม 3 คอลัมน์ยังใช้ได้)
                     rows.push({ roomId, number: String(row[1]).trim(), name: String(has4 ? row[3] : row[2]).trim(), code: has4 ? String(row[2] || '').trim().slice(0, 20) : '' });
                 }
-                return { rows, skippedRoom, err: skippedRoom ? 'ชื่อห้องในไฟล์ไม่ตรงกับห้องในระบบ' : '' };
-            }, (plan, res, prefetch) => {
-                const nRooms = new Set(res.rows.map(r => r.roomId)).size;
-                stuShowPlan(plan, nRooms + ' ห้อง' + (res.skippedRoom ? ' (ข้าม ' + res.skippedRoom + ' แถวที่ระบุห้องไม่ถูกต้อง)' : ''), (pl) => stuSavePlan(pl, prefetch, nRooms + ' ห้อง'));
-            });
+                go(rows, '', skippedRoom);
+            };
+            reader.readAsArrayBuffer(file);
         };
 
         window.exportAllStudentsExcel = function(roomId) {
