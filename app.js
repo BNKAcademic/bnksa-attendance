@@ -610,7 +610,7 @@
                 if (syncBusy) return; syncBusy = true; lastSync = Date.now();
                 try {
                     let j = null;
-                    try { const r = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=sync_meta`); j = await r.json(); } catch (e) { j = null; }
+                    try { const ty = [...new Set([`${settings.term}|${settings.year}`].concat((window.__loadedRoomsList || []).map(r => `${r.term}|${r.year}`)))].slice(0, 6).join(','); const r = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=sync_meta&ty=${encodeURIComponent(ty)}`); j = await r.json(); } /* [v2.02.2] อ่านเฉพาะภาคเรียนที่เปิดอยู่ */ catch (e) { j = null; }
                     if (!j || !j.syncMeta) { roomsTick(false); await mainTick(); return; } // Worker รุ่นเก่า — วิธีเดิม (เฉพาะห้องที่แสดงอยู่)
                     const seen = window.__syncSeen;
                     if (seen.main === undefined) seen.main = j.main;
@@ -1666,6 +1666,113 @@
             const pEl = document.getElementById('attPeriod'); if (pEl && !pEl.__lv) { pEl.__lv = true; pEl.addEventListener('change', draw); }
             if (wrLeavesFor(lvMonday(ds))) draw(); else wrLoadLeaves(lvMonday(ds));
         }
+        // ===== [v2.02.2] รายงานการเข้าแถวเช้า (คาบ B) รายวัน — ปุ่มบนหน้าห้อง แสดงเมื่อเช็คแถวของวันที่เลือกแล้วเท่านั้น =====
+        //   กดแล้วสร้างรูปในเครื่อง (ไม่ส่งคำขอไปเซิร์ฟเวอร์) · มือถือ = เปิดหน้าต่างแชร์ (เลือก LINE ได้) · คอม = ดาวน์โหลดรูป
+        const ASM_C = { 'มา': '#10b981', 'ร่วมกิจกรรม': '#06b6d4', 'สาย': '#f59e0b', 'ลาป่วย': '#3b82f6', 'ลากิจ': '#6366f1', 'ขาด': '#f43f5e', 'โดดเรียน': '#9333ea' };
+        const ASM_S = { 'มา': 'มา', 'ร่วมกิจกรรม': 'กิจกรรม', 'สาย': 'สาย', 'ลาป่วย': 'ลาป่วย', 'ลากิจ': 'ลากิจ', 'ขาด': 'ขาด', 'โดดเรียน': 'โดด' };
+        const ASM_TH_M = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+        function asmFind(roomId, date) {
+            const ms = getRoomSubjects(roomId).find(s => s.systemType === 'morning'); if (!ms) return null;
+            const rec = attendanceData.filter(a => a.subjectId === ms.id && a.date === date).sort((a, b) => Number(a.period) - Number(b.period))[0];
+            return rec ? { ms, rec } : null;
+        }
+        function asmCounts(rec) {
+            const c = { ok: 0, late: 0, leave: 0, abs: 0 };
+            Object.values(rec.records || {}).forEach(v => { if (v === 'มา' || v === 'ร่วมกิจกรรม') c.ok++; else if (v === 'สาย') c.late++; else if (v === 'ลาป่วย' || v === 'ลากิจ') c.leave++; else if (v) c.abs++; });
+            return c;
+        }
+        function ensureAsmStyle() {
+            if (document.getElementById('asmStyle')) return;
+            const s = document.createElement('style'); s.id = 'asmStyle';
+            s.textContent = `.asm-btn{display:block;width:100%;padding:0;border:2px solid #06c755;border-radius:16px;overflow:hidden;background:#f0fdf4;text-align:left;cursor:pointer;box-shadow:0 4px 12px rgba(6,199,85,.22);transition:transform .12s}
+.asm-btn:active{transform:scale(.985)}
+.asm-t{background:#06c755;color:#fff;padding:9px 12px;display:flex;align-items:center;gap:8px;font-weight:800;font-size:14px;line-height:1.3}
+.asm-t .asm-d{margin-left:auto;font-size:11px;font-weight:700;background:rgba(255,255,255,.22);border-radius:999px;padding:1px 8px;white-space:nowrap}
+.asm-s{display:flex;font-size:11px;font-weight:700;color:#166534}
+.asm-s div{flex:1;text-align:center;padding:4px 0;border-right:1px solid #bbf7d0;line-height:1.25}.asm-s div:last-child{border-right:0}
+.asm-s b{display:block;font-size:16px}
+.dark .asm-btn{background:rgba(6,199,85,.10)}.dark .asm-s{color:#86efac}.dark .asm-s div{border-color:rgba(134,239,172,.25)}
+.asm-btn.asm-busy{opacity:.7;pointer-events:none}
+@keyframes asmPulse{0%{box-shadow:0 0 0 0 rgba(6,199,85,.55)}70%{box-shadow:0 0 0 14px rgba(6,199,85,0)}100%{box-shadow:0 0 0 0 rgba(6,199,85,0)}}
+.asm-pulse{animation:asmPulse 1s ease-out 3}
+@media (min-width:640px){.asm-btn{min-width:330px}.asm-t{font-size:15px}.asm-row>button{flex:1 1 0!important}}`;
+            document.head.appendChild(s);
+        }
+        function asmButtonHtml(roomId, date) {
+            const f = asmFind(roomId, date); if (!f) return '';
+            ensureAsmStyle();
+            const c = asmCounts(f.rec), d = new Date(date + 'T00:00:00');
+            const dl = d.toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short' });
+            return `<button type="button" id="asmBtn" class="asm-btn" onclick="window.asmReport('${roomId}', '${date}')"><div class="asm-t"><i class="fas fa-paper-plane"></i><span>ส่งรายงานเข้าแถวให้ผู้ปกครอง</span><span class="asm-d">${dl}</span><i class="fas fa-chevron-right"></i></div><div class="asm-s"><div><b>${c.ok}</b>มา</div><div><b>${c.late}</b>สาย</div><div><b>${c.leave}</b>ลา</div><div><b>${c.abs}</b>ขาด</div></div></button>`;
+        }
+        // หลังบันทึกเช็คแถว: เลื่อนจอมาที่ปุ่ม + กะพริบ 3 ครั้ง
+        function asmFocus(tries) {
+            const b = document.getElementById('asmBtn');
+            if (!b) { if ((tries || 0) < 12) setTimeout(() => asmFocus((tries || 0) + 1), 250); return; }
+            b.scrollIntoView({ behavior: 'smooth', block: 'center' }); b.classList.remove('asm-pulse'); void b.offsetWidth; b.classList.add('asm-pulse');
+        }
+        function asmEsc(t) { return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+        function asmBuildHtml(roomId, date, f) {
+            const d = new Date(date + 'T00:00:00'), dow = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'][d.getDay()];
+            const dTxt = `วัน${dow}ที่ ${d.getDate()} ${ASM_TH_M[d.getMonth()]} ${d.getFullYear() + 543}`;
+            const st = getRoomStudents(roomId).filter(s => s.status !== 'resigned').sort((a, b) => parseInt(a.number) - parseInt(b.number));
+            const rows = st.map(s => ({ s, v: (f.rec.records || {})[s.id] || '' }));
+            const cnt = {}; rows.forEach(r => { if (r.v) cnt[r.v] = (cnt[r.v] || 0) + 1; });
+            const order = ['มา', 'ร่วมกิจกรรม', 'สาย', 'ลาป่วย', 'ลากิจ', 'ขาด', 'โดดเรียน'];
+            const sum = order.filter(k => cnt[k]).map(k => `<span style="background:${ASM_C[k]};color:#fff;border-radius:9px;padding:3px 10px;font-size:13.5px;font-weight:700;line-height:1.6">${k} ${cnt[k]}</span>`).join('');
+            const half = Math.ceil(rows.length / 2), cols = [rows.slice(0, half), rows.slice(half)];
+            const cell = (r) => `<div style="display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid #f1f5f9;font-size:13.5px;line-height:1.55;min-width:0"><span style="color:#94a3b8;width:20px;text-align:right;font-size:12px;flex:none">${asmEsc(r.s.number)}</span><span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${asmEsc(r.s.name)}</span><span style="flex:none;background:${ASM_C[r.v] || '#94a3b8'};color:#fff;border-radius:7px;padding:0 7px;font-size:12px;font-weight:700;min-width:46px;text-align:center">${ASM_S[r.v] || '-'}</span></div>`;
+            const adv = getRoomAdvisors(roomId).filter(a => a && String(a).trim());
+            const t = f.rec.checkedAt ? new Date(f.rec.checkedAt) : null;
+            const tTxt = t && !isNaN(t) && localDateStr(t) === date ? `เช็คเวลา ${String(t.getHours()).padStart(2, '0')}.${String(t.getMinutes()).padStart(2, '0')} น.` : '';
+            const logo = settings.logoDataUrl || 'icons/icon-192.png';
+            return `<div style="width:560px;background:#fff;color:#1e293b;font-family:'Sarabun','Noto Sans Thai',sans-serif">
+<div style="background:linear-gradient(135deg,#4338ca,#6d28d9);color:#fff;padding:18px 22px;display:flex;gap:14px;align-items:center"><img src="${logo}" style="width:58px;height:58px;border-radius:50%;background:#fff;padding:3px;object-fit:contain;flex:none"><div style="min-width:0;line-height:1.45"><div style="font-size:13.5px;opacity:.92">${asmEsc(settings.title || 'ระบบเช็คชื่อ')}</div><div style="font-size:22px;font-weight:800">รายงานการเข้าแถวเช้า ห้อง ${asmEsc(formatRoomName(roomId))}</div><div style="font-size:14px;opacity:.92">${dTxt} · นักเรียน ${rows.length} คน</div></div></div>
+<div style="padding:14px 20px 16px"><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">${sum}</div><div style="display:grid;grid-template-columns:1fr 1fr;column-gap:16px">${cols.map(c => `<div style="min-width:0">${c.map(cell).join('')}</div>`).join('')}</div></div>
+<div style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:9px 20px;font-size:12px;color:#64748b;display:flex;justify-content:space-between;gap:10px;line-height:1.5"><span>ครูที่ปรึกษา ${asmEsc(adv.join(' · ') || '-')}</span><span style="white-space:nowrap">${tTxt}</span></div></div>`;
+        }
+        async function asmMakeFile(roomId, date) {
+            const f = asmFind(roomId, date); if (!f) return null;
+            const wrap = document.createElement('div'); wrap.style.cssText = 'position:fixed;left:-30000px;top:0;z-index:-1';
+            wrap.innerHTML = asmBuildHtml(roomId, date, f); document.body.appendChild(wrap);
+            const wasDark = document.documentElement.classList.contains('dark'); if (wasDark) document.documentElement.classList.remove('dark');
+            try {
+                await document.fonts.ready; await Promise.all(Array.from(wrap.querySelectorAll('img')).map(im => im.complete ? 0 : new Promise(r => { im.onload = im.onerror = r; })));
+                const cv = await html2canvas(wrap.firstElementChild, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+                const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
+                if (!blob) return null;
+                const name = `รายงานเข้าแถว_${formatRoomName(roomId).replace(/\//g, '-')}_${date}.png`;
+                return { blob, name, file: (typeof File === 'function') ? new File([blob], name, { type: 'image/png' }) : null };
+            } finally { wrap.remove(); if (wasDark) document.documentElement.classList.add('dark'); }
+        }
+        function asmDownload(out) { const u = URL.createObjectURL(out.blob), a = document.createElement('a'); a.href = u; a.download = out.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000); }
+        function asmCanShare(out) { try { return !!(out.file && navigator.share && navigator.canShare && navigator.canShare({ files: [out.file] }) && window.matchMedia('(pointer: coarse)').matches); } catch (e) { return false; } }
+        // แชร์ไม่ผ่านเพราะเบราว์เซอร์ต้องการให้แตะอีกครั้ง (สร้างรูปนานเกินไป) → แสดงรูปพร้อมปุ่มแชร์/บันทึก
+        function asmPreview(out) {
+            const old = document.getElementById('asmPrev'); if (old) old.remove();
+            const u = URL.createObjectURL(out.blob), ov = document.createElement('div'); ov.id = 'asmPrev';
+            ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.6);display:flex;align-items:center;justify-content:center;padding:16px';
+            ov.innerHTML = `<div style="background:#fff;border-radius:20px;max-width:440px;width:100%;max-height:92vh;display:flex;flex-direction:column;overflow:hidden"><div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;font-weight:800;color:#1e293b"><span><i class="fas fa-paper-plane" style="color:#06c755"></i> รายงานการเข้าแถว</span><button type="button" id="asmPrevX" style="width:34px;height:34px;border-radius:10px;background:#ef4444;color:#fff;border:0"><i class="fas fa-xmark"></i></button></div><div style="overflow:auto;padding:0 14px"><img src="${u}" style="width:100%;border-radius:10px;border:1px solid #e2e8f0;display:block"></div><div style="display:flex;gap:8px;padding:12px 14px"><button type="button" id="asmPrevShare" style="flex:1;height:44px;border-radius:12px;border:0;background:#06c755;color:#fff;font-weight:800"><i class="fas fa-share-nodes"></i> แชร์ / ส่ง LINE</button><button type="button" id="asmPrevSave" style="flex:1;height:44px;border-radius:12px;border:2px solid #e2e8f0;background:#fff;color:#334155;font-weight:800"><i class="fas fa-download"></i> บันทึกรูป</button></div></div>`;
+            document.body.appendChild(ov);
+            const close = () => { ov.remove(); URL.revokeObjectURL(u); };
+            ov.querySelector('#asmPrevX').onclick = close; ov.addEventListener('click', e => { if (e.target === ov) close(); });
+            ov.querySelector('#asmPrevSave').onclick = () => asmDownload(out);
+            const sh = ov.querySelector('#asmPrevShare'); if (!asmCanShare(out)) sh.style.display = 'none';
+            sh.onclick = async () => { try { await navigator.share({ files: [out.file] }); close(); } catch (e) { if (!e || e.name !== 'AbortError') showToast('แชร์ไม่สำเร็จ กรุณากดบันทึกรูปแล้วส่งเอง', 'error'); } };
+        }
+        window.asmReport = async function (roomId, date) {
+            const b = document.getElementById('asmBtn'); if (b) b.classList.add('asm-busy');
+            try {
+                if (typeof html2canvas !== 'function') { showToast('โหลดตัวสร้างรูปไม่สำเร็จ กรุณารีเฟรชหน้า', 'error'); return; }
+                const out = await asmMakeFile(roomId, date);
+                if (!out) { showToast('ยังไม่มีข้อมูลการเข้าแถวของวันนี้', 'error'); return; }
+                if (asmCanShare(out)) {
+                    try { await navigator.share({ files: [out.file] }); }
+                    catch (e) { if (!e || e.name !== 'AbortError') asmPreview(out); }
+                } else { asmDownload(out); showToast('บันทึกรูปรายงานการเข้าแถวแล้ว', 'success'); }
+            } catch (e) { showToast('สร้างรูปรายงานไม่สำเร็จ', 'error'); }
+            finally { const b2 = document.getElementById('asmBtn'); if (b2) b2.classList.remove('asm-busy'); }
+        };
         function openClassroom(roomId, dayIndex = null) {
             const isDarkNow = document.documentElement.classList.contains('dark');
             currentRoomId = roomId;
@@ -1716,7 +1823,7 @@
             const isMakeupDay = makeupInfo && makeupInfo.type === 'makeup';
             const daySubjects = [];
             roomSubjects.forEach(s => { if(!s.schedules) return; const schedsOnDay = effSched(s).filter(sch => parseInt(sch.day) === effectiveDayForSchedule); schedsOnDay.forEach(sch => { daySubjects.push({ ...s, currentPeriod: parseInt(sch.period) }); }); });
-            let html = `<div class="mb-4 sm:mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-48 sm:w-64 h-full ${isDarkNow ? '' : 'bg-gradient-to-l from-indigo-50 to-transparent opacity-50'}"></div><div class="relative z-10"><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2 sm:gap-4"><div class="w-10 h-10 sm:w-14 sm:h-14 bg-indigo-600 text-white rounded-xl sm:rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-200"><i class="fas fa-door-open text-lg sm:text-2xl"></i></div> ห้องเรียน ${roomNameStr}</h2><div class="flex flex-wrap items-center gap-2 mt-3 text-[10px] sm:text-sm"><p class="text-slate-600 bg-slate-100 px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg border border-slate-200 font-bold flex items-center gap-1 sm:gap-2"><i class="fas fa-user-tie text-indigo-500"></i> <span class="hidden sm:inline">ที่ปรึกษา: </span><span class="text-indigo-700">${advisorText}</span></p><p class="text-slate-600 bg-slate-100 px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg border border-slate-200 font-bold flex items-center gap-1 sm:gap-2"><i class="fas fa-users text-blue-500"></i> <span class="hidden sm:inline">นักเรียน: </span><span class="text-blue-700">${activeStudents.length} คน</span></p></div></div><div class="relative z-10 flex gap-2 w-full sm:w-auto"><button onclick="window.navigate('room_summary', {roomId: '${roomId}', tab: 'daily'})" class="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 px-3 py-2 sm:px-6 sm:py-3 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-xs sm:text-base"><i class="fas fa-chart-bar"></i> ภาพรวมห้อง</button><button onclick="window.navigate('dashboard')" class="flex-1 sm:flex-none bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-2 sm:px-6 sm:py-3 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-xs sm:text-base"><i class="fas fa-arrow-left"></i> กลับ</button></div></div>`;
+            let html = `<div class="mb-4 sm:mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 bg-white p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden"><div class="absolute right-0 top-0 w-48 sm:w-64 h-full ${isDarkNow ? '' : 'bg-gradient-to-l from-indigo-50 to-transparent opacity-50'}"></div><div class="relative z-10"><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2 sm:gap-4"><div class="w-10 h-10 sm:w-14 sm:h-14 bg-indigo-600 text-white rounded-xl sm:rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-200"><i class="fas fa-door-open text-lg sm:text-2xl"></i></div> ห้องเรียน ${roomNameStr}</h2><div class="flex flex-wrap items-center gap-2 mt-3 text-[10px] sm:text-sm"><p class="text-slate-600 bg-slate-100 px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg border border-slate-200 font-bold flex items-center gap-1 sm:gap-2"><i class="fas fa-user-tie text-indigo-500"></i> <span class="hidden sm:inline">ที่ปรึกษา: </span><span class="text-indigo-700">${advisorText}</span></p><p class="text-slate-600 bg-slate-100 px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg border border-slate-200 font-bold flex items-center gap-1 sm:gap-2"><i class="fas fa-users text-blue-500"></i> <span class="hidden sm:inline">นักเรียน: </span><span class="text-blue-700">${activeStudents.length} คน</span></p></div></div><div class="relative z-10 flex flex-col gap-2 w-full sm:w-auto"><div class="flex gap-2 w-full asm-row"><button onclick="window.navigate('room_summary', {roomId: '${roomId}', tab: 'daily'})" class="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 px-3 py-2 sm:px-6 sm:py-3 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-xs sm:text-base"><i class="fas fa-chart-bar"></i> ภาพรวมห้อง</button><button onclick="window.navigate('dashboard')" class="flex-1 sm:flex-none bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-2 sm:px-6 sm:py-3 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 font-bold text-xs sm:text-base"><i class="fas fa-arrow-left"></i> กลับ</button></div>${wkNoPick ? '' : asmButtonHtml(roomId, dateToPass)}</div></div>`;
             const todayFullThaiDateStr = new Date().toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
             let todayProminentDateStr = `วันนี้ ${todayFullThaiDateStr}`;
             const wkFmt = (d) => d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
@@ -2090,7 +2197,23 @@
             });
         }
         async function hrGetPhotoPdf(id) { return hrCropCover(await hrGetPhoto(id)); }
+        // [v2.02.2] จำรูปที่โหลดแล้วไว้ในหน่วยความจำของหน้าเว็บ (ปิด/รีเฟรชหน้า = ล้าง ไม่เก็บรูปนักเรียนค้างในเครื่องที่ใช้ร่วมกัน)
+        //   สร้าง PDF ซ้ำ = ไม่ดึงรูปเดิมจาก Drive อีก · รหัสรูปไม่ซ้ำกัน (เปลี่ยนรูป = รหัสใหม่) จึงไม่มีรูปเก่าค้าง
+        const HR_PH_MEM = new Map(), HR_PH_MAX = 120;
         async function hrGetPhoto(id) {
+            if (HR_PH_MEM.has(id)) { const v = HR_PH_MEM.get(id); HR_PH_MEM.delete(id); HR_PH_MEM.set(id, v); return v; }
+            const u = await hrGetPhotoNet(id);
+            if (u) { HR_PH_MEM.set(id, u); while (HR_PH_MEM.size > HR_PH_MAX) HR_PH_MEM.delete(HR_PH_MEM.keys().next().value); }
+            return u;
+        }
+        // โหลดหลายรูปพร้อมกันครั้งละ 3 รูป (เดิมทีละรูป) — ผลเรียงตามลำดับเดิม
+        async function hrMapLimit(items, limit, fn, onEach) {
+            const out = new Array(items.length); let next = 0, done = 0;
+            const worker = async () => { while (next < items.length) { const i = next++; try { out[i] = await fn(items[i], i); } catch (e) { out[i] = null; } done++; if (onEach) onEach(done, items.length); } };
+            await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+            return out;
+        }
+        async function hrGetPhotoNet(id) {
             if (HOMEROOM_DRIVE_URL) {
                 const direct = await hrFetchJson(HOMEROOM_DRIVE_URL, { action: 'get', token: HOMEROOM_DRIVE_TOKEN, id }, 60000);
                 if (direct && direct.status === 'success' && direct.base64) return `data:${direct.mime || 'image/jpeg'};base64,${direct.base64}`;
@@ -2438,11 +2561,8 @@
                 Object.values(a.records || {}).forEach(st => { if (st === 'มา' || st === 'ร่วมกิจกรรม') c['มา']++; else if (st === 'สาย') c['สาย']++; else if (st === 'ลาป่วย' || st === 'ลากิจ') c['ลา']++; else c['ขาด']++; });
                 return { a, sub, c, owner: [sub.teacher, sub.teacher2].filter(Boolean).join(', ') || '-' };
             });
-            const urls = [];
-            for (let i = 0; i < rows.length; i++) {
-                updateProgressModal((i / rows.length) * 40, `กำลังโหลดรูปการสอนแทน ${i + 1}/${rows.length}...`);
-                urls.push(rows[i].a.subPhoto ? await hrGetPhotoPdf(rows[i].a.subPhoto.id) : null);
-            }
+            updateProgressModal(0, `กำลังโหลดรูปการสอนแทน 0/${rows.length}...`);
+            const urls = await hrMapLimit(rows, 3, (r) => r.a.subPhoto ? hrGetPhotoPdf(r.a.subPhoto.id) : null, (d, n) => updateProgressModal((d / n) * 40, `กำลังโหลดรูปการสอนแทน ${d}/${n}...`)); // [v2.02.2]
             const adv = getRoomAdvisors(roomId).filter(Boolean); const staff = getRoomStaff(roomId);
             const signers = []; if (adv[0]) signers.push({ name: adv[0], role: adv[1] ? 'ครูที่ปรึกษาคนที่ 1' : 'ครูที่ปรึกษา' }); if (adv[1]) signers.push({ name: adv[1], role: 'ครูที่ปรึกษาคนที่ 2' }); signers.push({ name: staff, role: 'เจ้าหน้าที่' });
             const head = (t) => `${rpHead(`${t}`, rpPill(`ห้อง ${roomName} · ${monthNames[mNum - 1]} ${year + 543}`))}`;
@@ -2665,11 +2785,8 @@
             // โหลดรูปของวันที่จัดกิจกรรม
             const photoMap = {}; const photoJobs = [];
             rows.forEach(r => { if (r.log && r.log.held) (r.log.photos || []).forEach(p => photoJobs.push({ date: r.dateStr, id: p.id })); });
-            for (let i = 0; i < photoJobs.length; i++) {
-                updateProgressModal((i / Math.max(1, photoJobs.length)) * 40, `กำลังโหลดรูปกิจกรรม ${i + 1}/${photoJobs.length}...`);
-                const u = await hrGetPhotoPdf(photoJobs[i].id);
-                (photoMap[photoJobs[i].date] = photoMap[photoJobs[i].date] || []).push(u);
-            }
+            const jobUrls = await hrMapLimit(photoJobs, 3, (j) => hrGetPhotoPdf(j.id), (d, n) => updateProgressModal((d / Math.max(1, n)) * 40, `กำลังโหลดรูปกิจกรรม ${d}/${n}...`)); // [v2.02.2]
+            photoJobs.forEach((j, i) => { (photoMap[j.date] = photoMap[j.date] || []).push(jobUrls[i]); });
             const roomName = formatRoomName(roomId);
             const adv = getRoomAdvisors(roomId).filter(Boolean); const staff = getRoomStaff(roomId);
             const signers = []; if (adv[0]) signers.push({ name: adv[0], role: adv[1] ? 'ครูที่ปรึกษาคนที่ 1' : 'ครูที่ปรึกษา' }); if (adv[1]) signers.push({ name: adv[1], role: 'ครูที่ปรึกษาคนที่ 2' }); signers.push({ name: staff, role: 'เจ้าหน้าที่' });
@@ -2684,16 +2801,23 @@
                 const tiles = p === 0 ? `<div style="display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; margin-bottom:16px;">${tile(rows.length - cnt('holiday'), 'วันตามตาราง', '#334155', '#ffffff')}${tile(cnt('held'), 'จัดกิจกรรม', '#047857', '#ecfdf5')}${tile(cnt('not'), 'ไม่ได้จัด', '#be123c', '#fff1f2')}${tile(cnt('override'), 'สอนวิชาอื่นแทน', '#92400e', '#fffbeb')}${tile(cnt('none'), 'ยังไม่บันทึก', '#b45309', '#fff7ed')}</div>` : '';
                 html += `<div class="a4-page flex flex-col justify-between bg-white">${pdfPageBadge(pages > 1 ? `หน้าสรุป ${p + 1}/${pages}` : '')}<div>${head()}${tiles}${tbl}</div>${p === pages - 1 ? buildPdfSignatureBlock(signers) : ''}</div>`;
             }
-            rows.filter(r => r.log).forEach(r => {
+            // [v2.02.2] บันทึกรายวัน 4 วันต่อหน้า (เดิม 1 วันต่อหน้า — รูปมีวันละ 1 รูป เหลือที่ว่างครึ่งหน้า) · วันที่ไม่ได้จัดกิจกรรมดูเหตุผลในตารางสรุป
+            const dayCard = (r) => {
                 const lg = r.log;
                 const recs = attendanceData.filter(a => a.subjectId === hrSub.id && a.date === r.dateStr);
                 const c = { 'มา': 0, 'สาย': 0, 'ลา': 0, 'ขาด': 0 };
                 recs.forEach(a => Object.values(a.records || {}).forEach(st => { if (st === 'มา' || st === 'ร่วมกิจกรรม') c['มา']++; else if (st === 'สาย') c['สาย']++; else if (st === 'ลาป่วย' || st === 'ลากิจ') c['ลา']++; else c['ขาด']++; }));
                 const t = lg.recordedAt ? new Date(lg.recordedAt) : null;
-                const imgs = (photoMap[r.dateStr] || []).map((u, i) => u ? `<div style="aspect-ratio:4/3; border-radius:10px; overflow:hidden; background:#e2e8f0;"><img src="${u}" style="width:100%; height:100%; object-fit:cover; display:block;"></div>` : `<div style="aspect-ratio:4/3; border-radius:10px; background:#fff1f2; color:#be123c; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700;">โหลดรูปที่ ${i + 1} ไม่สำเร็จ</div>`).join('');
-                const field = (k, v) => `<div style="color:#64748b; font-weight:700;">${k}</div><div style="line-height:1.6;">${v}</div>`;
-                html += `<div class="a4-page flex flex-col bg-white">${pdfPageBadge('รายวัน')}<div style="display:flex; align-items:flex-end; justify-content:space-between; border-bottom:2px solid #334155; padding-bottom:12px; margin-bottom:16px;"><div><div style="font-size:12px; color:#64748b; font-weight:600;">สรุปกิจกรรมโฮมรูม · ห้อง ${roomName}</div><div style="font-size:22px; font-weight:800; line-height:1.6;">${hrEsc(r.label)}</div></div><div style="font-size:13px; font-weight:800; padding:5px 12px; border-radius:999px; background:${lg.held ? '#d1fae5' : '#ffe4e6'}; color:${kindMeta[r.kind][1]};">${kindMeta[r.kind][0]}กิจกรรม</div></div><div style="display:grid; grid-template-columns:120px minmax(0,1fr); gap:8px 14px; font-size:14px; margin-bottom:16px;">${lg.held ? field('กิจกรรม', `<b>${hrEsc(lg.activity)}</b>`) + field('บันทึก', hrEsc(lg.note || '-')) : field('เหตุผล', hrEsc(lg.reason || '-'))}${field('นักเรียน', recs.length ? `มา ${c['มา']} · สาย ${c['สาย']} · ลา ${c['ลา']} · ขาด ${c['ขาด']}` : 'ไม่มีข้อมูลเช็คชื่อ')}${field('บันทึกโดย', `${hrEsc(lg.recordedBy || '-')}${t && !isNaN(t) ? ` · ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')} น.` : ''}${lg.editCount ? ` (แก้ไข ${lg.editCount} ครั้ง)` : ''}`)}</div>${imgs ? `<div style="font-size:14px; font-weight:800; margin-bottom:8px;">รูปกิจกรรม</div><div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px;">${imgs}</div>` : ''}</div>`;
-            });
+                const ph = photoMap[r.dateStr] || [], u = ph[0];
+                const img = u ? `<div style="aspect-ratio:4/3; border-radius:9px; overflow:hidden; background:#e2e8f0; position:relative;"><img src="${u}" style="width:100%; height:100%; object-fit:cover; display:block;">${ph.length > 1 ? `<span style="position:absolute; right:6px; bottom:6px; background:rgba(15,23,42,.7); color:#fff; font-size:11px; font-weight:700; border-radius:6px; padding:0 6px;">+${ph.length - 1} รูป</span>` : ''}</div>`
+                    : `<div style="aspect-ratio:4/3; border-radius:9px; background:${ph.length ? '#fff1f2' : '#f1f5f9'}; color:${ph.length ? '#be123c' : '#94a3b8'}; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700;">${ph.length ? 'โหลดรูปไม่สำเร็จ' : 'ไม่มีรูป'}</div>`;
+                const field = (k, v, clamp) => `<div style="color:#64748b; font-weight:700;">${k}</div><div style="min-width:0;${clamp ? ' max-height:40px; overflow:hidden;' : ''}">${v}</div>`;
+                return `<div style="border:1px solid #cbd5e1; border-radius:12px; padding:9px 10px; display:flex; flex-direction:column; gap:6px; min-width:0;"><div style="display:flex; align-items:center; justify-content:space-between; gap:6px;"><b style="font-size:13.5px;">${hrEsc(r.label)}</b><span style="font-size:11px; font-weight:800; padding:0 9px; border-radius:999px; background:#d1fae5; color:${kindMeta[r.kind][1]}; white-space:nowrap;">${kindMeta[r.kind][0]}กิจกรรม</span></div>${img}<div style="display:grid; grid-template-columns:58px minmax(0,1fr); gap:0 8px; font-size:12px;">${field('กิจกรรม', `<b>${hrEsc(lg.activity || '-')}</b>`, true)}${lg.note ? field('บันทึก', hrEsc(lg.note), true) : ''}${field('นักเรียน', recs.length ? `มา ${c['มา']} · สาย ${c['สาย']} · ลา ${c['ลา']} · ขาด ${c['ขาด']}` : 'ไม่มีข้อมูลเช็คชื่อ')}${field('บันทึกโดย', `${hrEsc(lg.recordedBy || '-')}${t && !isNaN(t) ? ` · ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')} น.` : ''}`)}</div></div>`;
+            };
+            const heldRows = rows.filter(r => r.log && r.log.held), DPP = 4, dPages = Math.ceil(heldRows.length / DPP);
+            for (let p = 0; p < dPages; p++) {
+                html += `<div class="a4-page flex flex-col bg-white">${pdfPageBadge('บันทึกรายวัน')}${head()}<div style="font-size:15px; font-weight:800; margin:2px 0 10px;">บันทึกกิจกรรมรายวัน${dPages > 1 ? ` (${p + 1}/${dPages})` : ''}</div><div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px;">${heldRows.slice(p * DPP, (p + 1) * DPP).map(dayCard).join('')}</div></div>`;
+            }
             html += `</div>`;
             const wasDark = document.documentElement.classList.contains('dark'); if (wasDark) document.documentElement.classList.remove('dark');
             document.body.insertAdjacentHTML('beforeend', html); rpFinalize(document.body.lastElementChild);
@@ -2826,7 +2950,7 @@
                 const dowSaved = getEffectiveDayOfWeek(date);
                 if (retState && retState.view === 'classroom' && retState.roomId === subject.roomId) history.back();
                 else navigate('classroom', { roomId: subject.roomId, dayIndex: (dowSaved >= 1 && dowSaved <= 5) ? dowSaved : null }, true);
-                setTimeout(() => { showToast(doneMsg, 'success'); flashAttRow(flashKey); }, 350);
+                setTimeout(() => { showToast(doneMsg, 'success'); flashAttRow(flashKey); if (subject.systemType === 'morning') setTimeout(() => asmFocus(0), 500); }, 350); // [v2.02.2] เช็คแถวแล้ว = เลื่อนไปที่ปุ่มส่งรายงาน
             }, 850);
         };
 
@@ -4565,7 +4689,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '2.02.1.081126';
+        const APP_VERSION = '2.02.2.081126';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
@@ -6384,11 +6508,7 @@ img[src^="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP"]{display:inline!importan
                     const thMs = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
                     const fmt = (d) => { const x = new Date(d); return `${x.getDate()} ${thMs[x.getMonth()]} ${x.getFullYear() + 543}`; };
                     const head2 = `${rpHead(`บันทึกสภาพเขตพื้นที่รับผิดชอบ`, rpPill(`ห้อง ${roomName} · ${monthNames[mNum-1]} ${year+543}`))}`;
-                    const urls = [];
-                    for (let i = 0; i < zLogs.length; i++) {
-                        updateProgressModal((i / zLogs.length) * 30, `กำลังโหลดรูปรายงาน ${i + 1}/${zLogs.length}...`);
-                        const ph = (zLogs[i].photos || [])[0]; urls.push(ph ? await hrGetPhotoPdf(ph.id) : null);
-                    }
+                    const urls = await hrMapLimit(zLogs, 3, (l) => { const ph = (l.photos || [])[0]; return ph ? hrGetPhotoPdf(ph.id) : null; }, (d, n) => updateProgressModal((d / n) * 30, `กำลังโหลดรูปรายงาน ${d}/${n}...`)); // [v2.02.2]
                     const PERP = 4;
                     for (let p = 0; p < Math.ceil(zLogs.length / PERP); p++) {
                         const cells = zLogs.slice(p * PERP, (p + 1) * PERP).map((l, k) => { const u = urls[p * PERP + k]; return `<div style="border:1px solid #cbd5e1; border-radius:12px; padding:10px; display:flex; flex-direction:column; gap:6px;"><div style="display:flex; justify-content:space-between; font-size:13px; font-weight:800;"><span>${fmt(l.date)}</span><span style="color:#0f766e;">${hrEsc(l.condition || '-')}</span></div>${u ? `<div style="aspect-ratio:4/3; border-radius:8px; overflow:hidden; background:#e2e8f0;"><img src="${u}" style="width:100%; height:100%; object-fit:cover; display:block;"></div>` : `<div style="aspect-ratio:4/3; border-radius:8px; background:#f1f5f9; color:#64748b; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700;">ไม่มีรูป / โหลดรูปไม่สำเร็จ</div>`}<div style="font-size:11px; color:#64748b; font-weight:600;">บันทึกโดย ${hrEsc(l.recordedBy || '-')}</div></div>`; }).join('');
