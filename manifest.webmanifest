@@ -1,6 +1,6 @@
 {
-  "name": "ระบบเช็คชื่อนักเรียน โรงเรียนบุ่งคล้านคร",
-  "short_name": "เช็คชื่อ BNK",
+  "name": "BNK E-Attendance",
+  "short_name": "BNK E-Attendance",
   "description": "ระบบเช็คชื่อนักเรียน โรงเรียนบุ่งคล้านคร",
   "lang": "th",
   "start_url": "./",
