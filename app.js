@@ -2703,31 +2703,65 @@
             if (window.__clubQFocus) { const q = document.getElementById('clubQ'); q.focus(); q.setSelectionRange(q.value.length, q.value.length); window.__clubQFocus = false; }
         }
         window.renderClubListAgain = function (keepFocus) { window.__clubQFocus = !!keepFocus; renderClubList(true); };
-        const CLUB_ST = [['มา', 'bg-emerald-500 border-emerald-500'], ['สาย', 'bg-amber-500 border-amber-500'], ['ลาป่วย', 'bg-blue-500 border-blue-500'], ['ลากิจ', 'bg-indigo-500 border-indigo-500'], ['ขาด', 'bg-rose-500 border-rose-500']];
+        // ===== [v2.02.5] หน้าเช็คชื่อชุมนุม: 7 สถานะเหมือนเช็คคาบ · แบบปกติ/ย่อ (ค่าเดียวกับหน้าเช็คคาบ) · เลือก "มา" ไว้ก่อน · จุดสถานะคาบอื่นของวันนี้ =====
+        const CLUB_ST_ORDER = ['มา', 'ขาด', 'สาย', 'ร่วมกิจกรรม', 'ลาป่วย', 'ลากิจ', 'โดดเรียน'];
         async function renderClubCheck(clubId) {
             const main = document.getElementById('mainContent');
             main.innerHTML = `<div class="text-center py-16 text-slate-400 font-bold"><i class="fas fa-circle-notch fa-spin text-2xl mb-2 block"></i> กำลังโหลดรายชื่อนักเรียน...</div>`;
             let j; try { j = await clubApi('club_get', { clubId }); } catch (e) { main.innerHTML = `<button onclick="window.navigate('club_list')" class="mb-4 text-slate-600 font-bold text-sm"><i class="fas fa-arrow-left"></i> รายชื่อชุมนุม</button><div class="max-w-xl mx-auto bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl p-5 font-bold">${wrEsc(e.message)}</div>`; return; }
-            window.__clubCk = { id: clubId, data: Object.assign({}, j.data || {}), room: '', q: '' };
-            const rooms = [...new Set((j.members || []).map(m => m.roomId))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-            const ro = !j.open;
+            const ro = !j.open, mem = j.members || [], data = Object.assign({}, j.data || {});
+            if (!ro) mem.forEach(m => { if (!data[m.id] || !statuses[data[m.id]]) data[m.id] = 'มา'; }); // เลือก "มา" ไว้ก่อน (ที่บันทึกไว้แล้วคงเดิม)
+            window.__clubCk = { id: clubId, data, room: '', q: '', date: j.session.date, dots: null };
+            const rooms = [...new Set(mem.map(m => m.roomId))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+            ensureAttCompactStyle(); const amcOn = attCompactOn(), isDarkNow = document.documentElement.classList.contains('dark');
             main.innerHTML = `<button onclick="window.navigate('club_list')" class="mb-4 text-slate-600 hover:text-indigo-600 font-bold text-sm flex items-center gap-2"><i class="fas fa-arrow-left"></i> รายชื่อชุมนุม</button>
               <div class="max-w-3xl mx-auto pb-24"><div class="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 mb-3"><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800">${wrEsc(j.club.name)}</h2><p class="text-slate-500 text-sm font-semibold mt-1">ครั้งที่ ${j.session.no} · ${clubThai(j.session.date)} · ${wrEsc(j.club.teachers.join(' · '))}</p>
               ${ro ? `<div class="mt-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-3 py-2 text-sm font-bold"><i class="fas fa-clock"></i> เปิดให้เช็คตั้งแต่ ${wrEsc(j.openTime)} น.</div>` : ''}
               <label class="block font-bold text-slate-700 text-sm mt-3 mb-1">กิจกรรมที่ทำวันนี้ <span class="text-rose-500">*</span></label><textarea id="clubAct" rows="2" maxlength="600" ${ro ? 'disabled' : ''} class="w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm" placeholder="เช่น นักเรียนศึกษาหาข้อมูลเรื่องที่สนใจ และบันทึกลงในสมุด">${wrEsc(j.activity || '')}</textarea></div>
-              <div class="flex flex-wrap gap-2 mb-3">${ro ? '' : `<button onclick="window.clubAllPresent()" class="bg-emerald-100 text-emerald-800 font-bold text-sm px-3 py-2 rounded-xl"><i class="fas fa-check-double"></i> มาทั้งหมด</button>`}<select onchange="window.__clubCk.room=this.value; window.clubDrawRows()" class="border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold"><option value="">ทุกห้อง</option>${rooms.map(r => `<option value="${r}">${formatRoomName(r)}</option>`).join('')}</select><input oninput="window.__clubCk.q=this.value.trim(); window.clubDrawRows()" placeholder="ค้นหาชื่อ" class="flex-1 min-w-[140px] border-2 border-slate-200 rounded-xl px-3 py-2 text-sm"></div>
-              <div id="clubRows" class="flex flex-col gap-2"></div></div>
-              ${ro ? '' : `<div class="fixed left-0 right-0 bottom-0 p-3 sm:p-4 bg-white/90 backdrop-blur border-t border-slate-200 z-40"><div class="max-w-3xl mx-auto"><button id="clubSaveBtn" onclick="window.clubSave()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-3 rounded-2xl shadow-lg text-base"><i class="fas fa-save"></i> บันทึกการเช็คชื่อ (<span id="clubCnt">0</span>/${(j.members || []).length} คน)</button></div></div>`}`;
-            window.__clubMembers = j.members || []; window.__clubRo = ro; window.clubDrawRows();
+              <div class="flex flex-wrap gap-2 mb-3"><select onchange="window.__clubCk.room=this.value; window.clubDrawRows()" class="border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold"><option value="">ทุกห้อง</option>${rooms.map(r => `<option value="${r}">${formatRoomName(r)}</option>`).join('')}</select><input oninput="window.__clubCk.q=this.value.trim(); clearTimeout(window.__clubQT2); window.__clubQT2=setTimeout(window.clubDrawRows,200)" placeholder="ค้นหาชื่อ" class="flex-1 min-w-[140px] border-2 border-slate-200 rounded-xl px-3 py-2 text-sm"></div>
+              <div class="bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-sm border border-slate-200 overflow-hidden">
+              <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-200 ${isDarkNow ? 'bg-slate-800/40' : 'bg-white'}"><span id="clubSum" class="text-[11px] sm:text-xs font-bold text-slate-500"></span><div class="inline-flex rounded-full border border-slate-200 ${isDarkNow ? 'bg-slate-800' : 'bg-slate-50'} p-0.5 text-[11px] font-bold shrink-0" role="group" aria-label="มุมมองรายชื่อ"><button type="button" data-amc="0" onclick="setAttCompact(false)" aria-pressed="${!amcOn}" class="px-3 py-1 rounded-full ${amcOn ? 'text-slate-500' : 'bg-indigo-600 text-white'}"><i class="fas fa-square"></i> ปกติ</button><button type="button" data-amc="1" onclick="setAttCompact(true)" aria-pressed="${amcOn}" class="px-3 py-1 rounded-full ${amcOn ? 'bg-indigo-600 text-white' : 'text-slate-500'}"><i class="fas fa-bars"></i> ย่อ</button></div></div>
+              <div id="attMobileList" class="divide-y divide-slate-100 ${amcOn ? 'amc-on' : ''}"></div></div></div>
+              ${ro ? '' : `<div class="fixed left-0 right-0 bottom-0 p-3 sm:p-4 bg-white/90 backdrop-blur border-t border-slate-200 z-40"><div class="max-w-3xl mx-auto"><button id="clubSaveBtn" onclick="window.clubSave()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-3 rounded-2xl shadow-lg text-base"><i class="fas fa-save"></i> บันทึกการเช็คชื่อ (<span id="clubCnt">0</span>/${mem.length} คน)</button></div></div>`}`;
+            window.__clubMembers = mem; window.__clubRo = ro; window.clubDrawRows();
+            loadClubDots(mem, j.session.date);
+        }
+        // จุดสถานะ: ดึงครั้งเดียวต่อการเปิดหน้า (เฉพาะวันนี้ + เฉพาะสมาชิก) · ตารางสอนใช้ข้อมูลที่มีในเครื่องอยู่แล้ว
+        async function loadClubDots(mem, date) {
+            try {
+                const r = await fetchWithRetry(GOOGLE_APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ __mode: 'club_dots', date, members: mem.map(m => [m.id, m.roomId]) }) }, 1);
+                const d = await r.json(); if (d.status !== 'success' || !window.__clubCk || window.__clubCk.date !== date) return;
+                window.__clubCk.dots = d.dots || {}; window.clubDrawRows();
+            } catch (e) { /* ไม่มีจุดก็เช็คชื่อได้ตามปกติ */ }
+        }
+        function clubRoomDayMap(roomId, date) { // คาบ → วิชา ของห้องนี้ในวันนี้ + คาบชุมนุม
+            const cache = window.__clubDayMap = window.__clubDayMap || {}, k = roomId + '|' + date; if (cache[k]) return cache[k];
+            const dow = getEffectiveDayOfWeek(date), map = {}; let clubP = null;
+            getRoomSubjects(roomId, settings.term, settings.year).forEach(s => effSched(s).forEach(sch => { if (parseInt(sch.day) === dow) { map[sch.period] = s; if (/ชุมนุม/.test(s.name || '')) clubP = String(sch.period); } }));
+            return (cache[k] = { map, clubP: clubP || '7' });
+        }
+        function clubDotsHtml(m) {
+            const c = window.__clubCk, dm = clubRoomDayMap(m.roomId, c.date), mine = (c.dots && c.dots[m.id]) || {};
+            return [-2, 0, 1, 2, 3, 4, 5, 6, 7, 8].map(p => {
+                const sub = dm.map[p], st = mine[String(p)], cur = String(p) === dm.clubP;
+                const color = st ? (STATUS_HEX[st] || '#cbd5e1') : (sub ? '#e2e8f0' : 'transparent');
+                const title = cur ? `คาบ ${periodLabel(p)}: ชุมนุม` : (!sub && !st ? `คาบ ${periodLabel(p)}: ไม่มีวิชา` : `คาบ ${periodLabel(p)}: ${st || 'ยังไม่เช็ค'}`);
+                return `<div title="${title}" class="w-2.5 h-2.5 rounded-full shrink-0 ${cur ? 'ring-2 ring-offset-1 ring-indigo-400' : ''} ${sub || st || cur ? '' : 'opacity-30'}" style="background-color:${cur && !st ? '#e2e8f0' : color}"></div>`;
+            }).join('');
         }
         window.clubDrawRows = function () {
-            const c = window.__clubCk, box = document.getElementById('clubRows'); if (!box) return;
-            const L = (window.__clubMembers || []).filter(m => (!c.room || m.roomId === c.room) && (!c.q || m.name.indexOf(c.q) !== -1));
-            box.innerHTML = L.map((m, i) => `<div class="bg-white border border-slate-200 rounded-2xl p-3"><div class="font-bold text-slate-800 text-sm sm:text-base">${i + 1}. ${wrEsc(m.name)} <span class="text-xs text-slate-400 font-semibold">${formatRoomName(m.roomId)}</span></div><div class="grid grid-cols-5 gap-1.5 mt-2">${CLUB_ST.map(x => `<button ${window.__clubRo ? 'disabled' : ''} onclick="window.clubSet('${wrEsc(m.id)}','${x[0]}')" class="py-1.5 rounded-xl border-2 text-xs sm:text-sm font-bold ${c.data[m.id] === x[0] ? x[1] + ' text-white' : 'bg-white border-slate-200 text-slate-600'}">${x[0]}</button>`).join('')}</div></div>`).join('') || '<p class="text-center text-slate-400 font-bold py-8">ไม่มีนักเรียน</p>';
-            const n = document.getElementById('clubCnt'); if (n) n.textContent = Object.keys(c.data).length;
+            const c = window.__clubCk, box = document.getElementById('attMobileList'); if (!box) return;
+            const ro = window.__clubRo, L = (window.__clubMembers || []).filter(m => (!c.room || m.roomId === c.room) && (!c.q || m.name.indexOf(c.q) !== -1));
+            const btn = (m, status, big) => { const style = statuses[status]; const sizeCls = big ? 'py-3.5 text-base gap-2' : 'py-2.5 text-xs gap-1'; return `<label class="cursor-pointer block ${ro ? 'pointer-events-none opacity-70' : ''}"><input type="radio" name="club_${wrEsc(m.id)}" value="${status}" ${c.data[m.id] === status ? 'checked' : ''} ${ro ? 'disabled' : ''} onchange="window.clubSet('${wrEsc(m.id)}','${status}')" class="peer sr-only"><div class="w-full ${sizeCls} rounded-xl border-2 ${style.border} ${style.bg} ${style.color} font-bold transition-all peer-checked:${style.activeBg} peer-checked:text-white peer-checked:border-transparent peer-checked:shadow-md flex items-center justify-center"><i class="fas ${style.icon}"></i><span class="amc-lf">&nbsp;${status}</span><span class="amc-ls">${ATT_SHORT[status] || status}</span></div></label>`; };
+            box.innerHTML = L.map((m, i) => `<div class="amc-card p-3 sm:p-5 bg-white"><div class="amc-head flex items-center gap-3 mb-2"><span class="shrink-0 font-black text-white bg-indigo-500 text-lg sm:text-xl w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow-sm">${i + 1}</span><div class="font-extrabold text-slate-800 text-base sm:text-lg leading-snug flex items-center flex-wrap gap-x-1 min-w-0">${wrEsc(m.name)} <span class="text-xs sm:text-sm text-slate-400 font-semibold w-full">${formatRoomName(m.roomId)}</span></div></div>${c.dots ? `<div class="amc-dots flex items-center gap-1 mb-3 pl-1">${clubDotsHtml(m)}</div>` : ''}<div class="amc-btns space-y-1.5">${btn(m, 'มา', true)}<div class="grid grid-cols-3 gap-1.5">${btn(m, 'ขาด')}${btn(m, 'สาย')}${btn(m, 'ร่วมกิจกรรม')}</div><div class="grid grid-cols-3 gap-1.5">${btn(m, 'ลาป่วย')}${btn(m, 'ลากิจ')}${btn(m, 'โดดเรียน')}</div></div></div>`).join('') || '<p class="text-center text-slate-400 font-bold py-8">ไม่มีนักเรียน</p>';
+            window.clubCount();
         };
-        window.clubSet = function (sid, v) { window.__clubCk.data[sid] = v; window.clubDrawRows(); };
-        window.clubAllPresent = function () { const c = window.__clubCk; (window.__clubMembers || []).forEach(m => { if (!c.data[m.id]) c.data[m.id] = 'มา'; }); window.clubDrawRows(); };
+        window.clubCount = function () {
+            const c = window.__clubCk, mem = window.__clubMembers || [], n = {}; mem.forEach(m => { const v = c.data[m.id]; if (v) n[v] = (n[v] || 0) + 1; });
+            const sum = document.getElementById('clubSum'); if (sum) sum.innerHTML = `<i class="fas fa-users"></i> ${mem.length} คน` + CLUB_ST_ORDER.filter(k => n[k]).map(k => ` · <span style="color:${STATUS_HEX[k]}">${ATT_SHORT[k] || k} ${n[k]}</span>`).join('');
+            const el = document.getElementById('clubCnt'); if (el) el.textContent = mem.filter(m => c.data[m.id]).length;
+        };
+        window.clubSet = function (sid, v) { window.__clubCk.data[sid] = v; window.clubCount(); };
         window.clubSave = async function () {
             const c = window.__clubCk, act = String(document.getElementById('clubAct').value || '').trim();
             if (!act) { showToast('กรุณากรอก "กิจกรรมที่ทำวันนี้"', 'error'); document.getElementById('clubAct').focus(); return; }
@@ -4748,7 +4782,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '2.02.4.091126';
+        const APP_VERSION = '2.02.5.101126';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
