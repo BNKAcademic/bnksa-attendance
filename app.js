@@ -508,6 +508,8 @@
             if (stale.length) setTimeout(() => { Promise.all(stale.map(x => ensureAttendanceLoadedForRoom(x.t, x.y, x.r))).then(() => { const cur = history.state || {}; if (JSON.stringify(cur) === JSON.stringify(state)) { try { safeRenderState(cur); } catch (e) { /* ข้าม */ } } }); }, 0);
         }
         function navigate(view, params = {}, forceReplace = false) {
+            // [v2.04.2] เช็คชื่อแล้วยังไม่บันทึก → ถามก่อนออก
+            if (bkDirty() && !(window.__curState && window.__curState.view === view && view !== 'attendance' && view !== 'club_check')) { bkAsk(() => navigate(view, params, forceReplace)); return; }
             resetViewRooms({ view, ...params });
             if (view === 'attendance') window.__attReturnState = history.state; // จำว่าเข้าหน้าเช็คชื่อมาจากหน้าไหน
             closeAllModals();
@@ -521,7 +523,7 @@
                 const isSameViewType = currentState && currentState.view === view;
                 const shouldReplace = forceReplace || isSameViewType;
                 if (shouldReplace) history.replaceState(state, '', location.pathname + location.search);
-                else history.pushState(state, '', location.pathname + location.search);
+                else { if (currentState && currentState.view) state._from = currentState.view; history.pushState(state, '', location.pathname + location.search); } // [v2.04.2] จำหน้าที่มา (ปุ่มกลับในหน้า = ถอยประวัติ ไม่ซ้อน)
             } catch (e) { /* เบราว์เซอร์บางตัวอาจไม่รองรับ ไม่กระทบการทำงานหลัก */ }
             safeRenderState(state);
         }
@@ -529,6 +531,7 @@
         // เรนเดอร์แบบปลอดภัย: ถ้าเกิดข้อผิดพลาดใดๆ จะไม่ปล่อยให้หน้าจอว่างเปล่า (white screen)
         // แต่จะ fallback กลับไปหน้าแรกเสมอ
         function safeRenderState(state) {
+            window.__curState = state; setTimeout(bkGuard, 0);
             try {
                 renderViewFromState(state);
             } catch (err) {
@@ -545,6 +548,14 @@
 
         // จัดการปุ่ม Back ของเบราว์เซอร์และปุ่ม Back ฮาร์ดแวร์ของ Android
         window.addEventListener('popstate', (event) => {
+            // [v2.04.2] เช็คชื่อยังไม่บันทึก = ดึงกลับหน้าเดิมแล้วถามก่อน
+            if (bkDirty()) { try { history.pushState(window.__curState, '', location.pathname + location.search); } catch (e) { /* ข้าม */ } bkAsk(() => history.back()); return; }
+            // [v2.04.2] เปิดเป็นแอปที่หน้าแรก: Back ครั้งแรก = เตือน · Back อีกครั้งภายใน 2 วินาที = ออกจากแอป
+            const ns = event.state || {}, cs = window.__curState || {};
+            if (cs.view === 'dashboard' && cs._g && ns.view === 'dashboard' && !ns._g && bkStandalone()) {
+                window.__curState = ns; closeAllModals(); bkArmed = true; showToast('กด Back อีกครั้งเพื่อออก', 'info');
+                setTimeout(() => { bkArmed = false; bkGuard(); }, 2200); return;
+            }
             closeAllModals();
             const state = event.state || { view: 'dashboard' };
             resetViewRooms(state); // [v1.74.3]
@@ -560,6 +571,28 @@
             }
         });
         
+        // ===== [v2.04.2] ปุ่ม Back / ปัดย้อนกลับ: กันออกจากหน้าเช็คชื่อที่ยังไม่บันทึก · กด Back อีกครั้งเพื่อออก (เปิดเป็นแอป)
+        let bkArmed = false, bkAct = false;
+        function bkStandalone() { try { return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; } catch (e) { return false; } }
+        function clubSig() { const c = window.__clubCk, a = document.getElementById('clubAct'); return c ? JSON.stringify(c.data) + '|' + (a ? a.value : '') : ''; }
+        function bkDirty() {
+            const v = (window.__curState || {}).view;
+            if (v === 'attendance') return !!window.__attDirty && !!document.getElementById('saveAttBtn');
+            if (v === 'club_check') return !!window.__clubCk && !window.__clubRo && window.__clubCk.sig0 != null && !!document.getElementById('clubSaveBtn') && clubSig() !== window.__clubCk.sig0;
+            return false;
+        }
+        function bkClean() { window.__attDirty = false; if (window.__clubCk) window.__clubCk.sig0 = clubSig(); }
+        function bkAsk(go) { showConfirm('ยังไม่ได้บันทึก', 'เช็คชื่อไว้แล้วแต่ยังไม่ได้กดบันทึก ออกจากหน้านี้เลยไหม?', () => { bkClean(); go(); }, 'ออก ไม่บันทึก'); }
+        window.bkClean = bkClean;
+        function bkGuard() {
+            if (!bkAct || bkArmed || !bkStandalone()) return; const s = history.state;
+            if (s && s.view === 'dashboard' && !s._g) { const g = Object.assign({}, s, { _g: 1 }); try { history.pushState(g, '', location.pathname + location.search); window.__curState = g; } catch (e) { /* ข้าม */ } }
+        }
+        ['pointerdown', 'keydown'].forEach(t => document.addEventListener(t, () => { if (!bkAct) { bkAct = true; bkGuard(); } }, true));
+        document.addEventListener('change', (e) => { const t = e.target; if (t && t.name && /^att_/.test(t.name) || t && t.closest && t.closest('#hrSection')) window.__attDirty = true; }, true);
+        window.addEventListener('beforeunload', (e) => { if (bkDirty()) { e.preventDefault(); e.returnValue = ''; } });
+        // ปุ่ม "← รายชื่อชุมนุม" / หลังบันทึก: มาจากรายชื่อ = ถอยประวัติ (ไม่ซ้อน) · เปิดตรง = แทนที่
+        window.clubBack = function () { if (bkDirty()) { bkAsk(window.clubBack); return; } if (history.state && history.state._from === 'club_list') history.back(); else navigate('club_list', {}, true); };
         function closeAllModals() {
             ['subjectModal', 'studentModal', 'teacherModal', 'confirmModal', 'promptModal'].forEach(id => {
                 const el = document.getElementById(id);
@@ -2074,6 +2107,7 @@
             document.querySelectorAll('input[type="radio"][value="ร่วมกิจกรรม"]').forEach(r => { if (!r.disabled) r.checked = true; });
         };
         function loadExistingAttendance(subjectId, date, period) {
+            window.__attDirty = false; // [v2.04.2]
             if (!period) return;
             document.querySelectorAll('input[type="radio"]').forEach(r => r.checked = false);
             const subForAct = subjects.find(s => s.id === subjectId);
@@ -2708,13 +2742,13 @@
         async function renderClubCheck(clubId) {
             const main = document.getElementById('mainContent');
             main.innerHTML = `<div class="text-center py-16 text-slate-400 font-bold"><i class="fas fa-circle-notch fa-spin text-2xl mb-2 block"></i> กำลังโหลดรายชื่อนักเรียน...</div>`;
-            let j; try { j = await clubApi('club_get', { clubId }); } catch (e) { main.innerHTML = `<button onclick="window.navigate('club_list')" class="mb-4 text-slate-600 font-bold text-sm"><i class="fas fa-arrow-left"></i> รายชื่อชุมนุม</button><div class="max-w-xl mx-auto bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl p-5 font-bold">${wrEsc(e.message)}</div>`; return; }
+            let j; try { j = await clubApi('club_get', { clubId }); } catch (e) { main.innerHTML = `<button onclick="window.clubBack()" class="mb-4 text-slate-600 font-bold text-sm"><i class="fas fa-arrow-left"></i> รายชื่อชุมนุม</button><div class="max-w-xl mx-auto bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl p-5 font-bold">${wrEsc(e.message)}</div>`; return; }
             const ro = !j.open, mem = j.members || [], data = Object.assign({}, j.data || {});
             if (!ro) mem.forEach(m => { if (!data[m.id] || !statuses[data[m.id]]) data[m.id] = 'มา'; }); // เลือก "มา" ไว้ก่อน (ที่บันทึกไว้แล้วคงเดิม)
             window.__clubCk = { id: clubId, data, room: '', q: '', date: j.session.date, dots: null };
             const rooms = [...new Set(mem.map(m => m.roomId))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
             ensureAttCompactStyle(); const amcOn = attCompactOn(), isDarkNow = document.documentElement.classList.contains('dark');
-            main.innerHTML = `<button onclick="window.navigate('club_list')" class="mb-4 text-slate-600 hover:text-indigo-600 font-bold text-sm flex items-center gap-2"><i class="fas fa-arrow-left"></i> รายชื่อชุมนุม</button>
+            main.innerHTML = `<button onclick="window.clubBack()" class="mb-4 text-slate-600 hover:text-indigo-600 font-bold text-sm flex items-center gap-2"><i class="fas fa-arrow-left"></i> รายชื่อชุมนุม</button>
               <div class="max-w-3xl mx-auto pb-24"><div class="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 mb-3"><h2 class="text-xl sm:text-3xl font-extrabold text-slate-800">${wrEsc(j.club.name)}</h2><p class="text-slate-500 text-sm font-semibold mt-1">ครั้งที่ ${j.session.no} · ${clubThai(j.session.date)} · ${wrEsc(j.club.teachers.join(' · '))}</p>
               ${ro ? `<div class="mt-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-3 py-2 text-sm font-bold"><i class="fas fa-clock"></i> เปิดให้เช็คตั้งแต่ ${wrEsc(j.openTime)} น.</div>` : ''}
               <label class="block font-bold text-slate-700 text-sm mt-3 mb-1">กิจกรรมที่ทำวันนี้ <span class="text-rose-500">*</span></label><textarea id="clubAct" rows="2" maxlength="600" ${ro ? 'disabled' : ''} class="w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm" placeholder="เช่น นักเรียนศึกษาหาข้อมูลเรื่องที่สนใจ และบันทึกลงในสมุด">${wrEsc(j.activity || '')}</textarea></div>
@@ -2723,7 +2757,7 @@
               <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-200 ${isDarkNow ? 'bg-slate-800/40' : 'bg-white'}"><span id="clubSum" class="text-[11px] sm:text-xs font-bold text-slate-500"></span><div class="inline-flex rounded-full border border-slate-200 ${isDarkNow ? 'bg-slate-800' : 'bg-slate-50'} p-0.5 text-[11px] font-bold shrink-0" role="group" aria-label="มุมมองรายชื่อ"><button type="button" data-amc="0" onclick="setAttCompact(false)" aria-pressed="${!amcOn}" class="px-3 py-1 rounded-full ${amcOn ? 'text-slate-500' : 'bg-indigo-600 text-white'}"><i class="fas fa-square"></i> ปกติ</button><button type="button" data-amc="1" onclick="setAttCompact(true)" aria-pressed="${amcOn}" class="px-3 py-1 rounded-full ${amcOn ? 'bg-indigo-600 text-white' : 'text-slate-500'}"><i class="fas fa-bars"></i> ย่อ</button></div></div>
               <div id="attMobileList" class="divide-y divide-slate-100 ${amcOn ? 'amc-on' : ''}"></div></div></div>
               ${ro ? '' : `<div class="fixed left-0 right-0 bottom-0 p-3 sm:p-4 bg-white/90 backdrop-blur border-t border-slate-200 z-40"><div class="max-w-3xl mx-auto"><button id="clubSaveBtn" onclick="window.clubSave()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-3 rounded-2xl shadow-lg text-base"><i class="fas fa-save"></i> บันทึกการเช็คชื่อ (<span id="clubCnt">0</span>/${mem.length} คน)</button></div></div>`}`;
-            window.__clubMembers = mem; window.__clubRo = ro; window.clubDrawRows();
+            window.__clubMembers = mem; window.__clubRo = ro; window.clubDrawRows(); window.__clubCk.sig0 = clubSig(); // [v2.04.2]
             loadClubDots(mem, j.session.date);
         }
         // จุดสถานะ: ดึงครั้งเดียวต่อการเปิดหน้า (เฉพาะวันนี้ + เฉพาะสมาชิก) · ตารางสอนใช้ข้อมูลที่มีในเครื่องอยู่แล้ว
@@ -2768,7 +2802,7 @@
             const miss = (window.__clubMembers || []).filter(m => !c.data[m.id]).length;
             const go = async () => {
                 const btn = document.getElementById('clubSaveBtn'); if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> กำลังบันทึก...'; }
-                try { await clubApi('club_save', { clubId: c.id, data: c.data, activity: act }); window.__clubToday = null; showToast('บันทึกการเช็คชื่อชุมนุมแล้ว'); window.navigate('club_list'); }
+                try { await clubApi('club_save', { clubId: c.id, data: c.data, activity: act }); window.__clubToday = null; showToast('บันทึกการเช็คชื่อชุมนุมแล้ว'); window.bkClean(); window.clubBack(); }
                 catch (e) { showToast(e.message, 'error'); if (btn) { btn.disabled = false; btn.innerHTML = `<i class="fas fa-save"></i> บันทึกการเช็คชื่อ (<span id="clubCnt">${Object.keys(c.data).length}</span>/${(window.__clubMembers || []).length} คน)`; } }
             };
             if (miss) showConfirm('ยังเช็คไม่ครบ', `ยังไม่ได้เลือกสถานะ ${miss} คน — บันทึกเท่าที่เลือกไว้?`, go); else go();
@@ -3032,7 +3066,7 @@
                 const hrOk = await hrSubmit(subject, date, (txt) => { const b = document.getElementById('saveAttBtn'); if (b) b.innerHTML = `<i class="fas fa-circle-notch fa-spin text-xl"></i> ${txt}`; });
                 if (!hrOk) { failAndRetry('เช็คชื่อบันทึกแล้ว แต่ส่งบันทึก/รูปไม่สำเร็จ'); return; }
             }
-            window.__attRetryCount = 0;
+            window.__attRetryCount = 0; window.__attDirty = false; // [v2.04.2]
             setAttSaveBtnState('saved');
             const nowD = new Date(); const hhmm = String(nowD.getHours()).padStart(2, '0') + ':' + String(nowD.getMinutes()).padStart(2, '0');
             const doneMsg = `บันทึกคาบ ${periodLabel(period)} แล้ว · ${hhmm} น.`;
@@ -4782,7 +4816,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '2.04.1.121126';
+        const APP_VERSION = '2.04.2.121126';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
