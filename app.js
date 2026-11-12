@@ -18,6 +18,7 @@
         let hubInterns = []; // [v2.02.0] นักศึกษาฝึกสอนจาก AcademicHub [{name, subjectIds}] — ครูสอนร่วม (ครูพี่เลี้ยงเลือกวิชาให้)
         function internNamesOf(subId) { return hubInterns.filter(x => (x.subjectIds || []).includes(subId)).map(x => x.name); }
         function internChipHtml(subId) { const n = internNamesOf(subId); return n.length ? `<span class="inline-flex items-center gap-1 ml-1 px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200 text-[10px] sm:text-xs font-bold whitespace-nowrap"><i class="fas fa-user-graduate"></i> นศ.ฝึกสอน ${n.map(escapeHtmlText).join(', ')}</span>` : ''; }
+        let hubAttWin = []; // [v2.04.3] ระยะเวลาการเช็คชื่อจาก AcademicHub [{ y, t, from, to, ts, te }] — วันนอกช่วง = ห้ามเช็ค · รายงานไม่นับ
         let hubHolidays = []; // [v1.72.1] วันหยุดเรียนจากปฏิทิน AcademicHub (Worker เก็บไว้ให้ · แก้ที่ AcademicHub เท่านั้น)
         // ===== [v1.71.5] บัตรผ่านผู้ดูแล (token) — Worker ตรวจสิทธิ์งานของผู้ดูแลทุกครั้ง ส่วนครูเช็คชื่อ/บันทึกโฮมรูมไม่ต้องเข้าสู่ระบบเหมือนเดิม =====
         // แนบบัตรผ่านไปกับทุกคำขอที่ส่งไป Worker อัตโนมัติ (GET = ?token= · POST = __token ใน body) — ไม่ต้องแก้ทุกจุดที่เรียก fetch
@@ -703,9 +704,9 @@
                                     settings.announcements = data.settings.announcements || [];
                                     updateAnnouncementBar();
                                 }
-                                if (JSON.stringify(data.settings.holidays || []) !== JSON.stringify(settings.holidays || []) || (Array.isArray(data.hubHolidays) && JSON.stringify(data.hubHolidays) !== JSON.stringify(hubHolidays))) {
+                                if (JSON.stringify(data.settings.holidays || []) !== JSON.stringify(settings.holidays || []) || (Array.isArray(data.hubHolidays) && JSON.stringify(data.hubHolidays) !== JSON.stringify(hubHolidays)) || (Array.isArray(data.hubAttWin) && JSON.stringify(data.hubAttWin) !== JSON.stringify(hubAttWin))) {
                                     settings.holidays = data.settings.holidays || [];
-                                    if (Array.isArray(data.hubHolidays)) hubHolidays = data.hubHolidays; if (Array.isArray(data.hubInterns)) hubInterns = data.hubInterns;
+                                    if (Array.isArray(data.hubHolidays)) hubHolidays = data.hubHolidays; if (Array.isArray(data.hubAttWin)) hubAttWin = data.hubAttWin; if (Array.isArray(data.hubInterns)) hubInterns = data.hubInterns;
                                     updateHolidayBar();
                                 }
                                 if (Array.isArray(data.hubPeriods)) hubPeriods = data.hubPeriods; // [v1.74]
@@ -764,7 +765,7 @@
             try {
                 const data = await fetchInitialDataWithRetry();
                 if (data && data.syncMain !== undefined) window.__syncSeen = { main: data.syncMain, all: data.syncAll, rooms: {} }; // [v1.74.3]
-                if (Array.isArray(data.hubHolidays)) hubHolidays = data.hubHolidays; if (Array.isArray(data.hubInterns)) hubInterns = data.hubInterns; // [v1.72.1]
+                if (Array.isArray(data.hubHolidays)) hubHolidays = data.hubHolidays; if (Array.isArray(data.hubAttWin)) hubAttWin = data.hubAttWin; if (Array.isArray(data.hubInterns)) hubInterns = data.hubInterns; // [v1.72.1]
                 if (Array.isArray(data.hubPeriods)) hubPeriods = data.hubPeriods; // [v1.74]
                 if (data.settings && Object.keys(data.settings).length > 0) {
                     settings = data.settings;
@@ -1125,7 +1126,7 @@
                             if (data.settings.faviconDataUrl !== undefined) { settings.faviconDataUrl = data.settings.faviconDataUrl; applyFavicon(); }
                             if (data.settings.logoDataUrl !== undefined) { settings.logoDataUrl = data.settings.logoDataUrl; applyHeaderLogo(); }
                             settings.announcements = data.settings.announcements || []; updateAnnouncementBar();
-                            settings.holidays = data.settings.holidays || []; if (Array.isArray(data.hubHolidays)) hubHolidays = data.hubHolidays; if (Array.isArray(data.hubInterns)) hubInterns = data.hubInterns; if (Array.isArray(data.hubPeriods)) hubPeriods = data.hubPeriods; updateHolidayBar();
+                            settings.holidays = data.settings.holidays || []; if (Array.isArray(data.hubHolidays)) hubHolidays = data.hubHolidays; if (Array.isArray(data.hubAttWin)) hubAttWin = data.hubAttWin; if (Array.isArray(data.hubInterns)) hubInterns = data.hubInterns; if (Array.isArray(data.hubPeriods)) hubPeriods = data.hubPeriods; updateHolidayBar();
                             settings.externalLinks = Array.isArray(data.settings.externalLinks) ? data.settings.externalLinks : [];
                             if (data.settings.serverOnline !== undefined) { settings.serverOnline = data.settings.serverOnline; applyServerStatusBadge(); }
                         }
@@ -1198,7 +1199,11 @@
         }
 
         // ===== ระบบวันหยุด =====
+        // [v2.04.3] วันในช่วงเปิดเทอมที่อยู่นอกระยะเวลาการเช็คชื่อ (ภาคที่ตั้งไว้) — ถือเป็นวันหยุดเต็มวัน + ห้ามเช็ค
+        function outAttWin(ds) { return !!ds && (hubAttWin || []).some(w => ds >= w.ts && ds <= w.te && (ds < w.from || (w.to && ds > w.to))); }
+        window.outAttWin = outAttWin;
         function getHolidayForDate(dateStr) {
+            if (outAttWin(dateStr)) return { date: dateStr, label: 'นอกระยะเวลาการเช็คชื่อ', name: 'นอกระยะเวลาการเช็คชื่อ', type: 'holiday', duration: 'full', outWin: true };
             // [v1.72.1] วันหยุดที่ตั้งในเว็บเช็คชื่อมาก่อน (ตั้งทับได้ เช่น เปลี่ยนเป็นวันชดเชย) แล้วจึงดูวันหยุดเรียนจาก AcademicHub
             return (settings.holidays || []).find(h => h.date === dateStr) || (hubHolidays || []).find(h => h.date === dateStr) || null;
         }
@@ -2062,7 +2067,8 @@
                     const meta = HOLIDAY_TYPE_META[type];
                     const durLabel = holiday.duration ? ` (${HOLIDAY_DURATION_LABEL[holiday.duration] || ''})` : '';
                     let msg;
-                    if (type === 'holiday') msg = `วันที่เลือกเป็นวันหยุด: ${holiday.label} (ยังสามารถเช็คชื่อได้ตามปกติหากมีการเรียนการสอน)`;
+                    if (holiday.outWin) msg = 'วันที่เลือกอยู่นอกระยะเวลาการเช็คชื่อ (ช่วงที่นักเรียนมาเรียน) — เช็คชื่อไม่ได้';
+                    else if (type === 'holiday') msg = `วันที่เลือกเป็นวันหยุด: ${holiday.label} (ยังสามารถเช็คชื่อได้ตามปกติหากมีการเรียนการสอน)`;
                     else msg = `วันที่เลือกมี${meta.label}: ${holiday.label}${durLabel} — เช็คชื่อได้ตามปกติ`;
                     textEl.innerText = msg;
                     noteEl.className = `mb-4 sm:mb-6 rounded-2xl p-3 sm:p-4 flex items-center gap-3 ${meta.noteBg}`;
@@ -2445,7 +2451,7 @@
             try { const res = await fetch(`${GOOGLE_APP_SCRIPT_URL}?action=hub_holidays_sync`); j = await res.json(); } catch (e) { j = null; }
             window.closeProgressModal();
             if (!j || j.status !== 'success') { showConfirm('ดึงวันหยุดไม่สำเร็จ', (j && j.message) || 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองใหม่', () => {}); return; }
-            hubHolidays = j.holidays || []; if (Array.isArray(j.periods)) hubPeriods = j.periods; updateHolidayBar();
+            hubHolidays = j.holidays || []; if (Array.isArray(j.periods)) hubPeriods = j.periods; if (Array.isArray(j.attWin)) hubAttWin = j.attWin; updateHolidayBar();
             logAction('ดึงวันหยุดเรียนจาก AcademicHub', `${hubHolidays.length} วัน`, 'settings');
             showToast(`ดึงแล้ว: วันหยุดเรียนจาก AcademicHub ${hubHolidays.length} วัน · กิจกรรม/หยุดเรียนรายคาบ ${hubPeriods.length} รายการ`, 'success'); renderAdminTab();
         };
@@ -3012,6 +3018,7 @@
             }
             const subject = subjects.find(s => s.id === currentSubjectId), roomStudents = getRoomStudents(subject.roomId);
             if (guardAttendanceLock(subject.term, subject.year)) return;
+            if (outAttWin(date)) { showToast('วันที่นี้อยู่นอกระยะเวลาการเช็คชื่อ — เช็คชื่อไม่ได้', 'error'); return; } // [v2.04.3]
             if (pastEditBlocked(date)) return; // [v1.78]
             let records = {}, allFilled = true;
             roomStudents.forEach(st => { if (st.status !== 'resigned') { const selected = document.querySelector(`input[name="att_${st.id}"]:checked`) || document.querySelector(`input[name="att_mobile_${st.id}"]:checked`); if (selected) records[st.id] = selected.value; else allFilled = false; } });
@@ -4816,7 +4823,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '2.04.2.121126';
+        const APP_VERSION = '2.04.3.121126';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
