@@ -515,7 +515,9 @@
             resetViewRooms({ view, ...params });
             if (view === 'attendance') window.__attReturnState = history.state; // จำว่าเข้าหน้าเช็คชื่อมาจากหน้าไหน
             closeAllModals();
-            window.scrollTo({ top: 0, behavior: 'smooth' });
+            // [v2.08.1] สลับในหน้าเดิม (วันในห้องเรียนเดิม · แท็บในแผงผู้ดูแล) = ไม่เด้งขึ้นบนสุด · ความสูงค่อยๆ เปลี่ยน + จางเข้าเบาๆ (เดิมภาพตัด/หน้ากระโดด)
+            const prevSt = history.state || {}, soft = prevSt.view === view && ((view === 'classroom' && prevSt.roomId === params.roomId) || view === 'admin');
+            if (!soft) window.scrollTo({ top: 0, behavior: 'smooth' });
             const state = { view, ...params };
             try {
                 // [ใหม่] ใช้ replace (แทนที่ประวัติเดิมแทนการเพิ่มใหม่) เมื่อ: (1) ถูกระบุมาชัดเจนว่าเป็นหน้าย่อย/หน้ารายละเอียด
@@ -527,7 +529,9 @@
                 if (shouldReplace) history.replaceState(state, '', location.pathname + location.search);
                 else { if (currentState && currentState.view) state._from = currentState.view; history.pushState(state, '', location.pathname + location.search); } // [v2.04.2] จำหน้าที่มา (ปุ่มกลับในหน้า = ถอยประวัติ ไม่ซ้อน)
             } catch (e) { /* เบราว์เซอร์บางตัวอาจไม่รองรับ ไม่กระทบการทำงานหลัก */ }
-            safeRenderState(state);
+            const mc = soft ? document.getElementById('mainContent') : null;
+            if (mc) { const y = window.scrollY; smoothHeight(mc, () => { safeRenderState(state); mc.classList.remove('dt-soft'); void mc.offsetWidth; mc.classList.add('dt-soft'); }); if (Math.abs(window.scrollY - y) > 2) window.scrollTo(0, y); }
+            else safeRenderState(state);
         }
 
         // เรนเดอร์แบบปลอดภัย: ถ้าเกิดข้อผิดพลาดใดๆ จะไม่ปล่อยให้หน้าจอว่างเปล่า (white screen)
@@ -1476,6 +1480,50 @@
             navigate('dashboard');
         }
 
+        // ===== [v2.08.1] ส่วน "ตารางสอน" ในหน้าแรก: ปุ่มกลุ่มสาระ + การ์ดครู =====
+        // เดิมกดเปลี่ยนกลุ่มสาระ = วาดหน้าแรกใหม่ทั้งหน้า (ภาพตัด อนิเมชั่นหาย หน้ากระโดด) → เปลี่ยนสีปุ่มเดิม (มีอนิเมชั่น) + วาดใหม่เฉพาะการ์ดครู แล้วค่อยๆ เลื่อนขึ้น
+        function dashTeacherData() {
+            const dashSubs = activeSubjects(); const dashTeachers = teachers.filter(t => !t.inactive || dashSubs.some(s => s.teacher === t.name || s.teacher2 === t.name)); // [v1.71.2] ครูที่ย้ายออก แสดงเฉพาะภาคเรียนที่ยังมีวิชาสอน
+            const deptsWithTeachers = departmentsList.filter(d => dashTeachers.some(t => (t.department || 'ระบบ/อื่นๆ') === d));
+            if (!window.dashboardTeacherDept || !deptsWithTeachers.includes(window.dashboardTeacherDept)) window.dashboardTeacherDept = deptsWithTeachers[0];
+            return { dashSubs, dashTeachers, deptsWithTeachers };
+        }
+        function dashDeptSolid(cfg) { const m = cfg.bg.match(/bg-(\w+)-100/); const color = m ? m[1] : 'indigo'; return { bg: `bg-${color}-600`, shadow: `shadow-${color}-200` }; }
+        function dashDeptBtnCls(d, active) { const cfg = deptConfig[d]; const solid = dashDeptSolid(cfg); return `${active ? `${solid.bg} text-white shadow-lg ${solid.shadow} scale-105 border-2 border-transparent` : `bg-white text-slate-600 border-2 border-slate-200 hover:${cfg.border} hover:shadow-md`} w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-2xl font-bold text-[11px] sm:text-sm transition-all duration-300 ease-out flex items-center justify-center gap-1.5 sm:gap-2`; }
+        function dashDeptIconCls(d, active) { const cfg = deptConfig[d]; return `fas ${cfg.icon} ${active ? '' : cfg.text} shrink-0 transition-colors duration-300`; }
+        function dashDeptCntCls(d, active) { const cfg = deptConfig[d]; return `${active ? 'bg-white/25' : 'bg-slate-100 ' + cfg.text} px-1.5 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black shrink-0 transition-colors duration-300`; }
+        function dashTeacherListHtml(dashTeachers, anim) {
+            const activeDept = window.dashboardTeacherDept;
+            const cfg = deptConfig[activeDept];
+            const solid = dashDeptSolid(cfg);
+            const deptTeachers = dashTeachers.filter(t => (t.department || 'ระบบ/อื่นๆ') === activeDept);
+            const subs = activeSubjects();
+            return `<div class="mb-2"><div class="flex items-center gap-3 mb-5 sm:mb-6 ${anim ? 'dt-in' : ''}"><div class="w-9 h-9 sm:w-11 sm:h-11 ${solid.bg} text-white rounded-xl flex items-center justify-center text-sm sm:text-lg shadow-md ${solid.shadow} shrink-0"><i class="fas ${cfg.icon}"></i></div><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800">${activeDept}</h3><span class="ml-auto bg-white border ${cfg.border} ${cfg.text} text-[10px] sm:text-xs font-black px-2.5 py-1 rounded-full shadow-sm shrink-0">${deptTeachers.length} ท่าน</span></div><div class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5">${deptTeachers.sort((a,b) => a.name.localeCompare(b.name)).map((t, i) => { const taughtSubjects = subs.filter(s => s.teacher === t.name || s.teacher2 === t.name);
+                    return `<button onclick="window.navigate('teacher_dash', {teacherName: '${t.name}'})" ${anim ? `style="animation-delay:${Math.min(i, 12) * 22}ms"` : ''} class="${anim ? 'dt-in ' : ''}bg-white border-2 ${cfg.border} rounded-2xl sm:rounded-3xl p-4 sm:p-6 transition-all duration-200 hover:shadow-2xl hover:-translate-y-1.5 text-left flex flex-col items-center text-center group relative overflow-hidden min-h-[140px] sm:min-h-[190px] justify-start"><div class="absolute top-0 left-0 w-full h-1.5 ${solid.bg}"></div><div class="w-12 h-12 sm:w-[4.5rem] sm:h-[4.5rem] ${solid.bg} text-white rounded-full flex items-center justify-center text-xl sm:text-3xl mb-3 sm:mb-4 mt-1 group-hover:scale-110 transition-transform shadow-md ${solid.shadow} shrink-0"><i class="fas fa-user-tie"></i></div><h4 class="font-extrabold text-xs sm:text-lg text-slate-800 relative w-full whitespace-nowrap overflow-hidden text-ellipsis px-1 leading-tight" title="${t.name}">${t.name}</h4><p class="text-[10px] sm:text-xs ${cfg.text} mt-2 font-bold ${cfg.bg} px-2.5 py-1 rounded-full shadow-sm relative mt-auto"><i class="fas fa-book mr-1"></i>${taughtSubjects.length} วิชา</p></button>`; }).join('')}</div></div>`;
+        }
+        function dashTeacherHtml() {
+            const { dashTeachers, deptsWithTeachers } = dashTeacherData();
+            return `<div class="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3 mb-8 sm:mb-10 max-w-3xl mx-auto">${deptsWithTeachers.map(d => { const active = window.dashboardTeacherDept === d; const cnt = teachers.filter(t => (t.department || 'ระบบ/อื่นๆ') === d).length; return `<button data-dash-dept="${d}" onclick="window.selectDashboardTeacherDept('${d}')" class="${dashDeptBtnCls(d, active)}"><i class="${dashDeptIconCls(d, active)}"></i><span class="truncate">${d}</span><span class="${dashDeptCntCls(d, active)}">${cnt}</span></button>`; }).join('')}</div><div id="dashTeacherList">${dashTeacherListHtml(dashTeachers, false)}</div>`;
+        }
+        // [v2.08.1] อนิเมชั่นแบบเบา (ใช้ร่วมหลายจุด) — การ์ดค่อยๆ เลื่อนขึ้น · เนื้อหาจางเข้า · เครื่องที่ตั้ง "ลดการเคลื่อนไหว" = ไม่เล่น
+        (function () { if (document.getElementById('dtAnimCss')) return; const st = document.createElement('style'); st.id = 'dtAnimCss';
+            st.textContent = '@keyframes dtIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}@keyframes dtFade{from{opacity:.25}to{opacity:1}}.dt-in{animation:dtIn .28s cubic-bezier(.2,.7,.3,1) both}.dt-fade{animation:dtFade .22s ease-out both}@keyframes dtSoft{from{opacity:.6}to{opacity:1}}.dt-soft{animation:dtSoft .18s ease-out both}@media (prefers-reduced-motion: reduce){.dt-in,.dt-fade,.dt-soft{animation:none}}';
+            document.head.appendChild(st); })();
+        // วาดเนื้อหาใหม่ในกล่องเดิม: ความสูงค่อยๆ ยืด/หด (หน้าไม่กระโดด) แล้วจางเข้า
+        function smoothHeight(el, render) {
+            const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            clearTimeout(el.__hT); el.style.height = ''; el.style.transition = ''; el.style.overflow = '';
+            const h0 = el.offsetHeight; render();
+            if (reduce) return;
+            const h1 = el.offsetHeight; if (Math.abs(h1 - h0) < 4) return;
+            el.style.overflow = 'hidden'; el.style.height = h0 + 'px'; void el.offsetHeight;
+            el.style.transition = 'height .28s cubic-bezier(.2,.7,.3,1)'; el.style.height = h1 + 'px';
+            el.__hT = setTimeout(() => { el.style.height = ''; el.style.transition = ''; el.style.overflow = ''; }, 300);
+        }
+        window.swapContent = function (el, html) {
+            if (!el) return;
+            smoothHeight(el, () => { el.innerHTML = html; el.classList.remove('dt-fade'); void el.offsetWidth; el.classList.add('dt-fade'); });
+        };
         function renderDashboard() {
             if(isAdmin) { document.getElementById('btnAdminLogin').classList.add('hidden');
                 document.getElementById('btnAdminPanel').classList.remove('hidden'); document.getElementById('btnAdminLogout').classList.remove('hidden'); }
@@ -1519,29 +1567,22 @@
 
             html += `<div class="bg-white rounded-3xl sm:rounded-[2rem] shadow-sm border border-slate-200 p-4 sm:p-8 relative overflow-hidden group/level"><div class="absolute top-0 left-0 w-1.5 sm:w-2.5 h-full bg-gradient-to-b from-slate-500 to-slate-700"></div><button onclick="window.navigate('school_summary')" class="w-full text-left flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 pl-3 sm:pl-4 group"><div class="flex items-center gap-3 sm:gap-4"><div class="w-10 h-10 sm:w-14 sm:h-14 bg-slate-100 text-slate-700 rounded-xl sm:rounded-2xl flex items-center justify-center text-xl sm:text-2xl shrink-0 group-hover:scale-110 transition-transform shadow-sm"><i class="fas fa-school"></i></div><div><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800 flex items-center gap-2">รวมทุกห้อง</h3><p class="text-xs sm:text-sm text-slate-500 mt-1 font-medium">ภาพรวมจำนวนนักเรียนและสถิติการมาเรียนทั้งโรงเรียนรายเดือน</p></div></div><span class="shrink-0 bg-slate-700 group-hover:bg-slate-800 text-white px-4 py-2.5 sm:px-6 sm:py-3 rounded-xl font-bold text-xs sm:text-sm shadow-sm transition-colors flex items-center gap-2 w-full sm:w-auto justify-center"><i class="fas fa-chart-pie"></i> ดูภาพรวมทั้งโรงเรียน</span></button></div>`;
             
-            html += `</div><div class="mt-12 sm:mt-20 mb-8"><div class="${isDarkNow ? 'bg-[#141e33]' : 'bg-gradient-to-br from-indigo-50 via-white to-blue-50'} rounded-[2rem] sm:rounded-[2.5rem] border-2 ${isDarkNow ? 'border-[#2d3d5a]' : 'border-indigo-100'} shadow-xl ${isDarkNow ? '' : 'shadow-indigo-100/60'} p-5 sm:p-10 relative overflow-hidden"><div class="absolute -top-16 -right-16 w-56 h-56 ${isDarkNow ? 'bg-indigo-500/10' : 'bg-indigo-200/30'} rounded-full blur-3xl pointer-events-none"></div><div class="absolute -bottom-16 -left-16 w-56 h-56 ${isDarkNow ? 'bg-blue-500/10' : 'bg-blue-200/30'} rounded-full blur-3xl pointer-events-none"></div><div class="relative z-10"><div class="text-center mb-8 sm:mb-10"><div class="inline-flex items-center justify-center w-14 h-14 sm:w-20 sm:h-20 bg-gradient-to-br from-indigo-500 to-blue-600 rounded-2xl sm:rounded-3xl shadow-lg shadow-indigo-300/50 mb-4 sm:mb-5 text-white text-2xl sm:text-4xl"><i class="fas fa-chalkboard-teacher"></i></div><span class="${isDarkNow ? 'bg-[#1f2c47] text-indigo-300 border-[#2d3d5a]' : 'bg-white text-indigo-700 border-indigo-200'} font-black px-3 py-1 sm:px-4 sm:py-1.5 rounded-full text-[10px] sm:text-sm inline-block mb-2 sm:mb-3 shadow-sm border tracking-wide">สำหรับคุณครูผู้สอน</span><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800">ระบบจัดการประจำตัวครู</h2><p class="text-xs sm:text-lg text-slate-500 mt-2 sm:mt-3 font-medium px-4">เลือกกลุ่มสาระด้านล่าง แล้วแตะชื่อของท่านเพื่อเช็คชื่อหรือดูรายงาน</p></div>`;
+            html += `</div><div class="mt-12 sm:mt-20 mb-8"><div class="${isDarkNow ? 'bg-[#141e33]' : 'bg-gradient-to-br from-indigo-50 via-white to-blue-50'} rounded-[2rem] sm:rounded-[2.5rem] border-2 ${isDarkNow ? 'border-[#2d3d5a]' : 'border-indigo-100'} shadow-xl ${isDarkNow ? '' : 'shadow-indigo-100/60'} p-5 sm:p-10 relative overflow-hidden"><div class="absolute -top-16 -right-16 w-56 h-56 ${isDarkNow ? 'bg-indigo-500/10' : 'bg-indigo-200/30'} rounded-full blur-3xl pointer-events-none"></div><div class="absolute -bottom-16 -left-16 w-56 h-56 ${isDarkNow ? 'bg-blue-500/10' : 'bg-blue-200/30'} rounded-full blur-3xl pointer-events-none"></div><div class="relative z-10"><div class="text-center mb-8 sm:mb-10"><div class="inline-flex items-center justify-center w-14 h-14 sm:w-20 sm:h-20 bg-gradient-to-br from-indigo-500 to-blue-600 rounded-2xl sm:rounded-3xl shadow-lg shadow-indigo-300/50 mb-4 sm:mb-5 text-white text-2xl sm:text-4xl"><i class="fas fa-chalkboard-teacher"></i></div><span class="${isDarkNow ? 'bg-[#1f2c47] text-indigo-300 border-[#2d3d5a]' : 'bg-white text-indigo-700 border-indigo-200'} font-black px-3 py-1 sm:px-4 sm:py-1.5 rounded-full text-[10px] sm:text-sm inline-block mb-2 sm:mb-3 shadow-sm border tracking-wide">สำหรับคุณครูผู้สอน</span><h2 class="text-xl sm:text-4xl font-extrabold text-slate-800">ตารางสอน</h2><p class="text-xs sm:text-lg text-slate-500 mt-2 sm:mt-3 font-medium px-4">เลือกกลุ่มสาระ แล้วแตะชื่อของท่านเพื่อดูตารางสอน เช็คชื่อ หรือดูรายงาน</p></div>`;
             if (teachers.length === 0) { 
                 html += `<div class="text-center text-slate-400 p-6 sm:p-8 bg-white/70 rounded-3xl border-2 border-slate-200 border-dashed text-sm sm:text-lg font-medium">ยังไม่มีข้อมูลครูผู้สอนในระบบ</div>`;
             } else { 
-                // แสดงเป็นแท็บกลุ่มสาระ แทนการเรียงการ์ดครูทุกกลุ่มสาระต่อกันยาวๆ กันหน้าเว็บยาวเกินไป
-                const dashSubs = activeSubjects(); const dashTeachers = teachers.filter(t => !t.inactive || dashSubs.some(s => s.teacher === t.name || s.teacher2 === t.name)); // [v1.71.2] ครูที่ย้ายออก แสดงเฉพาะภาคเรียนที่ยังมีวิชาสอน
-                const deptsWithTeachers = departmentsList.filter(d => dashTeachers.some(t => (t.department || 'ระบบ/อื่นๆ') === d));
-                if (!window.dashboardTeacherDept || !deptsWithTeachers.includes(window.dashboardTeacherDept)) {
-                    window.dashboardTeacherDept = deptsWithTeachers[0];
-                }
-                const deptSolid = (cfg) => { const m = cfg.bg.match(/bg-(\w+)-100/); const color = m ? m[1] : 'indigo'; return { bg: `bg-${color}-600`, shadow: `shadow-${color}-200` }; };
-                html += `<div class="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3 mb-8 sm:mb-10 max-w-3xl mx-auto">${deptsWithTeachers.map(d => { const cfg = deptConfig[d]; const solid = deptSolid(cfg); const cnt = teachers.filter(t => (t.department || 'ระบบ/อื่นๆ') === d).length; const active = window.dashboardTeacherDept === d; return `<button onclick="window.selectDashboardTeacherDept('${d}')" class="${active ? `${solid.bg} text-white shadow-lg ${solid.shadow} scale-105 border-2 border-transparent` : `bg-white text-slate-600 border-2 border-slate-200 hover:${cfg.border} hover:shadow-md`} w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-2xl font-bold text-[11px] sm:text-sm transition-all duration-200 flex items-center justify-center gap-1.5 sm:gap-2"><i class="fas ${cfg.icon} ${active ? '' : cfg.text} shrink-0"></i><span class="truncate">${d}</span><span class="${active ? 'bg-white/25' : 'bg-slate-100 ' + cfg.text} px-1.5 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black shrink-0">${cnt}</span></button>`; }).join('')}</div>`;
-
-                const activeDept = window.dashboardTeacherDept;
-                const cfg = deptConfig[activeDept];
-                const solid = deptSolid(cfg);
-                const deptTeachers = dashTeachers.filter(t => (t.department || 'ระบบ/อื่นๆ') === activeDept);
-                html += `<div class="mb-2"><div class="flex items-center gap-3 mb-5 sm:mb-6"><div class="w-9 h-9 sm:w-11 sm:h-11 ${solid.bg} text-white rounded-xl flex items-center justify-center text-sm sm:text-lg shadow-md ${solid.shadow} shrink-0"><i class="fas ${cfg.icon}"></i></div><h3 class="text-lg sm:text-2xl font-extrabold text-slate-800">${activeDept}</h3><span class="ml-auto bg-white border ${cfg.border} ${cfg.text} text-[10px] sm:text-xs font-black px-2.5 py-1 rounded-full shadow-sm shrink-0">${deptTeachers.length} ท่าน</span></div><div class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5">${deptTeachers.sort((a,b) => a.name.localeCompare(b.name)).map(t => { const taughtSubjects = activeSubjects().filter(s => s.teacher === t.name || s.teacher2 === t.name);
-                    return `<button onclick="window.navigate('teacher_dash', {teacherName: '${t.name}'})" class="bg-white border-2 ${cfg.border} rounded-2xl sm:rounded-3xl p-4 sm:p-6 transition-all duration-200 hover:shadow-2xl hover:-translate-y-1.5 text-left flex flex-col items-center text-center group relative overflow-hidden min-h-[140px] sm:min-h-[190px] justify-start"><div class="absolute top-0 left-0 w-full h-1.5 ${solid.bg}"></div><div class="w-12 h-12 sm:w-[4.5rem] sm:h-[4.5rem] ${solid.bg} text-white rounded-full flex items-center justify-center text-xl sm:text-3xl mb-3 sm:mb-4 mt-1 group-hover:scale-110 transition-transform shadow-md ${solid.shadow} shrink-0"><i class="fas fa-user-tie"></i></div><h4 class="font-extrabold text-xs sm:text-lg text-slate-800 relative w-full whitespace-nowrap overflow-hidden text-ellipsis px-1 leading-tight" title="${t.name}">${t.name}</h4><p class="text-[10px] sm:text-xs ${cfg.text} mt-2 font-bold ${cfg.bg} px-2.5 py-1 rounded-full shadow-sm relative mt-auto"><i class="fas fa-book mr-1"></i>${taughtSubjects.length} วิชา</p></button>`; }).join('')}</div></div>`;
+                html += `<div id="dashTeachers">${dashTeacherHtml()}</div>`; // [v2.08.1] แยกส่วนรายชื่อครู — เปลี่ยนกลุ่มสาระแล้ววาดใหม่เฉพาะส่วนนี้ (ไม่วาดทั้งหน้า)
             }
             html += `</div></div></div>`; document.getElementById('mainContent').innerHTML = html;
         }
-        window.selectDashboardTeacherDept = function(dept) { window.dashboardTeacherDept = dept; renderDashboard(); };
+        window.selectDashboardTeacherDept = function(dept) {
+            const host = document.getElementById('dashTeachers'), list = document.getElementById('dashTeacherList');
+            if (!host || !list) { window.dashboardTeacherDept = dept; renderDashboard(); return; }
+            if (window.dashboardTeacherDept === dept) return;
+            window.dashboardTeacherDept = dept;
+            host.querySelectorAll('[data-dash-dept]').forEach(b => { const d = b.getAttribute('data-dash-dept'), on = d === dept; b.className = dashDeptBtnCls(d, on); const ic = b.querySelector('i'), cn = b.querySelector('span:last-child'); if (ic) ic.className = dashDeptIconCls(d, on); if (cn) cn.className = dashDeptCntCls(d, on); });
+            smoothHeight(list, () => { list.innerHTML = dashTeacherListHtml(dashTeacherData().dashTeachers, true); });
+        };
         window.toggleTeacherLogRow = function(idx) {
             const detail = document.getElementById(`teacherLogDetail${idx}`); const chevron = document.getElementById(`teacherLogChevron${idx}`);
             if (!detail) return;
@@ -2668,11 +2709,11 @@
             const b = (v, ic, t) => `<button type="button" onclick="window.rptKind('${v}')" class="${k === v ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'} border-2 rounded-xl px-3 sm:px-4 py-2 text-xs sm:text-sm font-extrabold flex items-center gap-2"><i class="fas ${ic}"></i> ${t}</button>`;
             return `<div class="flex flex-wrap gap-2 mb-4 sm:mb-5">${b('weekly', 'fa-calendar-week', 'รายงานเช็คชื่อประจำสัปดาห์')}${b('sub', 'fa-user-clock', 'รายงานสอนแทน')}</div>` + (k === 'sub' ? srTabHtml() : wrTabHtml());
         }
-        window.rptKind = function(k) { window.__rptKind = k; renderAdminTab(); };
-        window.srMonth = function(n) { const w = srState(); const [y, m] = w.month.split('-').map(Number); const d = new Date(y, m - 1 + n, 1); w.month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; renderAdminTab(); };
-        window.srMode = function(m) { const w = srState(); w.mode = m; if (m !== 'grades') w.grades = []; renderAdminTab(); };
-        window.srGrade = function(g) { const w = srState(); if (w.mode !== 'grades') { w.mode = 'grades'; w.grades = []; } const i = w.grades.indexOf(g); if (i >= 0) w.grades.splice(i, 1); else w.grades.push(g); if (!w.grades.length) w.mode = 'all'; renderAdminTab(); };
-        window.srSet = function(k, v) { srState()[k] = v; renderAdminTab(); };
+        window.rptKind = function(k) { window.__rptKind = k; renderAdminTabSoft(); };
+        window.srMonth = function(n) { const w = srState(); const [y, m] = w.month.split('-').map(Number); const d = new Date(y, m - 1 + n, 1); w.month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; renderAdminTabSoft(); };
+        window.srMode = function(m) { const w = srState(); w.mode = m; if (m !== 'grades') w.grades = []; renderAdminTabSoft(); };
+        window.srGrade = function(g) { const w = srState(); if (w.mode !== 'grades') { w.mode = 'grades'; w.grades = []; } const i = w.grades.indexOf(g); if (i >= 0) w.grades.splice(i, 1); else w.grades.push(g); if (!w.grades.length) w.mode = 'all'; renderAdminTabSoft(); };
+        window.srSet = function(k, v) { srState()[k] = v; renderAdminTabSoft(); };
         // หน้า PDF: { kind: 'sum' | 'tbl' | 'ph', room?, rows } — ใช้ทั้งนับหน้าและสร้างไฟล์
         function srPlan(rows, rooms, w, usePh) {
             const out = [], PER = 14, PERP = 4, single = w.mode === 'room', split = !single && w.layout === 'split';
@@ -3574,9 +3615,9 @@
             h += `<div class="overflow-x-auto border border-slate-200 rounded-xl"><table class="w-full text-xs sm:text-sm"><thead class="bg-slate-50 text-slate-600"><tr><th class="p-2 text-left">ห้อง</th>${R.dates.map(ds => `<th class="p-2">${WR_TH_DS[wrD(ds).getDay()]} ${wrD(ds).getDate()}</th>`).join('')}<th class="p-2 text-left">%</th></tr></thead><tbody>${R.rooms.map(r => `<tr class="border-t border-slate-100"><td class="p-2 font-extrabold">${formatRoomName(r.roomId)}</td>${r.days.map(d => `<td class="p-2 text-center ${d.off ? 'text-slate-400' : ''}">${d.off ? 'หยุด' : (d.tot ? d.ok + '/' + d.tot : '-')}</td>`).join('')}<td class="p-2 whitespace-nowrap">${wrBar(r.pct)}</td></tr>`).join('') || `<tr><td colspan="9" class="p-6 text-center text-slate-400">ไม่มีห้องเรียนในภาคเรียนนี้</td></tr>`}</tbody></table></div></div></div>`;
             return h;
         }
-        window.wrWeek = function (n) { const w = wrState(); w.monday = wrAdd(w.monday, n * 7); renderAdminTab(); };
-        window.wrGrade = function (g) { const w = wrState(); if (!g) w.grades = []; else { const i = w.grades.indexOf(g); if (i >= 0) w.grades.splice(i, 1); else w.grades.push(g); } renderAdminTab(); };
-        window.wrSet = function (k, v) { wrState()[k] = !!v; renderAdminTab(); };
+        window.wrWeek = function (n) { const w = wrState(); w.monday = wrAdd(w.monday, n * 7); renderAdminTabSoft(); };
+        window.wrGrade = function (g) { const w = wrState(); if (!g) w.grades = []; else { const i = w.grades.indexOf(g); if (i >= 0) w.grades.splice(i, 1); else w.grades.push(g); } renderAdminTabSoft(); };
+        window.wrSet = function (k, v) { wrState()[k] = !!v; renderAdminTabSoft(); };
         // [v2.01.0] รายงานประจำสัปดาห์แบบใหม่: หน้าสรุป (สีตามระดับ %) + หน้ารายห้องเป็นตารางคาบ × วัน (ทุกช่องสูงเท่ากัน ไม่เลื่อน)
         const WR_C = { ok: ['#ecfdf5', '#10b981', 'เช็คแล้ว', '#047857'], no: ['#fef2f2', '#ef4444', 'ยังไม่เช็ค', '#b91c1c'], off: ['#f8fafc', '#cbd5e1', 'หยุดเรียน', '#64748b'], act: ['#f0f9ff', '#7dd3fc', 'กิจกรรม', '#0369a1'], future: ['#f8fafc', '#cbd5e1', 'ยังไม่ถึง', '#94a3b8'], club: ['#fefce8', '#facc15', 'ชุมนุม (ไม่นับ)', '#a16207'], leave: ['#f1f5f9', '#94a3b8', 'ครูไปราชการ (ไม่นับ)', '#475569'], empty: ['#ffffff', '#e2e8f0', '', '#94a3b8'] };
         function wrCellBg(ok, tot) { if (!tot) return ''; const p = ok / tot * 100; return p >= 100 ? '#dcfce7' : (p >= 75 ? '#fef9c3' : '#fee2e2'); }
@@ -3685,10 +3726,10 @@
             });
         };
         // ตัวกรองภาคเรียน/ปีเฉพาะของแท็บ "สถานะข้อมูล" — ไม่กระทบภาคเรียนที่แอดมินกำลังจัดการอยู่ (แถบสีม่วงด้านบน) และไม่บันทึกลงเซิร์ฟเวอร์
-        window.setDataStatusTerm = function(term) { window.dataStatusTerm = String(term); renderAdminTab(); };
-        window.setDataStatusYear = function(year) { window.dataStatusYear = String(year); renderAdminTab(); };
-        window.setTeacherStatusTerm = function(term) { window.teacherStatusTerm = String(term); renderAdminTab(); };
-        window.setTeacherStatusYear = function(year) { window.teacherStatusYear = String(year); renderAdminTab(); };
+        window.setDataStatusTerm = function(term) { window.dataStatusTerm = String(term); renderAdminTabSoft(); };
+        window.setDataStatusYear = function(year) { window.dataStatusYear = String(year); renderAdminTabSoft(); };
+        window.setTeacherStatusTerm = function(term) { window.teacherStatusTerm = String(term); renderAdminTabSoft(); };
+        window.setTeacherStatusYear = function(year) { window.teacherStatusYear = String(year); renderAdminTabSoft(); };
 
         // ===== [ใหม่] ลบประกาศที่หมดเวลาแล้วเกิน 7 วัน อัตโนมัติ (ทำเมื่อแอดมินเปิดหน้าจัดการ) =====
         function pruneExpiredItems() {
@@ -3701,6 +3742,13 @@
                 delA = before - settings.announcements.length;
             }
             if (delA > 0) { logAction('ลบประกาศที่หมดเวลาเกิน 7 วันอัตโนมัติ', `${delA} รายการ`, 'settings'); saveData('full'); }
+        }
+        // [v2.08.1] กดตัวเลือกในแผงผู้ดูแล (สัปดาห์ / ภาคเรียน / ตัวกรอง ฯลฯ) — วาดใหม่โดยความสูงค่อยๆ เปลี่ยน + จางเข้าเบาๆ · คงตำแหน่งที่เลื่อนอยู่ (เดิมภาพตัด/หน้ากระโดด)
+        function renderAdminTabSoft() {
+            const el = document.getElementById('adminContent'); if (!el) { renderAdminTab(); return; }
+            const y = window.scrollY;
+            smoothHeight(el, () => { renderAdminTab(); el.classList.remove('dt-soft'); void el.offsetWidth; el.classList.add('dt-soft'); });
+            if (Math.abs(window.scrollY - y) > 2) window.scrollTo(0, y);
         }
         function renderAdminTab() {
             pruneExpiredItems();
@@ -4321,8 +4369,8 @@ content.innerHTML = html;
                 content.innerHTML = html;
             }
         }
-        window.filterLogCategory = function(cat) { window.logFilterCategory = cat; renderAdminTab(); };
-        window.filterLogUser = function(name) { window.logFilterUser = name; renderAdminTab(); };
+        window.filterLogCategory = function(cat) { window.logFilterCategory = cat; renderAdminTabSoft(); };
+        window.filterLogUser = function(name) { window.logFilterUser = name; renderAdminTabSoft(); };
         window.refreshLogView = async function(btn) {
             const icon = document.getElementById('logRefreshIcon');
             if (icon) icon.classList.add('fa-spin');
@@ -4344,7 +4392,7 @@ content.innerHTML = html;
             window.holidayCalMonth += delta;
             if (window.holidayCalMonth > 11) { window.holidayCalMonth = 0; window.holidayCalYear++; }
             if (window.holidayCalMonth < 0) { window.holidayCalMonth = 11; window.holidayCalYear--; }
-            renderAdminTab();
+            renderAdminTabSoft();
         };
         window.openHolidayModal = function(dateStr) {
             const holiday = getHolidayForDate(dateStr);
@@ -4603,27 +4651,27 @@ content.innerHTML = html;
                 idx = Math.max(0, Math.min(list.length - 1, idx));
                 window.adminSelectedSubjectRoom = list[idx];
             }
-            renderAdminTab();
+            renderAdminTabSoft();
         };
         window.stepAdminRoom = function(dir) {
             const list = getRoomList();
             let idx = list.indexOf(window.adminSelectedRoom) + dir;
             idx = Math.max(0, Math.min(list.length - 1, idx));
             window.adminSelectedRoom = list[idx];
-            renderAdminTab();
+            renderAdminTabSoft();
         };
         window.setTeacherLogMode = function(mode, teacherName) {
             window.__teacherLogState = { mode, teacherFilter: teacherName, search: (window.__teacherLogState && window.__teacherLogState.search) || '' };
-            renderAdminTab();
+            renderAdminTabSoft();
         };
         window.setTeacherViewMode = function(mode) {
             window.__teacherViewMode = mode;
-            renderAdminTab();
+            renderAdminTabSoft();
         };
         window.toggleTeacherLogExpand = function(recordId) {
             if (!window.__teacherLogExpanded) window.__teacherLogExpanded = {};
             window.__teacherLogExpanded[recordId] = !window.__teacherLogExpanded[recordId];
-            renderAdminTab();
+            renderAdminTabSoft();
         };
         window.setTeacherLogSearch = function(value) {
             if (!window.__teacherLogState) window.__teacherLogState = { mode: 'all', teacherFilter: null, search: '' };
@@ -4854,7 +4902,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '2.08.0.161126';
+        const APP_VERSION = '2.08.1.171126';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
