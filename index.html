@@ -22,6 +22,14 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Sarabun:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     
     <link rel="stylesheet" href="styles.css">
+    <style>
+      /* [v2.08.3] แท็บเล็ต 640–1179px: ปุ่มแถบบนเป็นไอคอน (ชื่อระบบไม่ถูกตัด · ป้ายผู้ใช้/ปุ่มไม่ตัดหลายบรรทัด) */
+      @media (min-width: 640px) and (max-width: 1179px) {
+        #currentUserBadgeName, #currentUserBadgeRole, #btnAdminPanel > span, #btnAdminLogout > span { display: none !important; }
+        #currentUserBadge:not(.hidden), #btnAdminPanel:not(.hidden), #btnAdminLogout:not(.hidden) { width: 2.75rem; height: 2.75rem; padding: 0; gap: 0; justify-content: center; }
+        #currentUserBadge:not(.hidden) { border-radius: 9999px; }
+      }
+    </style>
 </head>
 <body class="text-slate-800 antialiased min-h-screen flex flex-col selection:bg-indigo-100 selection:text-indigo-900">
 
@@ -147,7 +155,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=2.08.2.171126"></script>
+    <script src="app.js?v=2.08.3.191126"></script>
     <script src="archive.js?v=2.06.0.161126"></script>
 </body>
 </html>
