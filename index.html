@@ -29,6 +29,9 @@
         #currentUserBadge:not(.hidden), #btnAdminPanel:not(.hidden), #btnAdminLogout:not(.hidden) { width: 2.75rem; height: 2.75rem; padding: 0; gap: 0; justify-content: center; }
         #currentUserBadge:not(.hidden) { border-radius: 9999px; }
       }
+      /* [v2.08.4] ป็อปอัปเปิดอยู่ = หน้าหลังเลื่อนไม่ได้ */
+      html.scroll-locked { overflow: hidden; scrollbar-gutter: stable; }
+      html.scroll-locked body { overscroll-behavior: none; }
     </style>
 </head>
 <body class="text-slate-800 antialiased min-h-screen flex flex-col selection:bg-indigo-100 selection:text-indigo-900">
@@ -155,7 +158,33 @@
         </div>
     </div>
 
-    <script src="app.js?v=2.08.3.191126"></script>
+    <script src="app.js?v=2.08.4.191126"></script>
     <script src="archive.js?v=2.06.0.161126"></script>
+    <script>
+// [v2.08.4] ล็อกการเลื่อนหน้าหลังตอนป็อปอัปเปิดอยู่ (เมาส์ / ลากนิ้ว) — iPad/iPhone ใช้วิธีตรึง body แล้วคืนตำแหน่งเดิมตอนปิด
+(function (SEL) {
+  var de = document.documentElement, IOS = /iP(ad|hone|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  var locked = false, y = 0, q = 0;
+  function vis(el) {
+    if (el.hidden) return false;
+    var cs = getComputedStyle(el);
+    return cs.position === 'fixed' && cs.display !== 'none' && cs.visibility !== 'hidden' && cs.pointerEvents !== 'none' && el.getClientRects().length > 0;
+  }
+  function lock() {
+    locked = true; y = window.scrollY || de.scrollTop || 0; de.classList.add('scroll-locked');
+    if (IOS) { var b = document.body.style; b.position = 'fixed'; b.top = -y + 'px'; b.left = '0'; b.right = '0'; b.width = '100%'; }
+  }
+  function unlock() {
+    locked = false; de.classList.remove('scroll-locked');
+    if (IOS) { var b = document.body.style; b.position = ''; b.top = ''; b.left = ''; b.right = ''; b.width = ''; window.scrollTo(0, y); }
+  }
+  function check() { q = 0; var open = [].some.call(document.querySelectorAll(SEL), vis); if (open !== locked) { if (open) lock(); else unlock(); } }
+  function start() {
+    new MutationObserver(function () { if (!q) q = requestAnimationFrame(check); }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'hidden', 'style', 'open'] });
+    check();
+  }
+  if (document.body) start(); else document.addEventListener('DOMContentLoaded', start);
+})('.fixed.inset-0, .crp-m');
+    </script>
 </body>
 </html>
