@@ -706,6 +706,7 @@
                                 if (Array.isArray(data.settings.externalLinks)) settings.externalLinks = data.settings.externalLinks;
                                 if (data.settings.recordHomeroom !== undefined) settings.recordHomeroom = data.settings.recordHomeroom;
                                 if (data.settings.recordZone !== undefined) settings.recordZone = data.settings.recordZone;
+                                if (data.skipWarn) window.__skipWarn = data.skipWarn; // [v2.09.0]
                                 if (JSON.stringify(data.settings.announcements || []) !== JSON.stringify(settings.announcements || [])) {
                                     settings.announcements = data.settings.announcements || [];
                                     updateAnnouncementBar();
@@ -772,6 +773,7 @@
                 const data = await fetchInitialDataWithRetry();
                 if (data && data.syncMain !== undefined) window.__syncSeen = { main: data.syncMain, all: data.syncAll, rooms: {} }; // [v1.74.3]
                 if (Array.isArray(data.hubHolidays)) hubHolidays = data.hubHolidays; if (Array.isArray(data.hubAttWin)) hubAttWin = data.hubAttWin; if (Array.isArray(data.hubInterns)) hubInterns = data.hubInterns; // [v1.72.1]
+                if (data.skipWarn) window.__skipWarn = data.skipWarn; // [v2.09.0] ป็อปอัพเตือนโดดเรียน (ค่าจาก AcademicHub)
                 if (Array.isArray(data.hubPeriods)) hubPeriods = data.hubPeriods; // [v1.74]
                 if (data.settings && Object.keys(data.settings).length > 0) {
                     settings = data.settings;
@@ -1132,7 +1134,7 @@
                             if (data.settings.faviconDataUrl !== undefined) { settings.faviconDataUrl = data.settings.faviconDataUrl; applyFavicon(); }
                             if (data.settings.logoDataUrl !== undefined) { settings.logoDataUrl = data.settings.logoDataUrl; applyHeaderLogo(); }
                             settings.announcements = data.settings.announcements || []; updateAnnouncementBar();
-                            settings.holidays = data.settings.holidays || []; if (Array.isArray(data.hubHolidays)) hubHolidays = data.hubHolidays; if (Array.isArray(data.hubAttWin)) hubAttWin = data.hubAttWin; if (Array.isArray(data.hubInterns)) hubInterns = data.hubInterns; if (Array.isArray(data.hubPeriods)) hubPeriods = data.hubPeriods; updateHolidayBar();
+                            settings.holidays = data.settings.holidays || []; if (data.skipWarn) window.__skipWarn = data.skipWarn; if (Array.isArray(data.hubHolidays)) hubHolidays = data.hubHolidays; if (Array.isArray(data.hubAttWin)) hubAttWin = data.hubAttWin; if (Array.isArray(data.hubInterns)) hubInterns = data.hubInterns; if (Array.isArray(data.hubPeriods)) hubPeriods = data.hubPeriods; updateHolidayBar();
                             settings.externalLinks = Array.isArray(data.settings.externalLinks) ? data.settings.externalLinks : [];
                             if (data.settings.serverOnline !== undefined) { settings.serverOnline = data.settings.serverOnline; applyServerStatusBadge(); }
                         }
@@ -1326,7 +1328,7 @@
                 if (badgeWrap) badgeWrap.className = badgeWrap.className.replace('bg-emerald-100', 'bg-rose-100').replace('text-emerald-500', 'text-rose-500');
                 if (badgeIcon) badgeIcon.className = 'fas fa-exclamation-triangle';
             }
-            const cancelBtn = document.getElementById('confirmBtn').previousElementSibling; if (cancelBtn) cancelBtn.classList.toggle('hidden', !!hideCancel); // ซ่อนปุ่ม "ยกเลิก" สำหรับป็อปอัพแจ้งผลแบบมีแค่ปุ่มเดียว (เช่น แจ้งเช็คชื่อสำเร็จ)
+            const cancelBtn = document.getElementById('confirmBtn').previousElementSibling; if (cancelBtn) { cancelBtn.classList.toggle('hidden', !!hideCancel); cancelBtn.innerText = 'ยกเลิก'; } // [v2.09.0] ป็อปอัพเตือนโดดเรียนเปลี่ยนเป็น "กลับไปแก้" — คืนค่าทุกครั้ง // ซ่อนปุ่ม "ยกเลิก" สำหรับป็อปอัพแจ้งผลแบบมีแค่ปุ่มเดียว (เช่น แจ้งเช็คชื่อสำเร็จ)
             const box = document.getElementById('confirmModalBox'); modal.classList.remove('hidden'); setTimeout(() => { box.classList.remove('scale-95', 'opacity-0'); box.classList.add('scale-100', 'opacity-100'); }, 10);
         }
         function closeConfirm() { const modal = document.getElementById('confirmModal'); const box = document.getElementById('confirmModalBox');
@@ -3077,6 +3079,25 @@
             chip.innerHTML = `<i class="fas fa-sync-alt text-indigo-100"></i> ${String(text).replace(/</g, '&lt;')}`;
             document.body.appendChild(chip); setTimeout(() => chip.remove(), 3500);
         }
+        // [v2.09.0] ป็อปอัพเตือนก่อนบันทึก — มีนักเรียน "โดดเรียน" (และ "ขาด" ถ้า AcademicHub เปิด "ขาดบางคาบ = นับเป็นโดด") ขณะเปิดหักคะแนนอัตโนมัติ
+        function skipWarnFor(roomStudents, records, fromTeacherDash) {
+            const W = window.__skipWarn || {}; if (!W.on) return false;
+            const sk = roomStudents.filter(s => records[s.id] === 'โดดเรียน'), ab = W.part ? roomStudents.filter(s => records[s.id] === 'ขาด') : [];
+            if (!sk.length && !ab.length) return false;
+            const esc = (t) => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+            const li = (L) => L.map(s => '<div style="padding:3px 0;font-weight:700;color:#334155">เลขที่ ' + esc(s.number) + ' · ' + esc(s.name) + '</div>').join('');
+            const pts = Number(W.pts) || 0, n = sk.length + ab.length;
+            showConfirm(sk.length && ab.length ? 'มีนักเรียนโดดเรียน / ขาด ' + n + ' คน' : sk.length ? 'มีนักเรียนโดดเรียน ' + sk.length + ' คน' : 'มีนักเรียนขาดเรียน ' + ab.length + ' คน', '', () => { window.__skipOk = true; setTimeout(() => window.saveAttendance(fromTeacherDash), 320); }, 'ยืนยันบันทึก', false, 'success');
+            const box = document.getElementById('confirmModalBox'), bw = box ? box.querySelector('.rounded-full') : null;
+            if (bw) { bw.className = bw.className.replace('bg-emerald-100', 'bg-purple-100').replace('text-emerald-500', 'text-purple-600'); const i = bw.querySelector('i'); if (i) i.className = 'fas fa-walking'; }
+            const cb = document.getElementById('confirmBtn').previousElementSibling; if (cb) cb.innerText = 'กลับไปแก้';
+            document.getElementById('confirmMessage').innerHTML = '<div style="text-align:left">' +
+                (sk.length ? '<div style="font-size:.85rem;color:#64748b;margin-top:4px">โดดเรียน</div><div style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:14px;padding:8px 12px;margin:4px 0 8px;max-height:30vh;overflow:auto">' + li(sk) + '</div>' : '') +
+                (ab.length ? '<div style="font-size:.85rem;color:#64748b;margin-top:4px">ขาด — ถ้าวันนี้มาเรียนคาบอื่น จะนับเป็นโดดเรียน</div><div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:14px;padding:8px 12px;margin:4px 0 8px;max-height:20vh;overflow:auto">' + li(ab) + '</div>' : '') +
+                '<div style="display:flex;gap:8px;align-items:flex-start;color:#6b21a8;font-weight:700"><i class="fas fa-minus-circle" style="margin-top:4px"></i><span>หักคะแนนพฤติกรรมอัตโนมัติ คนละ ' + pts + ' คะแนน (คาบนี้)</span></div>' +
+                '<div style="font-size:.85rem;color:#64748b;margin-top:6px;line-height:1.5">ระบบส่งข้อมูลให้กิจการนักเรียนรอบ ' + esc(W.times || '12:30 และ 18:30 น.') + ' · ถ้าเช็คผิด แก้สถานะได้ภายหลัง ระบบคืนคะแนนให้เอง</div></div>';
+            return true;
+        }
         window.saveAttendance = async function(fromTeacherDash = false, isAutoRetry = false) {
             if (!isAutoRetry) window.__attRetryCount = 0; // กดเองถือว่าเริ่มนับรอบลองใหม่อัตโนมัติใหม่
             const date = document.getElementById('attDate').value, period = document.getElementById('attPeriod').value;
@@ -3096,6 +3117,8 @@
             if (isSub && window.__subAssign !== 'yes' && window.__subAssign !== 'no') { showToast('กรุณาเลือกว่าครูเจ้าของวิชามอบหมายงานไว้หรือไม่', 'error'); subAssignPaint(true); const w = document.getElementById('subAssignWrap'); if (w) { w.scrollIntoView({ behavior: 'smooth', block: 'center' }); __ensureToastStyle(); w.classList.remove('__shake'); void w.offsetWidth; w.classList.add('__shake'); setTimeout(() => w.classList.remove('__shake'), 1800); } return; } // [v2.02.3]
             const subPhotoOn = isSub && recFeatureOn('substitute');
             if (subPhotoOn && !subHasPhoto()) { showToast('กรุณาแนบรูปการสอนแทน 1 รูปก่อนบันทึก', 'error'); const w = document.getElementById('subPhotoWrap'); if (w) { w.scrollIntoView({ behavior: 'smooth', block: 'center' }); __ensureToastStyle(); w.classList.remove('__shake'); void w.offsetWidth; w.classList.add('ring-4', 'ring-rose-200', '__shake'); setTimeout(() => w.classList.remove('ring-4', 'ring-rose-200', '__shake'), 1800); } return; }
+            if (!isAutoRetry && !window.__skipOk && skipWarnFor(roomStudents, records, fromTeacherDash)) return; // [v2.09.0] ป็อปอัพเตือนโดดเรียน (หักคะแนนอัตโนมัติ)
+            window.__skipOk = false;
             const payloadData = { id: (existingRec && existingRec.id) || generateId(), subjectId: currentSubjectId, date: date, period: period, records: records, createdAt: (existingRec && existingRec.createdAt) || new Date().toISOString(), checkedAt: new Date().toISOString(), checkedBy: currentUser ? currentUser.name : '' };
             if(isSub) { payloadData.substituteTeacher = subTeacher; payloadData.subAssign = window.__subAssign; } // [v2.02.3] มอบหมายงานไว้ไหม
             // [v1.71.6] รูปการสอนแทน: ส่งรูปใหม่ก่อน (ส่งแล้วจำไว้ ลองใหม่ไม่ต้องส่งซ้ำ) · ไม่ได้เปลี่ยนรูป = ใช้รูปเดิม · ปิดฟีเจอร์อยู่ = คงรูปเดิมไว้ในข้อมูล
@@ -4902,7 +4925,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '2.08.4.191126';
+        const APP_VERSION = '2.09.0.231126';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
