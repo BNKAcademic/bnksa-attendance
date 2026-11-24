@@ -1319,6 +1319,7 @@
             // ===== [ใหม่] ป็อปอัพแบบ "สำเร็จ" ใช้ปุ่มสีเขียว + ไอคอนติ๊กถูกแทนไอคอนตกใจ/เตือนสีแดงเริ่มต้น (อ้างอิง class จริงจาก index.html ตรงๆ ไม่ต้องเดา) =====
             const badgeWrap = document.querySelector('#confirmModalBox .rounded-full'); // ป้ายวงกลมไอคอน (bg-rose-100 text-rose-500 <i>...)
             const badgeIcon = badgeWrap ? badgeWrap.querySelector('i') : null;
+            if (badgeWrap) badgeWrap.className = badgeWrap.className.replace(/\bbg-(purple|amber)-100\b/, 'bg-emerald-100').replace(/\btext-(purple|amber)-600\b/, 'text-emerald-500'); // [v2.09.2] ล้างสีของป็อปอัพโดดเรียน / แก้ไข
             if (theme === 'success') {
                 confirmBtn.className = confirmBtn.className.replace('bg-rose-600', 'bg-emerald-600').replace('hover:bg-rose-700', 'hover:bg-emerald-700').replace('shadow-rose-200', 'shadow-emerald-200');
                 if (badgeWrap) badgeWrap.className = badgeWrap.className.replace('bg-rose-100', 'bg-emerald-100').replace('text-rose-500', 'text-emerald-500');
@@ -3080,22 +3081,29 @@
             document.body.appendChild(chip); setTimeout(() => chip.remove(), 3500);
         }
         // [v2.09.0] ป็อปอัพเตือนก่อนบันทึก — มีนักเรียน "โดดเรียน" (และ "ขาด" ถ้า AcademicHub เปิด "ขาดบางคาบ = นับเป็นโดด") ขณะเปิดหักคะแนนอัตโนมัติ
-        function skipWarnFor(roomStudents, records, fromTeacherDash) {
-            const W = window.__skipWarn || {}; if (!W.on) return false;
-            const sk = roomStudents.filter(s => records[s.id] === 'โดดเรียน'), ab = W.part ? roomStudents.filter(s => records[s.id] === 'ขาด') : [];
-            if (!sk.length && !ab.length) return false;
+        // [v2.09.2] ป็อปอัพก่อนบันทึก: เช็คครั้งแรกที่มีโดดเรียน = เตือน + รายชื่อ + คะแนนที่หัก · เข้ามาแก้คาบที่บันทึกแล้ว = ถามยืนยันแก้ไขเสมอ (มีโดด = บอกรายชื่อ / คะแนนด้วย)
+        function skipWarnFor(roomStudents, records, fromTeacherDash, existingRec) {
+            const W = window.__skipWarn || {}, on = !!W.on, isEdit = !!existingRec;
+            const old = (existingRec && existingRec.records) || {};
+            const sk = on ? roomStudents.filter(s => records[s.id] === 'โดดเรียน') : [], ab = on && W.part ? roomStudents.filter(s => records[s.id] === 'ขาด') : [];
+            const back = isEdit && on ? roomStudents.filter(s => old[s.id] === 'โดดเรียน' && records[s.id] !== 'โดดเรียน') : []; // แก้จากโดดเป็นอย่างอื่น = คืนคะแนน
+            const nChg = isEdit ? roomStudents.filter(s => records[s.id] !== undefined && old[s.id] !== records[s.id]).length : 0;
+            if (!isEdit && !sk.length && !ab.length) return false;
             const esc = (t) => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
             const li = (L) => L.map(s => '<div style="padding:3px 0;font-weight:700;color:#334155">เลขที่ ' + esc(s.number) + ' · ' + esc(s.name) + '</div>').join('');
             const pts = Number(W.pts) || 0, n = sk.length + ab.length;
-            showConfirm(sk.length && ab.length ? 'มีนักเรียนโดดเรียน / ขาด ' + n + ' คน' : sk.length ? 'มีนักเรียนโดดเรียน ' + sk.length + ' คน' : 'มีนักเรียนขาดเรียน ' + ab.length + ' คน', '', () => { window.__skipOk = true; setTimeout(() => window.saveAttendance(fromTeacherDash), 320); }, 'ยืนยันบันทึก', false, 'success');
+            const title = isEdit ? 'ยืนยันแก้ไขการเช็คชื่อ' : (sk.length && ab.length ? 'มีนักเรียนโดดเรียน / ขาด ' + n + ' คน' : sk.length ? 'มีนักเรียนโดดเรียน ' + sk.length + ' คน' : 'มีนักเรียนขาดเรียน ' + ab.length + ' คน');
+            showConfirm(title, '', () => { window.__skipOk = true; setTimeout(() => window.saveAttendance(fromTeacherDash), 320); }, isEdit ? 'ยืนยันแก้ไข' : 'ยืนยันบันทึก', false, 'success');
             const box = document.getElementById('confirmModalBox'), bw = box ? box.querySelector('.rounded-full') : null;
-            if (bw) { bw.className = bw.className.replace('bg-emerald-100', 'bg-purple-100').replace('text-emerald-500', 'text-purple-600'); const i = bw.querySelector('i'); if (i) i.className = 'fas fa-walking'; }
+            if (bw) { bw.className = bw.className.replace(/\bbg-(emerald|purple|amber)-100\b/, isEdit ? 'bg-amber-100' : 'bg-purple-100').replace(/\btext-(emerald-500|purple-600|amber-600)\b/, isEdit ? 'text-amber-600' : 'text-purple-600'); const i = bw.querySelector('i'); if (i) i.className = isEdit ? 'fas fa-pen' : 'fas fa-walking'; }
             const cb = document.getElementById('confirmBtn').previousElementSibling; if (cb) cb.innerText = 'กลับไปแก้';
             document.getElementById('confirmMessage').innerHTML = '<div style="text-align:left">' +
-                (sk.length ? '<div style="font-size:.85rem;color:#64748b;margin-top:4px">โดดเรียน</div><div style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:14px;padding:8px 12px;margin:4px 0 8px;max-height:30vh;overflow:auto">' + li(sk) + '</div>' : '') +
+                (isEdit ? '<div style="color:#334155;font-weight:700;margin:2px 0 8px">คาบนี้บันทึกการเช็คชื่อไว้แล้ว — ต้องการแก้ไขใช่ไหม?<div style="font-size:.85rem;color:#64748b;font-weight:500;margin-top:2px">' + (nChg ? 'เปลี่ยนสถานะ ' + nChg + ' คน' : 'ยังไม่ได้เปลี่ยนสถานะของใคร') + '</div></div>' : '') +
+                (sk.length ? '<div style="font-size:.85rem;color:#64748b;margin-top:4px">โดดเรียน ' + sk.length + ' คน</div><div style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:14px;padding:8px 12px;margin:4px 0 8px;max-height:30vh;overflow:auto">' + li(sk) + '</div>' : '') +
                 (ab.length ? '<div style="font-size:.85rem;color:#64748b;margin-top:4px">ขาด — ถ้าวันนี้มาเรียนคาบอื่น จะนับเป็นโดดเรียน</div><div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:14px;padding:8px 12px;margin:4px 0 8px;max-height:20vh;overflow:auto">' + li(ab) + '</div>' : '') +
-                '<div style="display:flex;gap:8px;align-items:flex-start;color:#6b21a8;font-weight:700"><i class="fas fa-minus-circle" style="margin-top:4px"></i><span>หักคะแนนพฤติกรรมอัตโนมัติ คนละ ' + pts + ' คะแนน (คาบนี้)</span></div>' +
-                '<div style="font-size:.85rem;color:#64748b;margin-top:6px;line-height:1.5">ระบบส่งข้อมูลให้กิจการนักเรียนรอบ ' + esc(W.times || '12:30 และ 18:30 น.') + ' · ถ้าเช็คผิด แก้สถานะได้ภายหลัง ระบบคืนคะแนนให้เอง</div></div>';
+                (n ? '<div style="display:flex;gap:8px;align-items:flex-start;color:#6b21a8;font-weight:700"><i class="fas fa-minus-circle" style="margin-top:4px"></i><span>หักคะแนนพฤติกรรมอัตโนมัติ คนละ ' + pts + ' คะแนน (คาบนี้)</span></div>' : '') +
+                (back.length ? '<div style="font-size:.85rem;color:#64748b;margin-top:8px">ไม่ได้โดดเรียนแล้ว — คืนคะแนนให้เองในรอบถัดไป</div><div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:14px;padding:8px 12px;margin:4px 0 8px;max-height:20vh;overflow:auto">' + li(back) + '</div>' : '') +
+                (n || back.length ? '<div style="font-size:.85rem;color:#64748b;margin-top:6px;line-height:1.5">ระบบส่งข้อมูลให้กิจการนักเรียนรอบ ' + esc(W.times || '12:30 และ 18:30 น.') + (n ? ' · ถ้าเช็คผิด แก้สถานะได้ภายหลัง ระบบคืนคะแนนให้เอง' : '') + '</div>' : '') + '</div>';
             return true;
         }
         window.saveAttendance = async function(fromTeacherDash = false, isAutoRetry = false) {
@@ -3117,7 +3125,7 @@
             if (isSub && window.__subAssign !== 'yes' && window.__subAssign !== 'no') { showToast('กรุณาเลือกว่าครูเจ้าของวิชามอบหมายงานไว้หรือไม่', 'error'); subAssignPaint(true); const w = document.getElementById('subAssignWrap'); if (w) { w.scrollIntoView({ behavior: 'smooth', block: 'center' }); __ensureToastStyle(); w.classList.remove('__shake'); void w.offsetWidth; w.classList.add('__shake'); setTimeout(() => w.classList.remove('__shake'), 1800); } return; } // [v2.02.3]
             const subPhotoOn = isSub && recFeatureOn('substitute');
             if (subPhotoOn && !subHasPhoto()) { showToast('กรุณาแนบรูปการสอนแทน 1 รูปก่อนบันทึก', 'error'); const w = document.getElementById('subPhotoWrap'); if (w) { w.scrollIntoView({ behavior: 'smooth', block: 'center' }); __ensureToastStyle(); w.classList.remove('__shake'); void w.offsetWidth; w.classList.add('ring-4', 'ring-rose-200', '__shake'); setTimeout(() => w.classList.remove('ring-4', 'ring-rose-200', '__shake'), 1800); } return; }
-            if (!isAutoRetry && !window.__skipOk && skipWarnFor(roomStudents, records, fromTeacherDash)) return; // [v2.09.0] ป็อปอัพเตือนโดดเรียน (หักคะแนนอัตโนมัติ)
+            if (!isAutoRetry && !window.__skipOk && skipWarnFor(roomStudents, records, fromTeacherDash, existingRec)) return; // [v2.09.0] · [v2.09.2] แก้ไข = ถามยืนยัน ป็อปอัพเตือนโดดเรียน (หักคะแนนอัตโนมัติ)
             window.__skipOk = false;
             const payloadData = { id: (existingRec && existingRec.id) || generateId(), subjectId: currentSubjectId, date: date, period: period, records: records, createdAt: (existingRec && existingRec.createdAt) || new Date().toISOString(), checkedAt: new Date().toISOString(), checkedBy: currentUser ? currentUser.name : '' };
             if(isSub) { payloadData.substituteTeacher = subTeacher; payloadData.subAssign = window.__subAssign; } // [v2.02.3] มอบหมายงานไว้ไหม
@@ -4925,7 +4933,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '2.09.2.241126';
+        const APP_VERSION = '2.09.3.241126';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
