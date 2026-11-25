@@ -2205,10 +2205,11 @@
             document.querySelectorAll('[data-grb]').forEach(el => { el.classList.add('hidden'); el.innerHTML = ''; });
             const box = document.getElementById('attGrantNote');
             const gs = grantsFor(sub, date, period), seen = {};
+            window.__grantCur = { sub, date, list: gs }; // [v2.10.0] ป็อปอัปรายละเอียด
             gs.forEach(g => {
                 if (seen[g.sid]) return; seen[g.sid] = 1;
-                const tip = escapeHtmlText('ขอเวลาเรียน: ' + (g.title || '') + (g.by ? ' · ครู ' + g.by : '') + ' · บันทึก/อนุมัติโดย ' + (g.ok || '-'));
-                document.querySelectorAll(`[data-grb="${g.sid}"]`).forEach(el => { el.innerHTML = `<span title="${tip}" onclick="showToast(this.title, 'info')" class="cursor-pointer inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-700 border border-cyan-200 text-[10px] sm:text-xs font-bold max-w-full"><i class="fas fa-running"></i><span class="truncate">ขอเวลาเรียน: ${escapeHtmlText(g.title || '')}${g.by ? ' · ' + escapeHtmlText(g.by) : ''}</span></span>`; el.classList.remove('hidden'); });
+                const tip = escapeHtmlText('ขอเวลาเรียน: ' + (g.title || '') + (g.by ? ' · ครู ' + g.by : '') + (g.m && g.m.appr ? ' · อนุมัติโดย ' + g.m.appr : g.m && g.m.rec ? ' · บันทึกโดย ' + g.m.rec : ' · บันทึก/อนุมัติโดย ' + (g.ok || '-')) + ' · กดเพื่อดูรายละเอียด');
+                document.querySelectorAll(`[data-grb="${g.sid}"]`).forEach(el => { el.innerHTML = `<span title="${tip}" onclick="openGrantInfo('${escapeHtmlText(g.sid)}')" class="cursor-pointer inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-700 border border-cyan-200 text-[10px] sm:text-xs font-bold max-w-full"><i class="fas fa-running"></i><span class="truncate">ขอเวลาเรียน: ${escapeHtmlText(g.title || '')}${g.by ? ' · ' + escapeHtmlText(g.by) : ''}</span></span>`; el.classList.remove('hidden'); });
                 if (!hasRecord) syncRadio(g.sid, 'ร่วมกิจกรรม');
             });
             if (!box) return;
@@ -2217,6 +2218,49 @@
             box.classList.remove('hidden');
             box.innerHTML = `<div class="w-9 h-9 sm:w-11 sm:h-11 bg-cyan-500 text-white rounded-full flex items-center justify-center text-sm sm:text-lg shrink-0"><i class="fas fa-running"></i></div><div class="flex-1 min-w-[200px]"><p class="text-cyan-800 font-extrabold text-xs sm:text-sm">มีนักเรียนได้รับอนุมัติขอเวลาเรียนในคาบนี้ ${n} คน</p><p class="text-cyan-700 font-semibold text-[11px] sm:text-xs">${hasRecord ? 'คาบนี้เช็คแล้ว — สถานะเป็นไปตามที่บันทึกไว้ (คนที่ถูกเช็คว่าขาดตั้งแต่วันที่ยื่นขอ ระบบเปลี่ยนเป็นร่วมกิจกรรมให้แล้ว)' : 'ระบบเลือก "ร่วมกิจกรรม" ให้แล้ว'} · ถ้านักเรียนไม่ได้ไปจริง แก้สถานะได้ตามปกติ · กดป้ายสีฟ้าใต้ชื่อเพื่อดูรายละเอียด</p></div>`;
         }
+
+        // ===== [v2.10.0] ป็อปอัปรายละเอียดขอเวลาเรียน (ไม่ต้องล็อกอินเว็บส่งงาน) — ข้อมูลส่งมาจาก AcademicHub ตอนอนุมัติ =====
+        const HUB_REQTIME_URL = 'https://bnkacademic-commits.github.io/bnk-academic-hub-web/reqtime.html';
+        const GI_MON = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+        function grantThD(s) { const p = String(s || '').split('-'); return p.length === 3 ? (+p[2]) + ' ' + GI_MON[+p[1] - 1] + ' ' + (+p[0] + 543) : ''; }
+        function grantThRange(a, b) {
+            if (!a) return ''; if (!b || a === b) return grantThD(a);
+            const x = a.split('-'), y = b.split('-');
+            if (x[0] === y[0] && x[1] === y[1]) return (+x[2]) + ' – ' + grantThD(b);
+            return grantThD(a) + ' – ' + grantThD(b);
+        }
+        function grantPerTxt(a) { return a && a.length ? 'คาบ ' + a.map(p => Number(p) === -2 ? 'A' : Number(p) === 0 ? 'B' : String(p)).join(', ') : 'ทั้งวัน'; }
+        function openGrantInfo(sid) {
+            const cur = window.__grantCur || {}, g = (cur.list || []).find(x => x.sid === sid); if (!g) return;
+            const m = g.m || {}, esc = escapeHtmlText;
+            let names = [];
+            try { const ids = new Set((cur.list || []).filter(x => x.req === g.req).map(x => x.sid)); names = getRoomStudents(cur.sub.roomId).filter(s => ids.has(s.id)).map(s => s.name); } catch (e) { names = []; }
+            if (!document.getElementById('grantInfoCss')) {
+                const st = document.createElement('style'); st.id = 'grantInfoCss';
+                st.textContent = '.gi-bd{position:fixed;inset:0;background:rgba(15,23,42,.6);backdrop-filter:blur(3px);z-index:80;display:flex;align-items:center;justify-content:center;padding:16px}.gi-box{background:#fff;color:#0f172a;border-radius:24px;box-shadow:0 25px 50px rgba(0,0,0,.25);width:100%;max-width:420px;max-height:90vh;overflow:auto;position:relative}.gi-x{position:absolute;top:12px;right:12px;width:34px;height:34px;border-radius:99px;background:#ef4444;color:#fff;border:0;font-size:15px;cursor:pointer}.gi-hd{padding:22px 22px 6px;text-align:center}.gi-ic{width:56px;height:56px;border-radius:99px;background:#cffafe;color:#0891b2;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-size:24px}.gi-k{font-size:12px;font-weight:800;color:#0891b2}.gi-t{font-size:18px;font-weight:800;margin-top:2px}.gi-rows{padding:4px 22px 6px}.gi-r{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9}.gi-r i{color:#0891b2;width:18px;text-align:center;margin-top:3px}.gi-l{font-size:11px;color:#64748b;font-weight:700}.gi-v{font-size:14px;font-weight:700}.gi-s{font-size:12px;color:#475569;font-weight:600}.gi-acts{padding:12px 22px 20px;display:flex;flex-direction:column;gap:8px}.gi-b{display:flex;align-items:center;justify-content:center;gap:8px;padding:11px;border-radius:14px;font-weight:800;text-decoration:none}.gi-b1{background:#0891b2;color:#fff}.gi-b2{background:#f1f5f9;color:#334155;font-size:13px;font-weight:700}' +
+                    'html.dark .gi-box{background:#1e293b;color:#e2e8f0}html.dark .gi-r{border-color:#334155}html.dark .gi-l,html.dark .gi-s{color:#94a3b8}html.dark .gi-ic{background:#164e63;color:#67e8f9}html.dark .gi-k,html.dark .gi-r i{color:#67e8f9}html.dark .gi-b2{background:#334155;color:#e2e8f0}';
+                document.head.appendChild(st);
+            }
+            const row = (ic, k, v) => v ? `<div class="gi-r"><i class="fas ${ic}"></i><div style="flex:1;min-width:0"><div class="gi-l">${k}</div><div class="gi-v">${v}</div></div></div>` : '';
+            const sub2 = [m.pos, m.no ? 'หนังสือที่ ' + m.no : '', m.dd ? 'ลงวันที่ ' + grantThD(m.dd) : ''].filter(Boolean).join(' · ');
+            const appr = m.appr ? esc(m.appr) + (sub2 ? `<div class="gi-s">${esc(sub2)}</div>` : '') : '';
+            const d = document.createElement('div'); d.className = 'gi-bd';
+            d.innerHTML = `<div class="gi-box" role="dialog" aria-modal="true"><button type="button" class="gi-x" aria-label="ปิด"><i class="fas fa-times"></i></button>
+                <div class="gi-hd"><div class="gi-ic"><i class="fas fa-running"></i></div><div class="gi-k">ขอเวลาเรียน (อนุมัติแล้ว)</div><div class="gi-t">${esc(g.title || '')}</div></div>
+                <div class="gi-rows">
+                ${row('fa-calendar-day', 'วันที่ / คาบ', esc((m.from ? grantThRange(m.from, m.to) : grantThD(g.date)) + ' · ' + grantPerTxt(m.per || g.periods)))}
+                ${row('fa-chalkboard-teacher', 'ครูผู้ควบคุม', esc(m.tch || g.by || ''))}
+                ${appr ? row('fa-signature', 'อนุมัติโดย (ตามหนังสือ)', appr) : row('fa-user-pen', 'บันทึกโดย', esc(m.rec || g.ok || ''))}
+                ${names.length ? row('fa-users', 'นักเรียนห้องนี้ในคำขอ (' + names.length + ' คน)', names.map((n, i) => (i + 1) + '. ' + esc(n)).join('<br>')) : ''}
+                </div>
+                <div class="gi-acts">${m.doc ? `<a class="gi-b gi-b1" href="${esc(m.doc)}" target="_blank" rel="noopener"><i class="fas fa-file-alt"></i> เปิดหนังสือขออนุญาต</a>` : ''}<a class="gi-b gi-b2" href="${HUB_REQTIME_URL}${m.id ? '#rt=' + encodeURIComponent(m.id) : ''}" target="_blank" rel="noopener"><i class="fas fa-external-link-alt"></i> ดูทั้งหมดในเว็บส่งงาน (ต้องล็อกอิน)</a></div></div>`;
+            const onKey = (e) => { if (e.key === 'Escape') close(); };
+            const close = () => { d.remove(); document.removeEventListener('keydown', onKey); };
+            d.addEventListener('click', e => { if (e.target === d || e.target.closest('.gi-x')) close(); });
+            document.addEventListener('keydown', onKey);
+            document.body.appendChild(d);
+        }
+        window.openGrantInfo = openGrantInfo;
 
 
         // ======================================================================
@@ -4933,7 +4977,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '2.09.4.241126';
+        const APP_VERSION = '2.10.0.251126';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
