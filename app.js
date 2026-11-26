@@ -2271,6 +2271,13 @@
             document.body.appendChild(d);
         }
         window.bnFilePreview = bnFilePreview;
+        // [v2.11.2] ล็อกพื้นหลังไม่ให้เลื่อน ขณะเปิดป็อปอัปขอเวลาเรียน / พรีวิวไฟล์ (เลื่อนได้เฉพาะในป็อปอัป)
+        (function () {
+            const st = document.createElement('style'); st.textContent = '#attendanceTableBody [data-grb]{max-width:300px}#attendanceTableBody [data-grb]>span{display:flex;max-width:100%}#attendanceTableBody [data-grb] .truncate{min-width:0}html.bn-lock,html.bn-lock body{overflow:hidden!important}.gi-bd,.bnfp{overscroll-behavior:contain}.gi-bd{overflow-y:auto}';
+            document.head.appendChild(st);
+            const sync = () => document.documentElement.classList.toggle('bn-lock', !!document.querySelector('.gi-bd, .bnfp'));
+            new MutationObserver(sync).observe(document.body, { childList: true });
+        })();
 
         // ===== [v2.10.0] ป็อปอัปรายละเอียดขอเวลาเรียน (ไม่ต้องล็อกอินเว็บส่งงาน) — ข้อมูลส่งมาจาก AcademicHub ตอนอนุมัติ =====
         const HUB_REQTIME_URL = 'https://bnkacademic-commits.github.io/bnk-academic-hub-web/reqtime.html';
@@ -5033,7 +5040,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '2.11.1.261126';
+        const APP_VERSION = '2.11.3.261126';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
