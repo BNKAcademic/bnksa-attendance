@@ -2205,9 +2205,12 @@
             document.querySelectorAll('[data-grb]').forEach(el => { el.classList.add('hidden'); el.innerHTML = ''; });
             const box = document.getElementById('attGrantNote');
             const gs = grantsFor(sub, date, period), seen = {};
-            window.__grantCur = { sub, date, list: gs }; // [v2.10.0] ป็อปอัปรายละเอียด
+            window.__grantCur = { sub, date, period, list: gs }; // [v2.10.0] ป็อปอัปรายละเอียด · [v2.11.0] + period
+            let nWarn = 0;
             gs.forEach(g => {
                 if (seen[g.sid]) return; seen[g.sid] = 1;
+                const w = grantDayWarn(sub, date, period, g); // [v2.11.0] วันนี้มีลา / ขาดคาบอื่น = ป้ายสีส้ม (ยังเลือกร่วมกิจกรรมให้ตามเดิม)
+                if (w) { nWarn++; document.querySelectorAll(`[data-grb="${g.sid}"]`).forEach(el => { el.innerHTML = `<span title="${escapeHtmlText('ขอเวลาเรียน: ' + (g.title || '') + ' · ' + w.dayTxt + ' — ตรวจว่าไปร่วมกิจกรรมจริงไหม · กดเพื่อดูรายละเอียด')}" onclick="openGrantInfo('${escapeHtmlText(g.sid)}')" class="cursor-pointer inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-300 text-[10px] sm:text-xs font-bold max-w-full dark:bg-amber-900/40 dark:text-amber-200 dark:border-amber-700"><i class="fas fa-exclamation-triangle"></i><span class="truncate">ขอเวลาเรียน · ${escapeHtmlText(w.short)}</span></span>`; el.classList.remove('hidden'); }); if (!hasRecord) syncRadio(g.sid, 'ร่วมกิจกรรม'); return; }
                 const tip = escapeHtmlText('ขอเวลาเรียน: ' + (g.title || '') + (g.by ? ' · ครู ' + g.by : '') + (g.m && g.m.appr ? ' · อนุมัติโดย ' + g.m.appr : g.m && g.m.rec ? ' · บันทึกโดย ' + g.m.rec : ' · บันทึก/อนุมัติโดย ' + (g.ok || '-')) + ' · กดเพื่อดูรายละเอียด');
                 document.querySelectorAll(`[data-grb="${g.sid}"]`).forEach(el => { el.innerHTML = `<span title="${tip}" onclick="openGrantInfo('${escapeHtmlText(g.sid)}')" class="cursor-pointer inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-700 border border-cyan-200 text-[10px] sm:text-xs font-bold max-w-full"><i class="fas fa-running"></i><span class="truncate">ขอเวลาเรียน: ${escapeHtmlText(g.title || '')}${g.by ? ' · ' + escapeHtmlText(g.by) : ''}</span></span>`; el.classList.remove('hidden'); });
                 if (!hasRecord) syncRadio(g.sid, 'ร่วมกิจกรรม');
@@ -2216,8 +2219,57 @@
             const n = Object.keys(seen).length;
             if (!n) { box.classList.add('hidden'); box.innerHTML = ''; return; }
             box.classList.remove('hidden');
-            box.innerHTML = `<div class="w-9 h-9 sm:w-11 sm:h-11 bg-cyan-500 text-white rounded-full flex items-center justify-center text-sm sm:text-lg shrink-0"><i class="fas fa-running"></i></div><div class="flex-1 min-w-[200px]"><p class="text-cyan-800 font-extrabold text-xs sm:text-sm">มีนักเรียนได้รับอนุมัติขอเวลาเรียนในคาบนี้ ${n} คน</p><p class="text-cyan-700 font-semibold text-[11px] sm:text-xs">${hasRecord ? 'คาบนี้เช็คแล้ว — สถานะเป็นไปตามที่บันทึกไว้ (คนที่ถูกเช็คว่าขาดตั้งแต่วันที่ยื่นขอ ระบบเปลี่ยนเป็นร่วมกิจกรรมให้แล้ว)' : 'ระบบเลือก "ร่วมกิจกรรม" ให้แล้ว'} · ถ้านักเรียนไม่ได้ไปจริง แก้สถานะได้ตามปกติ · กดป้ายสีฟ้าใต้ชื่อเพื่อดูรายละเอียด</p></div>`;
+            box.innerHTML = `<div class="w-9 h-9 sm:w-11 sm:h-11 bg-cyan-500 text-white rounded-full flex items-center justify-center text-sm sm:text-lg shrink-0"><i class="fas fa-running"></i></div><div class="flex-1 min-w-[200px]"><p class="text-cyan-800 font-extrabold text-xs sm:text-sm">มีนักเรียนได้รับอนุมัติขอเวลาเรียนในคาบนี้ ${n} คน</p><p class="text-cyan-700 font-semibold text-[11px] sm:text-xs">${hasRecord ? 'คาบนี้เช็คแล้ว — สถานะเป็นไปตามที่บันทึกไว้ (คนที่ถูกเช็คว่าขาดตั้งแต่วันที่ยื่นขอ ระบบเปลี่ยนเป็นร่วมกิจกรรมให้แล้ว)' : 'ระบบเลือก "ร่วมกิจกรรม" ให้แล้ว'} · ถ้านักเรียนไม่ได้ไปจริง แก้สถานะได้ตามปกติ · กดป้ายสีฟ้าใต้ชื่อเพื่อดูรายละเอียด</p>${nWarn ? `<p class="mt-1 text-amber-700 dark:text-amber-300 font-bold text-[11px] sm:text-xs"><i class="fas fa-exclamation-triangle"></i> ในจำนวนนี้ ${nWarn} คน${grantDayWord(date)}มีลา/ขาดคาบอื่น (ป้ายสีส้ม) — ตรวจว่าไปร่วมกิจกรรมจริงไหมก่อนบันทึก</p>` : ''}</div>`;
         }
+
+        // ===== [v2.11.0] ป้ายเตือน: นักเรียนที่ขอเวลาเรียน แต่วันนั้นมีลา (คาบใดก็ได้) หรือขาดคาบอื่นที่ไม่ได้ขอตั้งแต่ 2 คาบ =====
+        //   คำนวณจากข้อมูลเช็คชื่อของห้องที่โหลดอยู่แล้ว (ไม่เรียกเซิร์ฟเวอร์เพิ่ม) · ไม่ตัดสิทธิ์ — ระบบยังเลือก "ร่วมกิจกรรม" ให้ ครูตัดสินใจเอง
+        function grantDayWord(date) { const n = new Date(), t = n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0') + '-' + String(n.getDate()).padStart(2, '0'); return date === t ? 'วันนี้' : 'วันนั้น'; }
+        function grantPerList(ps) { // [1,2,3,5] -> "1–3, 5"
+            const L = ps.slice().sort((a, b) => a - b), out = []; let i = 0;
+            while (i < L.length) { let j = i; while (j + 1 < L.length && L[j + 1] === L[j] + 1 && L[j] > 0) j++; const a = grantPerTxt([L[i]]).replace('คาบ ', ''), b = grantPerTxt([L[j]]).replace('คาบ ', ''); out.push(i === j ? a : a + '–' + b); i = j + 1; }
+            return out.join(', ');
+        }
+        function grantDayRecs(sub, date, sid) {
+            const ids = new Set(subjects.filter(s => s.roomId === sub.roomId).map(s => s.id)), m = {};
+            (attendanceData || []).forEach(a => { if (a.date !== date || !ids.has(a.subjectId)) return; const v = (a.records || {})[sid]; if (v) m[Number(a.period)] = v; });
+            return m; // { คาบ: สถานะ }
+        }
+        function grantDayWarn(sub, date, period, g) {
+            try {
+                const recs = grantDayRecs(sub, date, g.sid), inReq = p => !(g.periods || []).length || g.periods.map(Number).includes(Number(p));
+                const leave = {}, absent = [];
+                Object.keys(recs).forEach(k => { const p = Number(k), v = recs[k]; if (p === Number(period)) return; if (v === 'ลาป่วย' || v === 'ลากิจ') (leave[v] = leave[v] || []).push(p); else if ((v === 'ขาด' || v === 'โดดเรียน') && !inReq(p)) absent.push(p); });
+                const lk = Object.keys(leave); if (!lk.length && absent.length < 2) return null;
+                const parts = lk.map(v => v + ' คาบ ' + grantPerList(leave[v])); if (absent.length) parts.push('ขาด คาบ ' + grantPerList(absent));
+                const byV = {}; Object.keys(recs).forEach(k => { (byV[recs[k]] = byV[recs[k]] || []).push(Number(k)); });
+                const dayTxt = Object.keys(byV).sort((a, b) => Math.min(...byV[a]) - Math.min(...byV[b])).map(v => v + ' คาบ ' + grantPerList(byV[v])).join(' · ');
+                return { short: grantDayWord(date) + parts.join(' · '), dayTxt };
+            } catch (e) { return null; }
+        }
+        // ===== [v2.11.0] พรีวิวไฟล์ (รูป / PDF จาก Google Drive) ในเว็บ — แทนการเปิดแท็บใหม่ =====
+        function bnDriveId(u) { const m = /\/d\/([\w-]{10,})/.exec(String(u || '')) || /[?&]id=([\w-]{10,})/.exec(String(u || '')); return m ? m[1] : ''; }
+        function bnFilePreview(url, name) {
+            const id = bnDriveId(url), esc = escapeHtmlText, img = /\.(jpe?g|png|gif|webp|bmp|heic|heif)$/i.test(name || '');
+            if (!document.getElementById('bnFpCss')) {
+                const st = document.createElement('style'); st.id = 'bnFpCss';
+                st.textContent = '.bnfp{position:fixed;inset:0;z-index:95;background:rgba(15,23,42,.78);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;padding:14px}.bnfp-f{background:#0f172a;border-radius:18px;overflow:hidden;width:min(1000px,100%);height:min(92vh,100%);display:flex;flex-direction:column;box-shadow:0 25px 50px rgba(0,0,0,.35)}.bnfp-h{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#fff;color:#0f172a}.bnfp-t{flex:1;min-width:0;font-weight:800;font-size:.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.bnfp-b{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:10px;font-weight:700;font-size:.85rem;text-decoration:none;white-space:nowrap}.bnfp-o{background:#e0f2fe;color:#0369a1}.bnfp-d{background:#2563eb;color:#fff}.bnfp-x{width:36px;height:36px;border-radius:50%;border:0;background:#ef4444;color:#fff;font-size:1rem;cursor:pointer;flex:none}.bnfp-c{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;background:#111827}.bnfp-c img{max-width:100%;max-height:100%;object-fit:contain;background:#fff}.bnfp-c iframe{width:100%;height:100%;border:0;background:#fff}.bnfp-e{color:#e2e8f0;text-align:center;padding:24px;font-size:.9rem}' +
+                    'html.dark .bnfp-h{background:#1e293b;color:#e2e8f0}html.dark .bnfp-o{background:#0c4a6e;color:#bae6fd}@media(max-width:560px){.bnfp{padding:0}.bnfp-f{border-radius:0;height:100%}.bnfp-l{display:none}}';
+                document.head.appendChild(st);
+            }
+            const dl = id ? 'https://drive.google.com/uc?export=download&id=' + id : url;
+            const body = !id ? `<div class="bnfp-e">เปิดตัวอย่างไม่ได้ — กด "เปิดไฟล์" ด้านบน</div>` : img ? `<img src="https://lh3.googleusercontent.com/d/${id}=w2000" data-fb="https://drive.google.com/thumbnail?id=${id}&sz=w2000" alt="${esc(name || 'รูป')}" referrerpolicy="no-referrer">` : `<iframe src="https://drive.google.com/file/d/${id}/preview" title="${esc(name || 'ไฟล์')}" allow="autoplay"></iframe>`;
+            const d = document.createElement('div'); d.className = 'bnfp'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-modal', 'true');
+            d.innerHTML = `<div class="bnfp-f"><div class="bnfp-h"><div class="bnfp-t">${esc(name || 'หนังสือขออนุญาต')}</div><a class="bnfp-b bnfp-o" href="${esc(url)}" target="_blank" rel="noopener"><i class="fas fa-external-link-alt"></i><span class="bnfp-l"> เปิดไฟล์</span></a><a class="bnfp-b bnfp-d" href="${esc(dl)}" target="_blank" rel="noopener" download><i class="fas fa-download"></i><span class="bnfp-l"> ดาวน์โหลด</span></a><button type="button" class="bnfp-x" aria-label="ปิด"><i class="fas fa-times"></i></button></div><div class="bnfp-c">${body}</div></div>`;
+            const im = d.querySelector('.bnfp-c img');
+            if (im) im.addEventListener('error', () => { const fb = im.getAttribute('data-fb'); if (fb) { im.removeAttribute('data-fb'); im.src = fb; } else im.outerHTML = `<iframe src="https://drive.google.com/file/d/${id}/preview" title="ไฟล์"></iframe>`; });
+            const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+            const close = () => { d.remove(); document.removeEventListener('keydown', onKey, true); };
+            d.addEventListener('click', e => { if (e.target === d || e.target.closest('.bnfp-x')) close(); });
+            document.addEventListener('keydown', onKey, true);
+            document.body.appendChild(d);
+        }
+        window.bnFilePreview = bnFilePreview;
 
         // ===== [v2.10.0] ป็อปอัปรายละเอียดขอเวลาเรียน (ไม่ต้องล็อกอินเว็บส่งงาน) — ข้อมูลส่งมาจาก AcademicHub ตอนอนุมัติ =====
         const HUB_REQTIME_URL = 'https://bnkacademic-commits.github.io/bnk-academic-hub-web/reqtime.html';
@@ -2232,7 +2284,7 @@
         function grantPerTxt(a) { return a && a.length ? 'คาบ ' + a.map(p => Number(p) === -2 ? 'A' : Number(p) === 0 ? 'B' : String(p)).join(', ') : 'ทั้งวัน'; }
         function openGrantInfo(sid) {
             const cur = window.__grantCur || {}, g = (cur.list || []).find(x => x.sid === sid); if (!g) return;
-            const m = g.m || {}, esc = escapeHtmlText;
+            const m = g.m || {}, esc = escapeHtmlText, wrn = cur.sub ? grantDayWarn(cur.sub, cur.date, cur.period, g) : null; // [v2.11.0]
             let names = [];
             try { const ids = new Set((cur.list || []).filter(x => x.req === g.req).map(x => x.sid)); names = getRoomStudents(cur.sub.roomId).filter(s => ids.has(s.id)).map(s => s.name); } catch (e) { names = []; }
             if (!document.getElementById('grantInfoCss')) {
@@ -2241,22 +2293,25 @@
                     'html.dark .gi-box{background:#1e293b;color:#e2e8f0}html.dark .gi-r{border-color:#334155}html.dark .gi-l,html.dark .gi-s{color:#94a3b8}html.dark .gi-ic{background:#164e63;color:#67e8f9}html.dark .gi-k,html.dark .gi-r i{color:#67e8f9}html.dark .gi-b2{background:#334155;color:#e2e8f0}';
                 document.head.appendChild(st);
             }
+            if (!document.getElementById('grantWarnCss')) { const st2 = document.createElement('style'); st2.id = 'grantWarnCss'; st2.textContent = '.gi-r.gi-w{background:#fffbeb;border:1px solid #fcd34d;border-radius:12px;padding:8px 10px;margin-bottom:6px}.gi-r.gi-w>i{color:#d97706}.gi-w .gi-l,.gi-w .gi-s{color:#b45309}.gi-w .gi-v{color:#92400e}html.dark .gi-r.gi-w{background:#451a03;border-color:#92400e}html.dark .gi-w .gi-l,html.dark .gi-w .gi-s{color:#fcd34d}html.dark .gi-w .gi-v{color:#fde68a}html.dark .gi-r.gi-w>i{color:#f59e0b}'; document.head.appendChild(st2); } // [v2.11.0]
             const row = (ic, k, v) => v ? `<div class="gi-r"><i class="fas ${ic}"></i><div style="flex:1;min-width:0"><div class="gi-l">${k}</div><div class="gi-v">${v}</div></div></div>` : '';
             const sub2 = [m.pos, m.no ? 'หนังสือที่ ' + m.no : '', m.dd ? 'ลงวันที่ ' + grantThD(m.dd) : ''].filter(Boolean).join(' · ');
             const appr = m.appr ? esc(m.appr) + (sub2 ? `<div class="gi-s">${esc(sub2)}</div>` : '') : '';
             const d = document.createElement('div'); d.className = 'gi-bd';
             d.innerHTML = `<div class="gi-box" role="dialog" aria-modal="true"><button type="button" class="gi-x" aria-label="ปิด"><i class="fas fa-times"></i></button>
-                <div class="gi-hd"><div class="gi-ic"><i class="fas fa-running"></i></div><div class="gi-k">ขอเวลาเรียน (อนุมัติแล้ว)</div><div class="gi-t">${esc(g.title || '')}</div></div>
+                <div class="gi-hd"><div class="gi-ic"><i class="fas fa-running"></i></div><div class="gi-k">${m.sf ? 'ขอเวลาเรียน (ครูรายงาน · แนบหนังสือที่ลงนามแล้ว)' : 'ขอเวลาเรียน (อนุมัติแล้ว)'}</div><div class="gi-t">${esc(g.title || '')}</div></div>
                 <div class="gi-rows">
+                ${wrn ? `<div class="gi-r gi-w"><i class="fas fa-exclamation-triangle"></i><div style="flex:1;min-width:0"><div class="gi-l">${grantDayWord(cur.date)}นักเรียนคนนี้</div><div class="gi-v">${esc(wrn.dayTxt)}</div><div class="gi-s">ระบบยังเลือก "ร่วมกิจกรรม" ไว้ให้ — ถ้าไม่ได้ไปจริงให้เปลี่ยนสถานะเอง</div></div></div>` : ''}
+                ${m.nt ? row('fa-align-left', 'รายละเอียด', esc(m.nt)) : ''}
                 ${row('fa-calendar-day', 'วันที่ / คาบ', esc((m.from ? grantThRange(m.from, m.to) : grantThD(g.date)) + ' · ' + grantPerTxt(m.per || g.periods)))}
                 ${row('fa-chalkboard-teacher', 'ครูผู้ควบคุม', esc(m.tch || g.by || ''))}
                 ${appr ? row('fa-signature', 'อนุมัติโดย (ตามหนังสือ)', appr) : row('fa-user-pen', 'บันทึกโดย', esc(m.rec || g.ok || ''))}
                 ${names.length ? row('fa-users', 'นักเรียนห้องนี้ในคำขอ (' + names.length + ' คน)', names.map((n, i) => (i + 1) + '. ' + esc(n)).join('<br>')) : ''}
                 </div>
-                <div class="gi-acts">${m.doc ? `<a class="gi-b gi-b1" href="${esc(m.doc)}" target="_blank" rel="noopener"><i class="fas fa-file-alt"></i> เปิดหนังสือขออนุญาต</a>` : ''}<a class="gi-b gi-b2" href="${HUB_REQTIME_URL}${m.id ? '#rt=' + encodeURIComponent(m.id) : ''}" target="_blank" rel="noopener"><i class="fas fa-external-link-alt"></i> ดูทั้งหมดในเว็บส่งงาน (ต้องล็อกอิน)</a></div></div>`;
+                <div class="gi-acts">${m.doc ? `<a class="gi-b gi-b1" href="${esc(m.doc)}" target="_blank" rel="noopener" data-gi-doc><i class="fas fa-file-alt"></i> เปิดหนังสือขออนุญาต</a>` : ''}<a class="gi-b gi-b2" href="${HUB_REQTIME_URL}${m.id ? '#rt=' + encodeURIComponent(m.id) : ''}" target="_blank" rel="noopener"><i class="fas fa-external-link-alt"></i> ดูทั้งหมดในเว็บส่งงาน (ต้องล็อกอิน)</a></div></div>`;
             const onKey = (e) => { if (e.key === 'Escape') close(); };
             const close = () => { d.remove(); document.removeEventListener('keydown', onKey); };
-            d.addEventListener('click', e => { if (e.target === d || e.target.closest('.gi-x')) close(); });
+            d.addEventListener('click', e => { const dc = e.target.closest('[data-gi-doc]'); if (dc && !e.ctrlKey && !e.metaKey) { e.preventDefault(); bnFilePreview(m.doc, m.dn || 'หนังสือขออนุญาต'); return; } if (e.target === d || e.target.closest('.gi-x')) close(); }); // [v2.11.0] ดูไฟล์ในเว็บ
             document.addEventListener('keydown', onKey);
             document.body.appendChild(d);
         }
@@ -4977,7 +5032,7 @@ content.innerHTML = html;
         // ===== [ใหม่] ปุ่มลิงก์เว็บภายนอกบนหน้าแรก (Super Admin จัดการได้คนเดียวในหน้าตั้งค่าทั่วไป) =====
 
         // ===== เลขเวอร์ชัน (รูปแบบ หลัก.ฟีเจอร์.แก้บั๊ก.DDMMYY) + ข้อมูล footer =====
-        const APP_VERSION = '2.10.0.251126';
+        const APP_VERSION = '2.11.0.261126';
         const SUPPORT_EMAIL = 'tear.jeerasak@gmail.com'; // อีเมลผู้ดูแลระบบ ใช้กับลิงก์ "แจ้งปัญหาการใช้งาน" และหน้านโยบายความเป็นส่วนตัว
         // ===== [v1.72] กดเลขเวอร์ชันที่ท้ายเว็บ = เมนู "โหลดหน้าใหม่" / "ล้างแคชแล้วโหลดใหม่" (เหมือน AcademicHub) =====
         function renderVersionButton(v) {
